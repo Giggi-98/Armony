@@ -72,6 +72,9 @@ function ask(title, value = '', label = '') {
 
 /* ================= icone ================= */
 const I = {
+  speaker: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="14" r="4"/><path d="M12 6h.01"/>',
+  phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
+  laptop: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/>',
   home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   lib: '<path d="M4 4v16M9 4v16M14 5l5 15"/>',
   artist: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
@@ -130,11 +133,11 @@ const QUALITIES = {
 const DEFAULT_PREFS = {
   quality: '192', qualityMobile: 'same', offlineQ: '192', crossfade: 0, rg: 'track', rgPre: 0, night: false, speed: 1,
   eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqOn: true, compat: false, lyricsOnline: true, syncQueue: true,
-  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true
+  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true, live: true, deviceName: '', solo: false
 };
 const P = Object.assign({}, DEFAULT_PREFS, store.get('prefs', {}));
 // restano su questo dispositivo anche con la sincronizzazione attiva
-const DEVICE_PREFS = ['compat', 'volume', 'sync'];
+const DEVICE_PREFS = ['compat', 'volume', 'sync', 'live', 'deviceName', 'solo'];
 const savePrefs = () => { store.set('prefs', P); store.set('prefsAt', Date.now()); PrefSync.schedule(); };
 const S = {
   servers: store.get('servers', []),
@@ -976,17 +979,18 @@ const Engine = {
 };
 
 /* ================= riproduzione ================= */
-function currentTrack() { return Jam.role === 'guest' ? Jam.track : S.queue[S.index]; }
+function currentTrack() { return Jam.role === 'guest' ? Jam.track : Live.remote() ? Live.track() : S.queue[S.index]; }
 const broadcastGuest = () => Jam.role === 'guest' && Jam.mode === 'broadcast';
-function isPlaying() { return broadcastGuest() ? Jam.playing : !Engine.el.paused; }
-function playPos() { return broadcastGuest() ? Jam.estPos() : Engine.time(); }
-function playDur() { return broadcastGuest() ? (Jam.track?.duration || 0) : Engine.duration(); }
+function isPlaying() { return broadcastGuest() ? Jam.playing : Live.remote() ? Live.playing() : !Engine.el.paused; }
+function playPos() { return broadcastGuest() ? Jam.estPos() : Live.remote() ? Live.pos() : Engine.time(); }
+function playDur() { return broadcastGuest() ? (Jam.track?.duration || 0) : Live.remote() ? Live.dur() : Engine.duration(); }
 function persistQueue() { store.set('queue', S.queue.slice(0, 3000)); store.set('index', S.index); }
 function setQueue(tracks, start = 0, shuffle = false) {
   if (Jam.role === 'guest') { tracks[start] && Jam.suggest(tracks[start]); return; }
   if (!tracks.length) return toast('Non ci sono brani da riprodurre.');
   let q = tracks.slice();
   if (shuffle) { q = shuffleArr(q); start = 0; }
+  if (Live.remote()) return Live.cmd('transfer', Live.pack(q, start, 0));  // l'uscita scelta è un altro dispositivo
   S.queue = q; playIndex(start);
 }
 async function playIndex(i, o = {}) {
@@ -1010,21 +1014,25 @@ function trackChanged(t) {
 }
 function ctlToggle() {
   if (Jam.role === 'guest') return Jam.guestControl(isPlaying() ? 'pause' : 'play');
+  if (Live.remote()) return Live.cmd('toggle');
   const a = Engine.el;
   if (!a.getAttribute('src')) { if (S.queue.length) playIndex(Math.max(0, S.index)); return; }
   Engine.graph(); a.paused ? a.play().catch(() => {}) : a.pause();
 }
 function ctlNext(auto) {
   if (Jam.role === 'guest') return Jam.guestControl('next');
+  if (Live.remote()) return auto ? undefined : Live.cmd('next');
   const n = S.index < S.queue.length - 1 ? S.index + 1 : (S.repeat === 'all' ? 0 : null);
   if (n != null) playIndex(n); else if (auto) Engine.el.pause();
 }
 function ctlPrev() {
   if (Jam.role === 'guest') return Jam.guestControl('prev');
+  if (Live.remote()) return Live.cmd('prev');
   if (Engine.time() > 4 || S.index <= 0) ctlSeek(0); else playIndex(S.index - 1);
 }
 function ctlSeek(sec) {
   if (Jam.role === 'guest') return Jam.guestControl('seek', sec);
+  if (Live.remote()) return Live.cmd('seek', Math.max(0, sec));
   try { Engine.el.currentTime = Math.max(0, sec); } catch {}
   emit('seek');
 }
@@ -1039,7 +1047,7 @@ function updateNowPlaying() {
     navigator.mediaSession.metadata = t ? new MediaMetadata({ title: t.title, artist: t.artist, album: t.album,
       artwork: t.coverArt && srv(t.serverId) ? [{ src: coverUrl(t.coverArt, 512, t.serverId), sizes: '512x512' }] : [] }) : null;
   }
-  paintButtons(); NativeMedia.sync();
+  paintButtons(); NativeMedia.sync(); Live.publish();
 }
 function paintButtons() {
   const playing = isPlaying();
@@ -1057,7 +1065,7 @@ function paintButtons() {
   $('#bRep').classList.toggle('on', S.repeat !== 'off');
   $('#bRep').title = { off: 'Ripeti: no', all: 'Ripeti: tutta la coda', one: 'Ripeti: questo brano' }[S.repeat];
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
-  NativeMedia.sync();
+  NativeMedia.sync(); Live.publish();
 }
 let seeking = false;
 const rangeFill = el => { if (el) el.style.setProperty('--p', ((el.value - (el.min || 0)) / ((el.max || 100) - (el.min || 0)) * 100) + '%'); };
@@ -1069,7 +1077,7 @@ function paintTime() {
   if ('mediaSession' in navigator && d && navigator.mediaSession.setPositionState) {
     try { navigator.mediaSession.setPositionState({ duration: d, position: Math.min(p, d), playbackRate: P.speed }); } catch {}
   }
-  NativeMedia.sync();
+  NativeMedia.sync(); Live.publish();
 }
 Bus.addEventListener('time', paintTime);
 
@@ -1773,7 +1781,9 @@ function vSettings() {
   <label class="setsearch">${ic('search')}<input type="search" id="setQ" placeholder="Cerca nelle impostazioni" aria-label="Cerca nelle impostazioni" autocomplete="off"></label>
   <div id="setNone" class="empty" hidden></div>
   ${grp('profilo', 'Profilo', 'nome nick sincronizzazione dispositivi', `<div class="panel stack"><label class="f">Il tuo nome nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
-    <label class="check"><input type="checkbox" data-pb="sync" ${P.sync ? 'checked' : ''}><span>Stesse statistiche e impostazioni su tutti i dispositivi<small>Storico d'ascolto e preferenze vengono salvati sul server, legati al tuo utente. Chi gestisce il server può vederli. Volume e modalità compatibile restano di ogni dispositivo.</small></span></label></div>`)}
+    <label class="check"><input type="checkbox" data-pb="sync" ${P.sync ? 'checked' : ''}><span>Stesse statistiche e impostazioni su tutti i dispositivi<small>Storico d'ascolto e preferenze vengono salvati sul server, legati al tuo utente. Chi gestisce il server può vederli. Volume e modalità compatibile restano di ogni dispositivo.</small></span></label>
+    <label class="check"><input type="checkbox" data-pb="live" ${P.live !== false ? 'checked' : ''}><span>Un solo dispositivo suona, gli altri lo comandano<small>Se avvii la musica qui, sugli altri tuoi dispositivi si ferma e il lettore mostra cosa suona qui. Da "Dove suona" nel lettore la sposti dove vuoi.</small></span></label>
+    <label class="f">Nome di questo dispositivo<input type="text" id="pDev" value="${esc(P.deviceName)}" placeholder="${esc(Live.name())}" maxlength="30"></label></div>`)}
 
   ${grp('server', 'Server musicali', 'navidrome subsonic account accesso password indirizzo rete lan', `<p class="sub">Qualsiasi server compatibile Subsonic: Navidrome, Gonic, Airsonic, Ampache.</p>
   <div>${S.servers.map(s => `<div class="list-item" style="cursor:default">
@@ -1828,12 +1838,14 @@ function vSettings() {
   });
   $('#setQ').oninput = e => settingsFilter(e.target.value);
   $('#pNick').onchange = e => { P.nick = e.target.value.trim(); savePrefs(); };
+  $('#pDev').onchange = e => { P.deviceName = e.target.value.trim(); savePrefs(); Live.connect(); };
   view.querySelectorAll('[data-p]').forEach(el => el.onchange = () => { P[el.dataset.p] = el.value; savePrefs(); fillSelectors(); });
   view.querySelectorAll('[data-pb]').forEach(el => el.onchange = () => {
     P[el.dataset.pb] = el.checked; savePrefs();
     if (el.dataset.pb === 'night') Engine.applyNight();
     if (el.dataset.pb === 'compat') toast('Ricarica la pagina per applicare.');
     if (el.dataset.pb === 'sync' && P.sync) { PrefSync.pull(); HistSync.run(); }
+    if (el.dataset.pb === 'live') Live.connect();
   });
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
@@ -2097,7 +2109,7 @@ view.addEventListener('click', async e => {
       case 'eq': eqDialog(); break;
       case 'addsrv': serverDialog(null, { url: el.dataset.url || '', name: el.dataset.name || '' }); break;
       case 'editsrv': serverDialog(srv(id)); break;
-      case 'usesrv': S.active = id; persistServers(); vSettings(); break;
+      case 'usesrv': S.active = id; persistServers(); vSettings(); Live.connect(); break;
       case 'delsrv': if (confirm('Rimuovere questo server da Armony?')) { S.servers = S.servers.filter(s => s.id !== id); if (S.active === id) S.active = S.servers[0]?.id || null; persistServers(); vSettings(); } break;
       case 'lanscan': {
         $('#lanRes').innerHTML = '<p class="sub">Cerco server Armony sulla rete…</p>';
@@ -2161,7 +2173,7 @@ const NativeMedia = {
   // manda lo stato solo se cambia qualcosa che la notifica non può dedurre da sola (brano, play/pausa, salti)
   sync() {
     if (!this.p) return;
-    const t = currentTrack();
+    const t = Live.remote() ? null : currentTrack();
     if (!t) { if (this.sent) { this.p.stop(); this.sent = null; } return; }
     const now = { title: t.title, artist: t.artist, album: t.album || '', playing: isPlaying(), position: playPos(), duration: playDur(), rate: P.speed,
       artwork: t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 512, t.serverId) : '' };
@@ -2277,6 +2289,152 @@ function nativeBack() {
   });
 }
 
+/* ================= dal vivo: un solo dispositivo suona, gli altri sono telecomandi (/api/live) =================
+   Tutti i dispositivi dello stesso utente tengono aperto un canale SSE col server. Chi suona pubblica brano,
+   play/pausa e posizione; quando un dispositivo comincia a suonare gli altri si fermano e diventano telecomandi:
+   il lettore mostra la sua musica e i comandi vanno a lui. "Dove suona" sposta la coda su un altro dispositivo.
+   Un dispositivo "per conto suo" (P.solo) è sganciato: non si ferma per gli altri e non li ferma, ma resta
+   nell'elenco e gli si può mandare la musica di proposito.
+   La Jam (più persone insieme) resta separata: con una Jam aperta questo modulo non interviene. */
+const Live = {
+  es: null, devices: new Map(), states: new Map(), target: null, sent: null, tick: null, retry: null,
+  name() { return P.deviceName || (NATIVE ? 'Telefono' : /Android|iPhone|iPad|Mobile/.test(navigator.userAgent) ? 'Telefono (browser)' : 'Computer'); },
+  on() { const s = srv(); return P.live !== false && !!s?.session && !!s.me?.caps?.includes('live'); },
+  st() { return this.target ? this.states.get(this.target) || null : null; },
+  // telecomando: c'è un dispositivo di destinazione collegato e qui non sta suonando niente
+  remote() { return !Jam.role && !!this.target && this.devices.has(this.target) && Engine.el.paused; },
+  track() { const s = this.st(); return s?.track ? localize(s.track) : null; },
+  playing() { return !!this.st()?.playing; },
+  pos() { const s = this.st(); if (!s) return 0; const p = (s.position || 0) + (s.playing ? (Date.now() - s.recvAt) / 1000 * (s.rate || 1) : 0); return s.duration ? Math.min(p, s.duration) : p; },
+  dur() { return this.st()?.duration || 0; },
+  connect() {
+    clearTimeout(this.retry); this.es?.close(); this.es = null; this.devices.clear(); this.states.clear(); this.target = null; this.sent = null; this.paint();
+    if (!this.on()) return;
+    const s = srv();
+    const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&token=${encodeURIComponent(s.session)}`);
+    es.onmessage = e => { try { this.recv(JSON.parse(e.data)); } catch {} };
+    es.onopen = () => { this.sent = null; this.publish(); };
+    // EventSource si ricollega da solo; se il server rifiuta (sessione scaduta) chiude, e si riprova più tardi
+    es.onerror = () => { if (es.readyState === EventSource.CLOSED && this.es === es) this.retry = setTimeout(() => this.connect(), 30000); };
+  },
+  recv(m) {
+    const now = Date.now(), before = this.track()?.id;
+    if (m.type === 'hello') {
+      this.devices = new Map(arr(m.devices).map(d => [d.device, d.name]));
+      this.states = new Map(arr(m.states).map(s => [s.device, { ...s, recvAt: now }]));
+      const p = arr(m.states).find(s => s.playing && !s.solo);
+      if (p && Engine.el.paused && !Jam.role && !P.solo) this.target = p.device;
+    } else if (m.type === 'join') this.devices.set(m.device, m.name);
+    else if (m.type === 'gone') {
+      const name = this.devices.get(m.device); this.devices.delete(m.device); this.states.delete(m.device);
+      if (this.target === m.device) { this.target = null; toast(`${name || 'Il dispositivo'} si è scollegato.`); }
+    } else if (m.type === 'state') {
+      const s = { ...m.state, recvAt: now }; this.states.set(s.device, s); this.devices.set(s.device, s.name);
+      if (s.solo && this.target === s.device) this.target = null;  // si è sganciato: non è più la nostra uscita
+      if (s.playing && !s.solo && !P.solo && !Jam.role) {
+        // un solo dispositivo suona: chi comincia ferma gli altri
+        if (!Engine.el.paused) { Engine.el.pause(); toast(`La musica è passata su ${s.name}.`); }
+        this.target = s.device;
+      }
+    } else if (m.type === 'cmd') return this.exec(m);
+    this.paint();
+    if (this.remote() && this.track()?.id !== before && location.hash.startsWith('#/ora')) vNow();
+  },
+  exec(m) {
+    const v = m.value;
+    if (m.cmd === 'transfer' && v && Array.isArray(v.queue)) {
+      this.target = null; this.pill(); S.queue = v.queue.map(localize).filter(Boolean);
+      if (S.queue.length) this.play(Math.min(v.index || 0, S.queue.length - 1), v.position || 0);
+      return;
+    }
+    if (m.cmd === 'handoff') { if (v?.to && v.to !== S.device) this.give(v.to); return; }
+    if (this.remote() || !S.queue[S.index]) return;  // i comandi valgono solo per chi suona
+    ({ play: () => Engine.el.paused && ctlToggle(), pause: () => !Engine.el.paused && ctlToggle(), toggle: ctlToggle,
+      next: () => ctlNext(false), prev: ctlPrev, seek: () => typeof v === 'number' && ctlSeek(v) })[m.cmd]?.();
+  },
+  async play(i, pos) {
+    persistQueue(); await playIndex(i, { startAt: pos });
+    // il browser può bloccare l'audio partito senza un tocco su questa pagina; l'app no
+    setTimeout(() => { if (Engine.el.paused && !this.target) toast('Il browser ha bloccato l\'avvio: premi play per ascoltare qui.', 6000); }, 1500);
+  },
+  pack(q, i, pos) { const from = Math.max(0, i - 50); return { queue: q.slice(from, from + 300).map(wire), index: i - from, position: pos }; },
+  // la coda di questo dispositivo va a un altro, che riparte dallo stesso punto; qui si diventa telecomando
+  async give(to) {
+    if (!S.queue[S.index]) return;
+    const v = this.pack(S.queue, Math.max(0, S.index), Engine.time());
+    Engine.el.pause(); this.publish(); this.target = P.solo ? null : to; this.paint();
+    await this.cmd('transfer', v, to);
+  },
+  async cmd(cmd, value, to = this.target) {
+    const s = srv(); if (!s?.session || !to) return;
+    // risposta immediata nel lettore; lo stato vero arriva poco dopo dal dispositivo
+    const st = this.states.get(to);
+    if (st && to === this.target) {
+      const p = this.pos(), now = Date.now();
+      if (cmd === 'pause' || cmd === 'toggle' && st.playing) Object.assign(st, { position: p, playing: false, recvAt: now });
+      else if (cmd === 'play' || cmd === 'toggle') Object.assign(st, { position: p, playing: true, recvAt: now });
+      else if (cmd === 'seek') Object.assign(st, { position: value, recvAt: now });
+      this.paint();
+    }
+    try { await srvApi(s, '/api/live/cmd', { method: 'POST', body: JSON.stringify({ to, cmd, value, from: S.device }) }); }
+    catch { toast(`${this.devices.get(to) || 'Il dispositivo'} non risponde.`); }
+  },
+  publish() {
+    if (!this.es || !this.on() || Jam.role === 'guest') return;
+    const t = S.queue[S.index]; if (!t) return;
+    if (this.remote() && !this.sent?.playing) return;  // telecomando: niente da dire, salvo la pausa appena fatta
+    const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: Engine.time(), duration: Engine.duration(), rate: P.speed, track: wire(t) };
+    if (now.playing && this.target) { this.target = null; this.pill(); }
+    const s = this.sent, exp = s ? s.position + (s.playing ? (Date.now() - s.at) / 1000 * s.rate : 0) : 0;
+    if (s && s.track.id === now.track.id && s.playing === now.playing && s.rate === now.rate && s.solo === now.solo && Math.abs(exp - now.position) < 2) return;
+    this.sent = { ...now, at: Date.now() };
+    srvApi(srv(), '/api/live/state', { method: 'POST', body: JSON.stringify(now) }).catch(() => {});
+  },
+  pill() {
+    const pill = $('#livePill'); if (!pill) return;
+    const remote = this.remote();
+    pill.hidden = !this.devices.size;
+    pill.classList.toggle('on', remote);
+    pill.innerHTML = `${ic('speaker')}<span>${esc(remote ? this.devices.get(this.target) || '…' : P.solo ? 'Per conto suo' : 'Qui')}</span>`;
+    pill.setAttribute('aria-label', remote ? `In riproduzione su ${this.devices.get(this.target)}: scegli dove suona` : 'Dove suona');
+  },
+  paint() {
+    this.pill();
+    const remote = this.remote();
+    clearInterval(this.tick); this.tick = null;
+    if (remote && this.playing()) this.tick = setInterval(() => emit('time'), 500);
+    updateNowPlaying(); paintTime();
+  },
+  sheet() {
+    const d = $('#dlg'); d.className = 'sheet';
+    const here = !this.remote(), mine = { track: S.queue[S.index] && wire(S.queue[S.index]), playing: !Engine.el.paused, solo: P.solo };
+    const row = (id, name, st, cur) => `<button class="mi${cur ? ' on' : ''}" data-dev="${esc(id)}">${ic(id === S.device ? (NATIVE || /Android|iPhone|Mobile/.test(navigator.userAgent) ? 'phone' : 'laptop') : 'speaker')}
+      <span class="grow"><b>${esc(name)}${id === S.device ? ' · questo' : ''}</b><small>${st?.track ? `${st.playing ? 'Suona' : 'In pausa'}: ${esc(st.track.title)}` : 'Pronto'}${st?.solo ? ' · per conto suo' : ''}</small></span>${cur ? ic('check') : ''}</button>`;
+    d.innerHTML = `<div class="head"><span style="min-width:0"><b style="display:block">Dove suona</b><small style="color:var(--muted)">La musica si sposta sul dispositivo che scegli, dallo stesso punto.</small></span></div>
+      ${row(S.device, this.name(), mine, here)}${[...this.devices].map(([id, n]) => row(id, n, this.states.get(id), !here && this.target === id)).join('')}
+      <label class="check" style="padding:12px 14px 6px;border-top:1px solid var(--line);margin-top:6px"><input type="checkbox" id="liveSolo" ${P.solo ? 'checked' : ''}><span>Questo dispositivo suona per conto suo<small>Sganciato: non si ferma quando suona un altro tuo dispositivo e non lo ferma. Potete ascoltare cose diverse insieme.</small></span></label>`;
+    d.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => { d.close(); this.choose(b.dataset.dev); });
+    $('#liveSolo').onchange = e => {
+      P.solo = e.target.checked; savePrefs(); this.sent = null;
+      if (P.solo) this.target = null;  // sganciato: niente più telecomando
+      this.publish(); this.paint(); this.sheet();
+    };
+    closeOutside(d); d.showModal();
+  },
+  async choose(id) {
+    if (id === S.device) {  // la musica torna qui: il dispositivo che suona ci passa la coda
+      if (!this.remote()) return;
+      const src = this.target; this.target = null; this.paint();
+      if (this.states.get(src)?.track) await this.cmd('handoff', { to: S.device }, src);
+      return;
+    }
+    if (!this.remote() && S.queue[S.index] && Engine.el.getAttribute('src')) return this.give(id);  // da qui a là
+    const src = this.target; this.target = id; this.paint();
+    if (src && src !== id && this.states.get(src)?.track) return this.cmd('handoff', { to: id }, src);  // fra due altri dispositivi
+    // altrimenti è solo la scelta dell'uscita: la prossima riproduzione partirà lì
+  }
+};
+
 /* ================= controlli del lettore e avvio ================= */
 function wirePlayer() {
   $('#bPrev').innerHTML = ic('prev'); $('#bNext').innerHTML = ic('next'); $('#bQueue').innerHTML = ic('queue'); $('#bQm').innerHTML = ic('sliders'); $('#bLyr').innerHTML = ic('lyrics');
@@ -2350,6 +2508,7 @@ async function boot() {
   Jam.init();
   route();
   setTimeout(resolvePending, 8000);
-  addEventListener('online', () => HistSync.run());
-  syncSessions().then(async () => { notifyUpdate(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche)/.test(location.hash)) route(); });
+  addEventListener('online', () => { HistSync.run(); if (!Live.es) Live.connect(); });
+  $('#livePill').onclick = () => Live.sheet();
+  syncSessions().then(async () => { Live.connect(); notifyUpdate(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche)/.test(location.hash)) route(); });
 }

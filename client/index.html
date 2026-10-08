@@ -252,6 +252,11 @@ input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px color
 .extra input[type=range]{max-width:100px}
 .pill{font-size:.74rem;font-weight:700;color:var(--muted);border:0;border-radius:99px;padding:4px 10px;white-space:nowrap;background:var(--surface2);cursor:pointer;font-variant-numeric:tabular-nums}
 .pill.jam{background:var(--accent);color:var(--on-accent)}
+/* "Dove suona": mostra il dispositivo che suona quando non è questo */
+.pill.live{display:inline-flex;align-items:center;gap:5px;padding:4px 10px 4px 8px}
+.pill.live svg{width:14px;height:14px;flex:none}
+.pill.live.on{background:var(--accent-soft);color:var(--ink)}
+.pill.live.on svg{color:var(--accent-text)}
 
 /* equalizzatore */
 .eq{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;align-items:end;margin:14px 0}
@@ -329,6 +334,9 @@ dialog.sheet .mi{display:flex;width:100%;gap:14px;align-items:center;min-height:
 @media (hover:hover) and (pointer:fine){dialog.sheet .mi:hover{background:var(--surface2)}}
 dialog.sheet .mi.on{background:var(--accent-soft)}
 dialog.sheet .mi svg{width:19px;height:19px;color:var(--muted);flex:none}
+dialog.sheet .mi .grow{flex:1;min-width:0}
+dialog.sheet .mi .grow b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+dialog.sheet .mi .grow small{display:block;color:var(--muted);font-size:.84rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 dialog.sheet .sh{margin:12px 12px 4px;font-size:.82rem;color:var(--muted)}
 dialog video{width:100%;border-radius:10px;background:#000}
 .toast{position:fixed;left:50%;bottom:calc(var(--player-h) + 16px + var(--sab));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 20px;border-radius:999px;z-index:70;font-weight:600;font-size:.94rem;box-shadow:var(--shadow-float);max-width:90vw;text-align:center;animation:toast-in var(--t-move) var(--ease)}
@@ -464,6 +472,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
     <div class="seek"><span id="tCur">0:00</span><input type="range" id="seek" min="0" max="1000" value="0" aria-label="Posizione"><span id="tDur">0:00</span></div>
   </div>
   <div class="extra">
+    <button class="pill live" id="livePill" hidden aria-haspopup="dialog"></button>
     <button class="pill" id="jamPill" hidden></button>
     <button class="pill" id="sleepPill" hidden></button>
     <button class="pill desk-only" id="qBadge" title="Qualità di ascolto"></button>

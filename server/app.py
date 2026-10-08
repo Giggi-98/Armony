@@ -11,6 +11,7 @@ Armony - server di supporto.
                         Subsonic); la sessione va nell'intestazione X-Token
   /api/users            permessi per utente (solo amministratori)
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
+  /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download")
   /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
@@ -18,6 +19,7 @@ Armony - server di supporto.
 """
 import hashlib
 import ipaddress
+import queue
 import json
 import os
 import re
@@ -60,12 +62,12 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/upload", "upload"),
          ("/api/download", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"),
-         ("/api/history", "user"), ("/api/prefs", "user"))
+         ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
 SESSION_DAYS = 180
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,48}$")
 
@@ -446,6 +448,100 @@ def prefs_put():
     return prefs_get()
 
 
+# ------------------------------------------------------------------ dal vivo: un solo dispositivo suona, gli altri sono telecomandi
+# Ogni dispositivo di un utente tiene aperto un canale SSE. Lo stato (brano, play/pausa, posizione)
+# va a tutti gli altri suoi dispositivi; un comando va solo al dispositivo indicato.
+# Tutto in memoria: dopo un riavvio i dispositivi si ricollegano da soli (EventSource) e ripubblicano.
+lconns = {}    # utente -> {id connessione: {"device", "name", "q"}}
+lstates = {}   # utente -> {dispositivo: ultimo stato}
+llock = threading.Lock()
+LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo")
+
+
+def live_put(user, msg, only=None, skip=None):
+    data = json.dumps(msg)
+    with llock:
+        for c in lconns.get(user, {}).values():
+            if (only and c["device"] != only) or (skip and c["device"] == skip):
+                continue
+            try:
+                c["q"].put_nowait(data)
+            except queue.Full:
+                pass  # un dispositivo che non legge non deve bloccare gli altri
+
+
+@app.get("/api/live")
+def live_stream():
+    u = user_or_400()
+    dev = (request.args.get("device") or "")[:40]
+    if not ID_RE.match(dev):
+        return jsonify(error="Dispositivo non valido"), 400
+    name = (request.args.get("name") or "Dispositivo")[:40]
+    cid, q = uuid.uuid4().hex, queue.Queue(maxsize=200)
+    with llock:
+        new = not any(c["device"] == dev for c in lconns.get(u, {}).values())
+        lconns.setdefault(u, {})[cid] = {"device": dev, "name": name, "q": q}
+        others = {c["device"]: c["name"] for c in lconns[u].values() if c["device"] != dev}
+        hello = json.dumps({"type": "hello", "devices": [{"device": d, "name": n} for d, n in others.items()],
+                            "states": [s for d, s in lstates.get(u, {}).items() if d != dev]})
+    if new:
+        live_put(u, {"type": "join", "device": dev, "name": name}, skip=dev)
+
+    def gen():
+        try:
+            yield f"retry: 3000\ndata: {hello}\n\n"
+            while True:
+                try:
+                    yield f"data: {q.get(timeout=15)}\n\n"
+                except queue.Empty:
+                    yield ": ancora qui\n\n"  # tiene viva la connessione attraverso proxy e NAT
+        finally:
+            with llock:
+                lconns.get(u, {}).pop(cid, None)
+                gone = not any(c["device"] == dev for c in lconns.get(u, {}).values())
+                if gone:
+                    lstates.get(u, {}).pop(dev, None)
+            if gone:
+                live_put(u, {"type": "gone", "device": dev})
+
+    return Response(stream_with_context(gen()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/live/state")
+def live_state():
+    u, d = user_or_400(), request.get_json(silent=True) or {}
+    dev = str(d.get("device") or "")
+    if not ID_RE.match(dev):
+        return jsonify(error="Dispositivo non valido"), 400
+    st = {k: d[k] for k in LIVE_FIELDS if k in d}
+    st.update(device=dev, name=str(d.get("name") or "Dispositivo")[:40], at=time.time())
+    if len(json.dumps(st)) > 8000:
+        return jsonify(error="Stato troppo grande"), 400
+    with llock:
+        lstates.setdefault(u, {})[dev] = st
+    live_put(u, {"type": "state", "state": st}, skip=dev)
+    return jsonify(ok=True)
+
+
+@app.post("/api/live/cmd")
+def live_cmd():
+    u, d = user_or_400(), request.get_json(silent=True) or {}
+    to, cmd = str(d.get("to") or ""), str(d.get("cmd") or "")
+    # transfer: "suona questa coda da qui"; handoff: "passa la tua coda a quel dispositivo"
+    if cmd not in ("play", "pause", "toggle", "next", "prev", "seek", "transfer", "handoff"):
+        return jsonify(error="Comando non valido"), 400
+    with llock:
+        present = any(c["device"] == to for c in lconns.get(u, {}).values())
+    if not present:
+        return jsonify(error="Quel dispositivo non è più collegato."), 404
+    value = d.get("value")
+    if not isinstance(value, (int, float, dict)) or len(json.dumps(value)) > 300_000:
+        value = None
+    live_put(u, {"type": "cmd", "cmd": cmd, "value": value, "from": str(d.get("from") or "")[:40]}, only=to)
+    return jsonify(ok=True)
+
+
 # ------------------------------------------------------------------ download
 jobs = {}
 jlock = threading.Lock()
@@ -771,4 +867,5 @@ if __name__ == "__main__":
         threading.Thread(target=mcast_listener, daemon=True).start()
     from waitress import serve
     print(f"Armony '{NAME}' sulla porta {PORT}, multicast {'attivo' if MULTICAST else 'spento'}")
-    serve(app, host="0.0.0.0", port=PORT, threads=48, channel_timeout=600)
+    # ogni dispositivo collegato tiene un thread per il canale dal vivo (/api/live), oltre a flussi audio e Jam
+    serve(app, host="0.0.0.0", port=PORT, threads=96, channel_timeout=600)
