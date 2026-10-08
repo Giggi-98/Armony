@@ -58,6 +58,8 @@ input,textarea{caret-color:var(--accent)}
 a{color:var(--accent-text)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-s)}
 img{max-width:100%;display:block}
+/* hidden vince su ogni display dei componenti (.stack, .btn, .seg…): senza, un campo "nascosto" resta a schermo */
+[hidden]{display:none!important}
 audio{display:none}
 
 .app{display:grid;grid-template-columns:var(--side-w) 1fr;min-height:100vh;min-height:100dvh;padding-bottom:calc(var(--player-h) + var(--sab))}

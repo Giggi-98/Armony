@@ -31,6 +31,12 @@ MIGRATIONS = [
     """
     ALTER TABLE perms ADD COLUMN del INTEGER NOT NULL DEFAULT 0;
     """,
+    # 4: registrazione degli amici (modalità) e codici d'invito monouso
+    """
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE invites (code TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL, by TEXT,
+                          used_by TEXT, used_at REAL, revoked INTEGER NOT NULL DEFAULT 0);
+    """,
 ]
 
 _local = threading.local()

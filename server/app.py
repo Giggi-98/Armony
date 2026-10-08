@@ -10,6 +10,8 @@ Armony - server di supporto.
   /api/login, /api/logout, /api/me   accesso con le credenziali Navidrome (token + sale
                         Subsonic); la sessione va nell'intestazione X-Token
   /api/users            permessi per utente (solo amministratori)
+  /api/register         un amico si crea l'account (pubblica: info e registrazione con invito);
+                        /api/register/settings e /invites solo amministratori
   /api/tracks/delete    elimina file dalla libreria (permesso "delete"); il percorso vero viene dal DB di
                         Navidrome, letto in sola lettura, mai dal client
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
@@ -68,9 +70,9 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete", "scaletta"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete", "scaletta", "register"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
-RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/upload", "upload"), ("/api/tracks/delete", "delete"),
+RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks/delete", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -200,6 +202,186 @@ def set_user(name):
 @app.delete("/api/users/<name>/sessions")
 def revoke_user(name):
     db.run("DELETE FROM sessions WHERE user = ?", name)
+    return jsonify(ok=True)
+
+
+# ------------------------------------------------------------------ registrazione degli amici
+# Gli account sono utenti di Navidrome, quindi per crearli serve il suo amministratore: le sue credenziali
+# le inserisce una volta l'admin di Armony e restano solo qui (file 600 in /data, mai mandate al client),
+# oppure arrivano da NAVIDROME_ADMIN_USER/NAVIDROME_ADMIN_PASS, che hanno la precedenza.
+# Gli account creati sono sempre utenti normali: l'amministratore di un server è uno solo.
+ND_ADMIN_FILE = os.path.join(os.path.dirname(db.PATH), "navidrome-admin.json")
+REG_MODES = ("chiusa", "invito", "aperta")
+INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # niente 0/O, 1/I/L: si detta e si copia a mano
+INVITE_DAYS = 7
+USER_RE = re.compile(r"^[A-Za-z0-9._-]{3,32}$")
+nd_jwt = {"token": None, "at": 0}
+reg_failed, reg_done = {}, {}  # ip -> istanti: tentativi falliti e account creati
+
+
+def nd_admin():
+    if os.environ.get("NAVIDROME_ADMIN_USER") and os.environ.get("NAVIDROME_ADMIN_PASS"):
+        return {"user": os.environ["NAVIDROME_ADMIN_USER"], "pass": os.environ["NAVIDROME_ADMIN_PASS"], "source": "env"}
+    c = read_json(ND_ADMIN_FILE)
+    return dict(c, source="file") if c and c.get("user") and c.get("pass") else None
+
+
+def nd_login(user, password):
+    """JWT dell'API nativa di Navidrome, e se l'utente è amministratore."""
+    r = http.post(f"{NAVIDROME_URL}/auth/login", json={"username": user, "password": password}, timeout=10)
+    if r.status_code == 401:
+        return None, False
+    r.raise_for_status()
+    d = r.json()
+    return d.get("token"), bool(d.get("isAdmin"))
+
+
+def nd_create_user(username, password):
+    """Crea un utente normale su Navidrome. Il JWT dell'amministratore si rinnova se scaduto."""
+    adm = nd_admin()
+    if not adm:
+        raise PermissionError("Registrazione non configurata")
+    for attempt in (0, 1):
+        if not nd_jwt["token"] or attempt:
+            nd_jwt["token"], is_admin = nd_login(adm["user"], adm["pass"])
+            if not nd_jwt["token"] or not is_admin:
+                raise PermissionError("Le credenziali dell'amministratore di Navidrome non valgono più")
+        r = http.post(f"{NAVIDROME_URL}/api/user", timeout=10, headers={"X-ND-Authorization": f"Bearer {nd_jwt['token']}"},
+                      json={"userName": username, "name": username, "password": password, "isAdmin": False})
+        if r.status_code == 401 and not attempt:
+            continue
+        if r.status_code == 400 and "unique" in r.text:
+            raise ValueError("Questo nome utente esiste già: scegline un altro, oppure accedi.")
+        r.raise_for_status()
+        return
+    raise PermissionError("Navidrome rifiuta le credenziali dell'amministratore")
+
+
+def reg_mode():
+    if not nd_admin():
+        return "chiusa"
+    r = db.one("SELECT value FROM settings WHERE key = 'register_mode'")
+    return r["value"] if r and r["value"] in REG_MODES else "invito"
+
+
+def norm_code(c):
+    return re.sub(r"[^A-Z0-9]", "", str(c or "").upper())[:16]
+
+
+@app.get("/api/register/info")
+def register_info():
+    m = reg_mode()
+    return jsonify(mode=m, open=m != "chiusa", needsCode=m == "invito", name=NAME)
+
+
+@app.post("/api/register")
+def register():
+    ip, now = request.remote_addr or "", time.time()
+    recent = [t for t in reg_failed.get(ip, []) if now - t < 600]
+    if len(recent) >= 10:
+        return jsonify(error="Troppi tentativi: riprova fra qualche minuto."), 429
+    made = [t for t in reg_done.get(ip, []) if now - t < 3600]
+    if len(made) >= 20:  # gli amici sulla stessa Wi-Fi escono con lo stesso indirizzo
+        return jsonify(error="Troppi account creati da qui: riprova più tardi."), 429
+
+    def fail(msg, code=400):
+        reg_failed[ip] = recent + [now]
+        return jsonify(error=msg), code
+
+    mode = reg_mode()
+    if mode == "chiusa":
+        return jsonify(error="La registrazione su questo server è chiusa: chiedi un account a chi lo gestisce."), 403
+    d = request.get_json(silent=True) or {}
+    username, password = str(d.get("username") or "").strip(), str(d.get("password") or "")
+    if not USER_RE.match(username):
+        return fail("Il nome utente va da 3 a 32 caratteri: lettere, cifre, punto, trattino e trattino basso.")
+    if len(password) < 8 or len(password) > 200:
+        return fail("La password deve avere almeno 8 caratteri.")
+    code = norm_code(d.get("code"))
+    if mode == "invito":
+        if not code:
+            return fail("Serve un codice d'invito: chiedilo a chi gestisce il server.")
+        # l'invito si prenota prima di creare l'utente: due amici con lo stesso codice, ne passa uno solo
+        took = db.conn().execute("UPDATE invites SET used_by = ?, used_at = ? WHERE code = ? AND used_by IS NULL "
+                                 "AND revoked = 0 AND expires > ?", (username, now, code, now)).rowcount
+        if not took:
+            inv = db.one("SELECT used_by, revoked, expires FROM invites WHERE code = ?", code)
+            why = ("Questo invito è già stato usato." if inv and inv["used_by"] else "Questo invito è stato revocato." if inv and inv["revoked"]
+                   else "Questo invito è scaduto: chiedine uno nuovo." if inv else "Codice d'invito non valido.")
+            return fail(why, 403)
+    try:
+        nd_create_user(username, password)
+    except ValueError as e:
+        if mode == "invito":
+            db.run("UPDATE invites SET used_by = NULL, used_at = NULL WHERE code = ?", code)
+        return fail(str(e), 409)
+    except (PermissionError, requests.RequestException) as e:
+        if mode == "invito":
+            db.run("UPDATE invites SET used_by = NULL, used_at = NULL WHERE code = ?", code)
+        msg = str(e) if isinstance(e, PermissionError) else "Il server musicale non risponde"
+        return jsonify(error=msg + ": avvisa chi gestisce il server."), 502
+    reg_done[ip] = made + [now]
+    return jsonify(ok=True, username=username), 201
+
+
+@app.get("/api/register/settings")
+def register_settings():
+    adm = nd_admin()
+    stored = db.one("SELECT value FROM settings WHERE key = 'register_mode'")
+    return jsonify(mode=reg_mode(), chosen=stored["value"] if stored else "invito", configured=bool(adm),
+                   source=adm["source"] if adm else None, adminUser=adm["user"] if adm else None)
+
+
+@app.put("/api/register/settings")
+def register_settings_put():
+    d = request.get_json(silent=True) or {}
+    if d.get("user") or d.get("password"):
+        if nd_admin() and nd_admin()["source"] == "env":
+            return jsonify(error="Le credenziali arrivano dalle variabili d'ambiente del server: cambiale lì."), 409
+        user, password = str(d.get("user") or "").strip(), str(d.get("password") or "")
+        try:
+            tok, is_admin = nd_login(user, password)
+        except (requests.RequestException, ValueError):
+            return jsonify(error="Il server musicale non risponde"), 502
+        if not tok:
+            return jsonify(error="Utente o password di Navidrome errati."), 400
+        if not is_admin:
+            return jsonify(error="Questo utente non è amministratore di Navidrome."), 400
+        fd = os.open(ND_ADMIN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump({"user": user, "pass": password}, f)
+        os.chmod(ND_ADMIN_FILE, 0o600)
+        nd_jwt.update(token=tok, at=time.time())
+    if d.get("clear") and os.path.exists(ND_ADMIN_FILE):
+        os.remove(ND_ADMIN_FILE)
+        nd_jwt.update(token=None)
+    if d.get("mode") in REG_MODES:
+        db.run("INSERT INTO settings VALUES ('register_mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", d["mode"])
+    return register_settings()
+
+
+@app.get("/api/register/invites")
+def invites_list():
+    now = time.time()
+    rows = db.all_("SELECT * FROM invites ORDER BY created DESC LIMIT 50")
+    out = []
+    for r in rows:
+        state = ("usato" if r["used_by"] else "revocato" if r["revoked"] else "scaduto" if r["expires"] <= now else "attivo")
+        out.append(dict(code=r["code"], created=r["created"], expires=r["expires"], usedBy=r["used_by"], usedAt=r["used_at"], state=state))
+    return jsonify(out)
+
+
+@app.post("/api/register/invites")
+def invites_create():
+    code = "".join(secrets.choice(INVITE_ALPHABET) for _ in range(8))
+    now = time.time()
+    db.run("INSERT INTO invites (code, created, expires, by) VALUES (?, ?, ?, ?)", code, now, now + INVITE_DAYS * 86400, g.who["user"])
+    return jsonify(code=code, expires=now + INVITE_DAYS * 86400, state="attivo"), 201
+
+
+@app.delete("/api/register/invites/<code>")
+def invites_revoke(code):
+    db.run("UPDATE invites SET revoked = 1 WHERE code = ? AND used_by IS NULL", norm_code(code))
     return jsonify(ok=True)
 
 

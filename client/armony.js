@@ -339,7 +339,7 @@ async function route() {
   const fn = {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys
+    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav; Scene.hash = location.hash; Scene.r = r;
   const run = async () => {
@@ -410,12 +410,18 @@ const listActions = (extra = '') => `<div class="row acts-row" style="margin-bot
 function noServer() {
   const local = /^https?:/.test(location.protocol) && !NATIVE;
   view.innerHTML = `<h1>Benvenuto in Armony</h1><p class="sub">La musica della vostra compagnia, dai vostri server.</p>
-  <div class="empty"><h3>Collega il primo server</h3><p>Ti servono un nome utente e una password del server musicale.</p>
+  <div class="empty"><h3>Collega il primo server</h3><p>Accedi con il tuo utente del server musicale, oppure creane uno se chi lo gestisce ti ha dato un invito.</p>
   <div class="row" style="justify-content:center">
     <button class="btn primary" data-act="addsrv" ${local ? `data-url="${esc(location.origin)}"` : ''}>Aggiungi server</button>
     <button class="btn" data-act="importset">Importa impostazioni da un amico</button>
     <a class="btn" href="#/jam">Entra in una Jam</a>
   </div></div>`;
+}
+
+// link d'invito (<server>/#/invito/<codice>): apre "Crea un account" con indirizzo e codice già compilati
+function vInvite(code) {
+  noServer();
+  serverDialog(null, { url: NATIVE ? '' : location.origin, mode: 'crea', code: code || '' });
 }
 
 /* ================= viste: libreria ================= */
@@ -2014,7 +2020,7 @@ function vSettings() {
     </div>
   </div>`)}
 
-  ${access().admin && srv()?.session ? grp('utenti', 'Utenti', 'permessi caricamento download disconnetti amministratore', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div>') : ''}
+  ${access().admin && srv()?.session ? grp('utenti', 'Utenti', 'permessi caricamento download disconnetti amministratore', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div><h3 style="margin-top:var(--s5)">Registrazione</h3><div id="regBox"><p class="sub">Caricamento…</p></div>') : ''}
   ${window.ARMONY_APP ? grp('app', 'App Android', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div>') : ''}
   ${access().admin ? grp('aggiornamenti', 'Aggiornamenti', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>') : ''}
 
@@ -2040,7 +2046,7 @@ function vSettings() {
   });
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  if (access().admin) { refreshUpdate(); refreshUsers(); }
+  if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); }
   if (window.ARMONY_APP) AppUpdate.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
 }
@@ -2083,6 +2089,53 @@ async function refreshUpdate(force) {
   if (busy) setTimeout(() => refreshUpdate(), 5000);
   return u;
 }
+/* ================= registrazione degli amici (solo amministratori) ================= */
+const fmtCode = c => String(c).replace(/^(.{4})(.+)$/, '$1-$2');
+const inviteLink = c => `${absUrl(srv()?.shareBase || srv()?.url || location.origin)}/#/invito/${fmtCode(c)}`;
+async function qrInto(box, text) {
+  // stessa libreria del QR della Jam, caricata solo quando serve
+  if (!window.QRCode) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; sc.onload = res; sc.onerror = rej; document.head.append(sc); });
+  const q = document.createElement('div'); q.className = 'qr'; box.append(q);
+  new QRCode(q, { text, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.L });
+}
+async function refreshReg() {
+  const box = $('#regBox'); if (!box) return;
+  let st, inv = [];
+  try { st = await dlApi('/api/register/settings'); if (st.configured) inv = await dlApi('/api/register/invites'); }
+  catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  const modes = [['chiusa', 'Chiusa'], ['invito', 'Con invito'], ['aperta', 'Aperta']];
+  const hint = { chiusa: 'Nessuno può crearsi un account: li crei tu in Navidrome.', invito: 'Si entra con un codice d\'invito monouso che crei qui (valido 7 giorni).', aperta: 'Chiunque raggiunga il server può crearsi un account.' };
+  const credForm = `<div class="grid2"><label class="f">Amministratore di Navidrome<input type="text" id="regU" autocomplete="off" autocapitalize="none" value="${esc(st.adminUser || '')}"></label>
+    <label class="f">Password<input type="password" id="regP" autocomplete="new-password"></label></div>
+    <div class="row" style="margin-top:var(--s3)"><button class="btn primary" data-act="regcred">Salva</button></div>`;
+  box.innerHTML = !st.configured ? `<div class="panel stack"><p style="margin:0">Per far creare un account agli amici serve l'amministratore di Navidrome: inseriscilo una volta, resta solo sul server.</p>${credForm}</div>`
+    : `<div class="panel stack">
+      <p style="margin:0">Gli account si creano come <b>${esc(st.adminUser)}</b>${st.source === 'env' ? ' (dalle variabili d\'ambiente del server)' : ''}. Chi si registra è sempre un utente normale.</p>
+      <div class="seg" role="radiogroup" aria-label="Registrazione">${modes.map(([v, l]) => `<label><input type="radio" name="regmode" value="${v}" ${st.mode === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      <p class="small" style="margin:0;color:var(--muted)">${hint[st.mode]}</p>
+      ${st.source === 'env' ? '' : `<details><summary class="small" style="cursor:pointer;color:var(--muted)">Cambia l'amministratore di Navidrome</summary><div style="margin-top:var(--s3)">${credForm}</div></details>`}
+    </div>
+    ${st.mode === 'invito' ? `<div class="row between"><h3 style="margin:var(--s3) 0">Inviti</h3><button class="btn sm primary" data-act="reginv">${ic('plus')} Crea invito</button></div>
+      ${inv.length ? inv.map(i => `<div class="list-item" style="cursor:default;flex-wrap:wrap;min-height:56px">
+        <span class="grow"><b style="font-variant-numeric:tabular-nums;letter-spacing:.04em">${esc(fmtCode(i.code))}</b><small>${i.state === 'usato' ? `usato da ${esc(i.usedBy)}` : i.state === 'attivo' ? `scade il ${new Date(i.expires * 1000).toLocaleDateString()}` : i.state}</small></span>
+        <span class="tag ${i.state === 'attivo' ? 'ok' : ''}">${esc(i.state)}</span>
+        ${i.state === 'attivo' ? `<button class="btn sm" data-act="regshow" data-code="${esc(i.code)}">Condividi</button><button class="icon-btn" data-act="regrevoke" data-code="${esc(i.code)}" aria-label="Revoca">${ic('trash')}</button>` : ''}</div>`).join('')
+        : '<div class="empty">Nessun invito. Creane uno e mandalo a un amico.</div>'}` : ''}`;
+  box.querySelectorAll('[name=regmode]').forEach(r => r.onchange = async () => { try { await dlApi('/api/register/settings', { method: 'PUT', body: JSON.stringify({ mode: r.value }) }); } catch (e) { toast(e.message); } refreshReg(); });
+}
+function inviteSheet(code) {
+  const d = $('#dlg2'); d.className = ''; const link = inviteLink(code);
+  d.innerHTML = `<h3>Invito per un amico</h3><p class="sub" style="margin-bottom:var(--s3)">Monouso, valido 7 giorni. Chi lo apre si crea l'account e entra subito.</p>
+    <p style="font:800 2rem/1 var(--display);letter-spacing:.06em;margin:0 0 var(--s3);font-variant-numeric:tabular-nums">${esc(fmtCode(code))}</p>
+    <div class="code" style="font-size:.8rem">${esc(link)}</div><div id="regQr" style="margin:var(--s3) 0"></div>
+    <div class="row"><button class="btn primary" id="regCopy">${ic('share')} ${navigator.share ? 'Condividi' : 'Copia il link'}</button><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
+  $('#regCopy').onclick = async () => {
+    const text = `Ti invito su Armony: apri ${link} (codice ${fmtCode(code)})`;
+    if (navigator.share) { try { await navigator.share({ title: 'Armony', text, url: link }); return; } catch {} }
+    if (await copyText(link)) toast('Link copiato.');
+  };
+  d.showModal(); qrInto($('#regQr'), link).catch(() => {});
+}
 async function refreshUsers() {
   const box = $('#usrBox'); if (!box) return;
   let list; try { list = await dlApi('/api/users'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
@@ -2105,38 +2158,90 @@ async function notifyUpdate() {
   if (u?.available && store.get('updSeen') !== u.latest) { store.set('updSeen', u.latest); toast(`Armony ${u.latest} disponibile: aggiorna da Impostazioni.`, 6000); }
 }
 function serverDialog(s, preset = {}) {
+  const editing = !!s;
   s = s || { id: uid(8), name: preset.name || '', url: preset.url || '', user: '', shareBase: '' };
   const d = $('#dlg'); d.className = '';
-  d.innerHTML = `<h3>${s.user ? 'Modifica server' : 'Nuovo server'}</h3><div class="stack">
-    <label class="f">Nome<input type="text" id="sName" value="${esc(s.name)}" placeholder="Casa di Marco"></label>
-    <label class="f">Indirizzo<input type="url" id="sUrl" value="${esc(s.url)}" placeholder="http://192.168.1.10:8080"></label>
-    <label class="f">Utente<input type="text" id="sUser" value="${esc(s.user)}" autocomplete="username"></label>
-    <label class="f">Password<input type="password" id="sPass" value="" autocomplete="current-password" ${s.tok ? 'placeholder="Lascia vuoto per non cambiarla"' : ''}></label>
+  d.innerHTML = `<h3>${editing ? 'Modifica server' : 'Nuovo server'}</h3><div class="stack">
+    <label class="f">Indirizzo<input type="url" id="sUrl" value="${esc(s.url)}" placeholder="http://192.168.1.10:8080" autocapitalize="none" autocorrect="off" inputmode="url"></label>
+    <div class="seg" id="sMode" role="radiogroup" aria-label="Accesso" hidden><label><input type="radio" name="smode" value="accedi" checked><span>Accedi</span></label><label><input type="radio" name="smode" value="crea"><span>Crea un account</span></label></div>
+    <div class="stack" id="sLogin">
+      <label class="f">Utente<input type="text" id="sUser" value="${esc(s.user)}" autocomplete="username" autocapitalize="none" autocorrect="off"></label>
+      <label class="f">Password<input type="password" id="sPass" value="" autocomplete="current-password" ${s.tok ? 'placeholder="Lascia vuoto per non cambiarla"' : ''}></label>
+    </div>
+    <div class="stack" id="sCreate" hidden>
+      <label class="f">Scegli un nome utente<input type="text" id="rUser" autocomplete="username" autocapitalize="none" autocorrect="off" maxlength="32" placeholder="es. giulia"></label>
+      <label class="f">Scegli una password<input type="password" id="rPass" autocomplete="new-password" placeholder="Almeno 8 caratteri"></label>
+      <label class="f">Ripeti la password<input type="password" id="rPass2" autocomplete="new-password"></label>
+      <label class="f" id="rCodeL">Codice d'invito<input type="text" id="rCode" value="${esc(preset.code || '')}" autocapitalize="characters" autocorrect="off" placeholder="XXXX-XXXX"></label>
+    </div>
+    <label class="f">Nome del server<input type="text" id="sName" value="${esc(s.name)}" placeholder="Casa di Marco"></label>
     <details><summary class="small" style="cursor:pointer;color:var(--muted)">Avanzate</summary>
       <label class="f" style="margin-top:8px">Indirizzo pubblico per i link condivisi<input type="url" id="sShare" value="${esc(s.shareBase || '')}" placeholder="https://musica.miodominio.it"></label></details>
-    <p id="sMsg" class="small" style="margin:0;color:var(--muted)"></p>
-    <div class="row"><button class="btn primary" id="sSave">Salva</button><button class="btn" id="sTest">Prova</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div></div>`;
+    <p id="sMsg" class="small" style="margin:0;color:var(--muted)" role="status"></p>
+    <div class="row"><button class="btn primary" id="sSave">${editing ? 'Salva' : 'Accedi'}</button><button class="btn" id="sTest">Prova</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div></div>`;
+  const msg = t => { $('#sMsg').textContent = t; };
+  const mode = () => d.querySelector('[name=smode]:checked')?.value || 'accedi';
+  let reg = null;
+  const paintMode = () => {
+    const crea = mode() === 'crea';
+    $('#sLogin').hidden = crea; $('#sCreate').hidden = !crea; $('#sTest').hidden = crea;
+    $('#rCodeL').hidden = !reg?.needsCode;
+    $('#sSave').textContent = editing ? 'Salva' : crea ? 'Crea l\'account' : 'Accedi';
+    msg('');
+  };
+  d.querySelectorAll('[name=smode]').forEach(r => r.onchange = paintMode);
+  // la registrazione si offre solo se il server la permette (/api/register/info è pubblica)
+  const checkReg = async () => {
+    const url = $('#sUrl').value.trim().replace(/\/+$/, ''); reg = null;
+    if (!editing && url && /^https?:\/\/./.test(absUrl(url))) reg = await fetch(absUrl(url) + '/api/register/info').then(r => r.ok ? r.json() : null).catch(() => null);
+    $('#sMode').hidden = !reg?.open;
+    if (!reg?.open && mode() === 'crea') d.querySelector('[name=smode][value=accedi]').checked = true;
+    if (reg?.open && preset.mode === 'crea' && !paintMode.done) { d.querySelector('[name=smode][value=crea]').checked = true; paintMode.done = true; }
+    paintMode();
+  };
+  $('#sUrl').onchange = checkReg;
   const read = () => {
     const pass = $('#sPass').value, user = $('#sUser').value.trim();
-    const n = { ...s, name: $('#sName').value.trim() || $('#sUrl').value.trim(), url: $('#sUrl').value.trim().replace(/\/+$/, ''), user, shareBase: $('#sShare').value.trim() };
+    const n = { ...s, name: $('#sName').value.trim() || reg?.name || $('#sUrl').value.trim(), url: $('#sUrl').value.trim().replace(/\/+$/, ''), user, shareBase: $('#sShare').value.trim() };
     if (pass) Object.assign(n, subsonicCreds(pass));
     else if (user !== s.user) delete n.tok;  // utente cambiato senza password: credenziali vecchie non valide
     return n;
   };
-  $('#sTest').onclick = async () => { $('#sMsg').textContent = 'Provo…'; try { await api('ping', {}, read()); $('#sMsg').textContent = 'Connessione riuscita.'; } catch (e) { $('#sMsg').textContent = e.message; } };
-  $('#sSave').onclick = async () => {
-    const n = read(); if (!n.url || !n.user || !n.tok) { $('#sMsg').textContent = 'Indirizzo, utente e password sono obbligatori.'; return; }
-    $('#sMsg').textContent = 'Verifico…';
-    try { await api('ping', {}, n); } catch (e) { if (!confirm(`${e.message}\nSalvare comunque?`)) { $('#sMsg').textContent = e.message; return; } }
+  $('#sTest').onclick = async () => { msg('Provo…'); try { await api('ping', {}, read()); msg('Connessione riuscita.'); } catch (e) { msg(e.message); } };
+  const save = async welcome => {
+    const n = read(); if (!n.url || !n.user || !n.tok) return msg('Indirizzo, utente e password sono obbligatori.');
+    msg('Verifico…');
+    try { await api('ping', {}, n); } catch (e) { if (welcome || !confirm(`${e.message}\nSalvare comunque?`)) return msg(e.message); }
     delete n.session; delete n.armony; delete n.me;
-    try { await armonyLogin(n); } catch (e) { $('#sMsg').textContent = 'Armony: ' + e.message; return; }
+    try { await armonyLogin(n); } catch (e) { return msg('Armony: ' + e.message); }
     const i = S.servers.findIndex(x => x.id === n.id); if (i >= 0) S.servers[i] = n; else S.servers.push(n);
-    if (!S.active) S.active = n.id;
+    if (!S.active || welcome) S.active = n.id;
     if (n.session && S.active === n.id) store.set('downloader', null);
-    persistServers(); d.close(); route();
-    toast(n.me ? `Collegato a ${n.name}${n.me.admin ? ' come amministratore' : ''}.` : `Collegato a ${n.name}: solo ascolto, il server non ha Armony.`);
+    persistServers(); d.close();
+    if (location.hash.startsWith('#/invito')) location.hash = '#/home'; else route();
+    Live.connect?.();
+    toast(welcome ? `Benvenuto in Armony, ${n.user}!` : n.me ? `Collegato a ${n.name}${n.me.admin ? ' come amministratore' : ''}.` : `Collegato a ${n.name}: solo ascolto, il server non ha Armony.`);
   };
+  const create = async () => {
+    const url = absUrl($('#sUrl').value.trim().replace(/\/+$/, '')), u = $('#rUser').value.trim(), p1 = $('#rPass').value, code = $('#rCode').value.trim();
+    if (!/^[A-Za-z0-9._-]{3,32}$/.test(u)) return msg('Il nome utente va da 3 a 32 caratteri: lettere, cifre, punto, trattino e trattino basso.');
+    if (p1.length < 8) return msg('La password deve avere almeno 8 caratteri.');
+    if (p1 !== $('#rPass2').value) return msg('Le due password non coincidono.');
+    if (reg?.needsCode && !code) return msg('Serve il codice d\'invito: chiedilo a chi gestisce il server.');
+    msg('Creo l\'account…'); $('#sSave').disabled = true;
+    try {
+      const r = await fetch(url + '/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p1, code }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return msg(j.error || `Errore ${r.status}`);
+      // account creato: si entra come se l'avesse scritto nei campi di accesso
+      $('#sUser').value = u; $('#sPass').value = p1;
+      await save(true);
+    } catch { msg('Non riesco a raggiungere il server.'); }
+    finally { $('#sSave').disabled = false; }
+  };
+  $('#sSave').onclick = () => mode() === 'crea' ? create() : save(false);
   d.showModal();
+  checkReg();
 }
 function persistServers() { store.set('servers', S.servers); store.set('active', S.active); fillSelectors(); }
 function fillSelectors() {
@@ -2317,6 +2422,14 @@ view.addEventListener('click', async e => {
       case 'updcheck': await refreshUpdate(true); break;
       case 'updrun': if (confirm('Aggiornare il server? Armony si riavvia e per un minuto non risponde.')) { await dlApi('/api/update', { method: 'POST' }); toast('Aggiornamento richiesto.'); refreshUpdate(); } break;
       case 'delalbum': if (await deleteTracks(S.lastList.slice(), el.dataset.name)) location.hash = '#/libreria/album'; break;
+      case 'regcred': {
+        const u = $('#regU').value.trim(), p = $('#regP').value; if (!u || !p) { toast('Inserisci utente e password dell\'amministratore di Navidrome.'); break; }
+        try { await dlApi('/api/register/settings', { method: 'PUT', body: JSON.stringify({ user: u, password: p }) }); toast('Registrazione pronta: ora puoi creare inviti.'); } catch (e) { toast(e.message); }
+        refreshReg(); break;
+      }
+      case 'reginv': { const r = await dlApi('/api/register/invites', { method: 'POST' }); refreshReg(); inviteSheet(r.code); break; }
+      case 'regshow': inviteSheet(el.dataset.code); break;
+      case 'regrevoke': if (confirm(`Revocare l'invito ${fmtCode(el.dataset.code)}?`)) { await dlApi('/api/register/invites/' + encodeURIComponent(el.dataset.code), { method: 'DELETE' }); refreshReg(); } break;
       case 'usrrevoke': if (confirm(`Disconnettere ${el.dataset.user} da tutti i dispositivi? Dovrà rifare l'accesso.`)) { await dlApi(`/api/users/${encodeURIComponent(el.dataset.user)}/sessions`, { method: 'DELETE' }); refreshUsers(); } break;
       case 'exportset': {
         const withPw = confirm('Includere le credenziali nel file?\nOK = sì (conservalo al sicuro), Annulla = no');
