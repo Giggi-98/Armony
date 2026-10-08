@@ -126,6 +126,9 @@ label.check small{display:block;color:var(--muted)}
 .seg label>span{display:inline-flex;align-items:center;gap:6px}
 .seg svg{width:16px;height:16px;flex:none}
 .stack>.seg{justify-self:start;max-width:100%}
+/* collegamento della Jam: tre voci della stessa larghezza, su una riga anche a 360 px */
+.seg.jnet{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));justify-self:stretch}
+.seg.jnet label{justify-content:center;padding:0 6px;white-space:nowrap}
 .tabs{display:flex;gap:var(--s1);border-bottom:1px solid var(--line);margin-bottom:var(--s5);overflow-x:auto;scrollbar-width:none}
 .tabs a,.tabs button{padding:10px 14px;border:0;background:none;color:var(--muted);text-decoration:none;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer;white-space:nowrap;transition:color var(--t-tap) ease}
 .tabs .on{color:var(--ink);border-bottom-color:var(--accent)}
