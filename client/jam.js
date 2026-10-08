@@ -556,7 +556,8 @@ async function showCode(title, text, code, qrOnly, withReply) {
 async function vJam(sub = '') {
   const secureNote = SUBTLE ? `${ic('lock')} Cifratura end-to-end attiva` : `${ic('lock')} Cifratura WebRTC attiva. Apri Armony in HTTPS per lo strato end-to-end completo.`;
   if (sub.startsWith('entra/') && !Jam.role) {
-    const code = sub.slice(6); let info; try { info = await unpack(code); } catch { view.innerHTML = '<div class="empty">Link d\'invito non valido.</div>'; return; }
+    const code = sub.slice(6), n = Scene.nav; let info; try { info = await unpack(code); } catch { if (!stale(n)) view.innerHTML = '<div class="empty">Link d\'invito non valido.</div>'; return; }
+    if (stale(n)) return;
     view.innerHTML = `<h1>${esc(info.n)}</h1><p class="sub">${esc(info.h)} ti invita ad ascoltare insieme.</p>
       <div class="panel stack" style="max-width:520px">
         <label class="f">Il tuo nome<input type="text" id="jName" value="${esc(P.nick)}" maxlength="30" placeholder="Come ti chiami?"></label>
