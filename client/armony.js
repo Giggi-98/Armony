@@ -106,6 +106,8 @@ const I = {
   speed: '<path d="M12 13l4-4M4 18a9 9 0 1 1 16 0"/>',
   album: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  chevl: '<path d="M15 5l-7 7 7 7"/>',
+  chevr: '<path d="M9 5l7 7-7 7"/>',
   send: '<path d="M4 12l16-8-6 16-2-7z"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   wifi: '<path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/>',
@@ -265,11 +267,23 @@ async function route() {
 /* ================= componenti ================= */
 function albumGrid(albums, opts = {}) {
   if (!albums.length) return `<div class="empty">${opts.empty || 'Nessun album.'}</div>`;
-  return `<div class="albums ${opts.strip ? 'strip' : ''}">${albums.map(a => `
+  const grid = `<div class="albums ${opts.strip ? 'strip' : ''}">${albums.map(a => `
     <button class="alb" data-act="album" data-id="${esc(a.id)}">
       <div class="art">${imgTag(a.coverArt, 300, opts.sid)}</div>
       <b>${esc(a.name || a.title)}</b><small>${esc(a.artist || '')}${a.year ? ' (' + a.year + ')' : ''}</small>
     </button>`).join('')}</div>`;
+  if (!opts.strip) return grid;
+  return `<div class="strip-wrap"><button class="strip-nav prev" aria-label="Album precedenti" hidden>${ic('chevl')}</button>${grid}<button class="strip-nav next" aria-label="Altri album" hidden>${ic('chevr')}</button></div>`;
+}
+// frecce delle strisce di copertine: solo con il mouse (su telefono si scorre col dito, lo nasconde il CSS)
+function wireStrips(root = view) {
+  root.querySelectorAll('.strip-wrap').forEach(w => {
+    const st = w.querySelector('.strip'), [prev, next] = w.querySelectorAll('.strip-nav');
+    const sync = () => { prev.hidden = st.scrollLeft < 4; next.hidden = st.scrollLeft + st.clientWidth >= st.scrollWidth - 4; };
+    const go = dir => st.scrollBy({ left: dir * st.clientWidth * .9, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    prev.onclick = () => go(-1); next.onclick = () => go(1);
+    st.addEventListener('scroll', sync, { passive: true }); new ResizeObserver(sync).observe(st); sync();
+  });
 }
 function songList(tracks, opts = {}) {
   S.lastList = tracks;
@@ -338,6 +352,7 @@ async function vHome() {
     ${g.length ? `<h2>Generi</h2><div class="chips">${g.map(x => `<a class="chip" href="#/genere/${encodeURIComponent(x.value)}">${esc(x.value)} <small>${x.songCount}</small></a>`).join('')}</div>` : ''}
     <h2>Per decennio</h2><div class="chips">${[1960, 1970, 1980, 1990, 2000, 2010, 2020].map(d => `<a class="chip" href="#/decennio/${d}">Anni ${String(d).slice(2)}</a>`).join('')}</div>
     <h2>Da riscoprire</h2>${albumGrid(arr(rnd.albumList2.album))}`;
+  wireStrips();
   QSync.check().then(q => {
     if (!q || !$('#resume')) return;
     $('#resume').innerHTML = `<div class="banner"><span class="grow">Stavi ascoltando <b>${esc(q.current.title)}</b> su un altro dispositivo${q.by ? ` (${esc(q.by)})` : ''}.</span>
@@ -355,9 +370,9 @@ async function vLibrary(tab = 'artisti') {
   const tabs = `<h1>Libreria</h1><div class="tabs">${[['artisti', 'Artisti'], ['album', 'Album'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('')}</div>`;
   if (tab === 'artisti') {
     const idx = arr((await api('getArtists')).artists.index);
-    view.innerHTML = tabs + `<p class="sub">${idx.reduce((n, x) => n + arr(x.artist).length, 0)} artisti.</p>` +
+    view.innerHTML = tabs + `<div class="narrow"><p class="sub">${idx.reduce((n, x) => n + arr(x.artist).length, 0)} artisti.</p>` +
       idx.map(x => `<div class="letter">${esc(x.name)}</div>` + arr(x.artist).map(a =>
-        `<div class="list-item" data-act="artist" data-id="${esc(a.id)}"><span class="pic" style="border-radius:50%">${imgTag(a.coverArt, 100)}</span><span class="grow"><b>${esc(a.name)}</b></span><small>${a.albumCount || 0} album</small></div>`).join('')).join('');
+        `<div class="list-item" data-act="artist" data-id="${esc(a.id)}"><span class="pic" style="border-radius:50%">${imgTag(a.coverArt, 100)}</span><span class="grow"><b>${esc(a.name)}</b></span><small>${a.albumCount || 0} album</small></div>`).join('')).join('') + '</div>';
   } else if (tab === 'album') {
     let offset = 0, sort = sessionStorage.getItem('armony:asort') || 'alphabeticalByName';
     view.innerHTML = tabs + `<div class="row" style="margin-bottom:16px"><select id="aSort" style="width:auto">
@@ -377,7 +392,7 @@ async function vLibrary(tab = 'artisti') {
     view.innerHTML = tabs + (g.length ? `<div class="chips">${g.map(x => `<a class="chip" href="#/genere/${encodeURIComponent(x.value)}">${esc(x.value)} <small>${x.songCount} brani, ${x.albumCount} album</small></a>`).join('')}</div>` : '<div class="empty">Nessun genere nei metadati dei brani.</div>');
   } else {
     const r = await api('getRandomSongs', { size: 80 });
-    view.innerHTML = tabs + listActions(`<button class="btn" onclick="route()">${ic('shuffle')} Altri</button>`) + songList(arr(r.randomSongs.song).map(x => norm(x)));
+    view.innerHTML = tabs + `<div class="narrow">${listActions(`<button class="btn" onclick="route()">${ic('shuffle')} Altri</button>`) + songList(arr(r.randomSongs.song).map(x => norm(x)))}</div>`;
   }
 }
 async function vArtist(id) {
@@ -1091,16 +1106,33 @@ async function vStats() {
   const maxH = Math.max(1, ...hours);
   const days = new Set(all.map(x => new Date(x.ts).toDateString()));
   let streak = 0; for (let d = new Date(); days.has(d.toDateString()); d.setDate(d.getDate() - 1)) streak++;
-  const top = (list, label) => list.length ? `<ol class="rank">${list.slice(0, 10).map(e => `<li><span class="grow"><b>${label(e.x)}</b></span><small>${e.n} ascolti</small></li>`).join('')}</ol>` : '<p class="sub">Ancora nessun dato.</p>';
-  view.innerHTML = `<h1>Statistiche</h1><p class="sub">${syncable(srv()) ? `Calcolate sui tuoi ascolti da tutti i tuoi dispositivi collegati a ${esc(srv().name)}.` : 'Calcolate sui tuoi ascolti da questo dispositivo. Restano qui, non vengono inviate a nessuno.'}</p>
-    <div class="row" style="margin-bottom:18px"><div class="seg">${[['7', '7 giorni'], ['30', '30 giorni'], ['year', 'Quest\'anno'], ['all', 'Sempre']].map(([v, l]) => `<label><input type="radio" name="sp" value="${v}" ${v === period ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
-      <button class="btn" data-act="wrapped">${ic('image')} Crea immagine da condividere</button></div>
-    <div class="bigstat"><div><b>${Math.round(secs / 60).toLocaleString('it-IT')}</b><small>minuti di musica</small></div><div><b>${h.length.toLocaleString('it-IT')}</b><small>ascolti</small></div>
-      <div><b>${songs.length.toLocaleString('it-IT')}</b><small>brani diversi</small></div><div><b>${artists.length.toLocaleString('it-IT')}</b><small>artisti</small></div><div><b>${streak}</b><small>giorni di fila</small></div></div>
+  const top = (title, list, label) => list.length ? `<div><h2>${title}</h2><ol class="rank">${list.slice(0, 10).map(e => `<li><span class="grow"><b>${label(e.x)}</b></span><small>${e.n} ascolti</small></li>`).join('')}</ol></div>` : '';
+  const n = v => v.toLocaleString('it-IT');
+  const sub = syncable(srv()) ? `Calcolate sui tuoi ascolti da tutti i tuoi dispositivi collegati a ${esc(srv().name)}.` : 'Calcolate sui tuoi ascolti da questo dispositivo. Restano qui, non vengono inviate a nessuno.';
+  // nessun ascolto in assoluto: una pagina che invita ad ascoltare, non una fila di zeri
+  if (!all.length) {
+    view.innerHTML = `<h1>Statistiche</h1><p class="sub">${sub}</p>
+      <div class="stats-empty"><div class="vinyl" aria-hidden="true"></div><div>
+        <h3>Il primo ascolto apre le statistiche</h3>
+        <p>Ogni brano che ascolti finisce qui: quanti minuti, gli artisti che torni a cercare, le ore in cui suoni di più.</p>
+        <div class="row"><button class="btn primary" data-act="radio">${ic('shuffle')} Fai partire un mix casuale</button><a class="btn" href="#/libreria">Sfoglia la libreria</a></div>
+      </div></div>`;
+    return;
+  }
+  const label = { '7': 'negli ultimi 7 giorni', '30': 'negli ultimi 30 giorni', year: 'quest\'anno', all: 'da quando usi Armony' }[period];
+  view.innerHTML = `<h1>Statistiche</h1><p class="sub">${sub}</p>
+    <div class="row" style="margin-bottom:24px"><div class="seg">${[['7', '7 giorni'], ['30', '30 giorni'], ['year', 'Quest\'anno'], ['all', 'Sempre']].map(([v, l]) => `<label><input type="radio" name="sp" value="${v}" ${v === period ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      ${h.length ? `<button class="btn" data-act="wrapped">${ic('image')} Crea immagine da condividere</button>` : ''}</div>
+    ${!h.length ? `<div class="empty"><h3>Nessun ascolto ${label}</h3><p>Hai ${n(all.length)} ascolti in tutto.</p><button class="btn" data-act="spall">Guarda da sempre</button></div>` : `
+    <div class="statshero">
+      <div class="lead"><b>${n(Math.round(secs / 60))}</b><span>minuti di musica ${label}${artists[0] ? `, soprattutto con <em>${esc(artists[0].x.artist)}</em>` : ''}</span></div>
+      <dl class="minor"><div><dt>ascolti</dt><dd>${n(h.length)}</dd></div><div><dt>brani diversi</dt><dd>${n(songs.length)}</dd></div>
+        <div><dt>artisti</dt><dd>${n(artists.length)}</dd></div><div><dt>${streak === 1 ? 'giorno di fila' : 'giorni di fila'}</dt><dd>${streak}</dd></div></dl>
+    </div>
     <h2>Quando ascolti</h2><div class="panel"><div class="hours">${hours.map((v, i) => `<i style="height:${v / maxH * 100}%" title="${i}:00, ${v} ascolti"></i>`).join('')}</div>
       <div class="hours-l">${hours.map((_, i) => `<span>${i % 3 === 0 ? i : ''}</span>`).join('')}</div></div>
-    <div class="grid2"><div><h2>Artisti</h2>${top(artists, x => esc(x.artist))}</div><div><h2>Brani</h2>${top(songs, x => `${esc(x.title)}<small style="display:block">${esc(x.artist)}</small>`)}</div></div>
-    <div class="grid2"><div><h2>Album</h2>${top(albums, x => `${esc(x.album)}<small style="display:block">${esc(x.artist)}</small>`)}</div><div><h2>Generi</h2>${top(genres, x => esc(x.genre))}</div></div>
+    <div class="grid2">${top('Artisti', artists, x => esc(x.artist))}${top('Brani', songs, x => `${esc(x.title)}<small style="display:block">${esc(x.artist)}</small>`)}
+      ${top('Album', albums, x => `${esc(x.album)}<small style="display:block">${esc(x.artist)}</small>`)}${top('Generi', genres, x => esc(x.genre))}</div>`}
     <h2>I tuoi dati</h2><div class="row"><button class="btn" data-act="histexport">Esporta storico (CSV)</button><button class="btn danger" data-act="histclear">Cancella storico</button></div>`;
   view.querySelectorAll('[name=sp]').forEach(r => r.onchange = () => { sessionStorage.setItem('armony:sp', r.value); vStats(); });
   view._wrapped = { secs, h, artists, songs, period };
@@ -1506,20 +1538,25 @@ function songMenu(t, ctx = {}) {
 function vSettings() {
   const opt = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${String(k) === String(cur) ? 'selected' : ''}>${v}</option>`).join('');
   const qOpts = Object.fromEntries(Object.entries(QUALITIES).map(([k, q]) => [k, q.label]));
+  // gruppi richiudibili: lo stato aperto/chiuso resta su questo dispositivo
+  const closed = new Set(store.get('setClosed', SET_CLOSED));
+  const grp = (id, title, keys, body) => `<details class="sgroup" data-g="${id}" data-k="${esc(keys)}" ${closed.has(id) ? '' : 'open'}><summary><h2>${title}</h2>${ic('chevr')}</summary><div class="sbody">${body}</div></details>`;
   view.innerHTML = `<h1>Impostazioni</h1><p class="sub">Tutto resta su questo dispositivo, salvo ciò che sta sui server.</p>
-  <h2>Profilo</h2><div class="panel stack"><label class="f">Il tuo nome nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
-    <label class="check"><input type="checkbox" data-pb="sync" ${P.sync ? 'checked' : ''}><span>Stesse statistiche e impostazioni su tutti i dispositivi<small>Storico d'ascolto e preferenze vengono salvati sul server, legati al tuo utente. Chi gestisce il server può vederli. Volume e modalità compatibile restano di ogni dispositivo.</small></span></label></div>
+  <label class="setsearch">${ic('search')}<input type="search" id="setQ" placeholder="Cerca nelle impostazioni" aria-label="Cerca nelle impostazioni" autocomplete="off"></label>
+  <div id="setNone" class="empty" hidden></div>
+  ${grp('profilo', 'Profilo', 'nome nick sincronizzazione dispositivi', `<div class="panel stack"><label class="f">Il tuo nome nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
+    <label class="check"><input type="checkbox" data-pb="sync" ${P.sync ? 'checked' : ''}><span>Stesse statistiche e impostazioni su tutti i dispositivi<small>Storico d'ascolto e preferenze vengono salvati sul server, legati al tuo utente. Chi gestisce il server può vederli. Volume e modalità compatibile restano di ogni dispositivo.</small></span></label></div>`)}
 
-  <h2>Server musicali</h2><p class="sub">Qualsiasi server compatibile Subsonic: Navidrome, Gonic, Airsonic, Ampache.</p>
+  ${grp('server', 'Server musicali', 'navidrome subsonic account accesso password indirizzo rete lan', `<p class="sub">Qualsiasi server compatibile Subsonic: Navidrome, Gonic, Airsonic, Ampache.</p>
   <div>${S.servers.map(s => `<div class="list-item" style="cursor:default">
     <span class="grow"><b>${esc(s.name)} ${s.id === S.active ? '<span class="tag ok">in uso</span>' : ''}</b><small>${esc(s.url)}, utente ${esc(s.user)}${s.me ? (s.me.admin ? ', amministratore' : '') + ` · Armony ${esc(s.me.version || '')}` : s.armony === false ? ' · solo ascolto (server senza Armony)' : ''}</small></span>
     ${s.id !== S.active ? `<button class="btn sm" data-act="usesrv" data-id="${s.id}">Usa</button>` : ''}
     <button class="btn sm" data-act="editsrv" data-id="${s.id}">Modifica</button>
     <button class="icon-btn" data-act="delsrv" data-id="${s.id}" aria-label="Rimuovi">${ic('trash')}</button></div>`).join('') || '<p class="sub">Nessun server.</p>'}</div>
   <div class="row" style="margin-top:12px"><button class="btn primary" data-act="addsrv">${ic('plus')} Aggiungi server</button><button class="btn" data-act="lanscan">${ic('wifi')} Cerca sulla rete</button></div>
-  <div id="lanRes"></div>
+  <div id="lanRes"></div>`)}
 
-  <h2>Ascolto</h2><div class="panel stack">
+  ${grp('ascolto', 'Ascolto', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
     <div class="grid2">
       <label class="f">Qualità<select data-p="quality">${opt(qOpts, P.quality)}</select></label>
       <label class="f">Qualità con rete mobile<select data-p="qualityMobile">${opt({ same: 'Uguale', ...qOpts }, P.qualityMobile)}</select></label>
@@ -1531,14 +1568,14 @@ function vSettings() {
     <label class="check"><input type="checkbox" data-pb="visualizer" ${P.visualizer ? 'checked' : ''}><span>Visualizzatore nella schermata In riproduzione</span></label>
     <label class="check"><input type="checkbox" data-pb="compat" ${P.compat ? 'checked' : ''}><span>Modalità compatibile<small>Disattiva equalizzatore, dissolvenza e trasmissione nelle Jam. Attivala se su iPhone la musica si ferma a schermo bloccato. Richiede di ricaricare la pagina.</small></span></label>
     <div class="row"><button class="btn" data-act="eq">${ic('sliders')} Equalizzatore</button><button class="btn" data-act="speed">${ic('speed')} Velocità: ${P.speed}×</button></div>
-  </div>
+  </div>`)}
 
-  <h2>Testi e sincronizzazione</h2><div class="panel stack">
+  ${grp('testi', 'Testi e sincronizzazione', 'lyrics lrclib coda continua dispositivi', `<div class="panel stack">
     <label class="check"><input type="checkbox" data-pb="lyricsOnline" ${P.lyricsOnline ? 'checked' : ''}><span>Cerca i testi online se il server non li ha<small>Usa LRCLIB, un archivio libero di testi sincronizzati. Invia solo titolo, artista e durata del brano.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="syncQueue" ${P.syncQueue ? 'checked' : ''}><span>Continua su altri dispositivi<small>Salva la coda sul server: apri Armony sul PC e riprendi da dove eri al telefono.</small></span></label>
-  </div>
+  </div>`)}
 
-  <h2>Jam</h2><div class="panel stack">
+  ${grp('jam', 'Jam', 'stun turn 5g internet nat ascoltare insieme', `<div class="panel stack">
     <label class="check"><input type="checkbox" data-pb="stun" ${P.stun ? 'checked' : ''}><span>Permetti Jam via internet (5G)<small>Usa server STUN pubblici per scoprire l'indirizzo esterno. Non passa musica né chiavi da quei server.</small></span></label>
     <p class="small" style="color:var(--muted);margin:0">Server TURN (facoltativo). Serve quando operatori mobili o reti aziendali impediscono il collegamento diretto. Il traffico che vi passa resta cifrato.</p>
     <div class="grid2">
@@ -1546,18 +1583,21 @@ function vSettings() {
       <label class="f">Utente<input type="text" id="tUser" value="${esc(P.turn.user)}"></label>
       <label class="f">Password<input type="password" id="tPass" value="${esc(P.turn.pass)}"></label>
     </div>
-  </div>
+  </div>`)}
 
-  ${access().admin ? `${srv()?.session ? '<h2>Utenti</h2><p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div>' : ''}
-  <h2>Aggiornamenti</h2><div class="panel" id="updBox"><p class="sub">Controllo…</p></div>` : ''}
+  ${access().admin && srv()?.session ? grp('utenti', 'Utenti', 'permessi caricamento download disconnetti amministratore', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div>') : ''}
+  ${access().admin ? grp('aggiornamenti', 'Aggiornamenti', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>') : ''}
 
-  <h2>Aspetto</h2>
-  <div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+  ${grp('aspetto', 'Aspetto', 'tema chiaro scuro automatico colori', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`)}
 
-  <h2>Backup e trasferimento</h2>
-  <p class="sub">Sposta tutto su un altro telefono, o passa la configurazione a un amico in dieci secondi.</p>
-  <div class="row"><button class="btn" data-act="exportset">Esporta impostazioni</button><button class="btn" data-act="importset">Importa impostazioni</button><a class="btn" href="#/tasti">Scorciatoie da tastiera</a></div>
+  ${grp('backup', 'Backup e trasferimento', 'esporta importa file amico scorciatoie tastiera', `<p class="sub">Sposta tutto su un altro telefono, o passa la configurazione a un amico in dieci secondi.</p>
+  <div class="row"><button class="btn" data-act="exportset">Esporta impostazioni</button><button class="btn" data-act="importset">Importa impostazioni</button><a class="btn" href="#/tasti">Scorciatoie da tastiera</a></div>`)}
   <p class="small" style="color:var(--muted);margin-top:24px">Armony, dispositivo ${esc(S.device)}.</p>`;
+  view.querySelectorAll('.sgroup').forEach(d => d.ontoggle = () => {
+    if ($('#setQ').value) return;  // durante la ricerca i gruppi si aprono da soli: non è una scelta da ricordare
+    d.open ? closed.delete(d.dataset.g) : closed.add(d.dataset.g); store.set('setClosed', [...closed]);
+  });
+  $('#setQ').oninput = e => settingsFilter(e.target.value);
   $('#pNick').onchange = e => { P.nick = e.target.value.trim(); savePrefs(); };
   view.querySelectorAll('[data-p]').forEach(el => el.onchange = () => { P[el.dataset.p] = el.value; savePrefs(); fillSelectors(); });
   view.querySelectorAll('[data-pb]').forEach(el => el.onchange = () => {
@@ -1570,6 +1610,26 @@ function vSettings() {
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
   if (access().admin) { refreshUpdate(); refreshUsers(); }
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
+}
+// ricerca fra le impostazioni: mostra solo le voci che contengono il testo, e apre i gruppi che ne hanno
+const SET_CLOSED = ['testi', 'jam', 'utenti', 'aspetto', 'backup'];
+const fold = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+function settingsFilter(raw) {
+  const q = fold(raw.trim());
+  let shown = 0;
+  view.querySelectorAll('.sgroup').forEach(g => {
+    // se qualche voce contiene il testo si mostrano solo quelle; il gruppo intero solo se lo nomina il titolo
+    const items = [...g.querySelectorAll('.check, label.f, .list-item, .sbody > .row, .panel > .row, .seg')];
+    const match = items.filter(el => !q || fold(el.textContent).includes(q));
+    const whole = !q || (!match.length && fold(g.querySelector('summary').textContent + ' ' + g.dataset.k).includes(q));
+    let hits = 0;
+    items.forEach(el => { const ok = whole || match.includes(el); el.classList.toggle('nohit', !ok); hits += ok; });
+    g.querySelectorAll('.sbody > .sub, .panel > .small').forEach(el => el.classList.toggle('nohit', !whole));
+    g.hidden = !whole && !hits; if (!g.hidden) shown++;
+    if (q) g.open = !g.hidden; else g.open = !store.get('setClosed', SET_CLOSED).includes(g.dataset.g);
+  });
+  const none = $('#setNone'); none.hidden = !q || shown > 0;
+  if (q && !shown) none.innerHTML = `Nessuna impostazione contiene «${esc(raw.trim())}». Prova con una parola più corta, come «qualità» o «tema».`;
 }
 /* ================= aggiornamenti dell'app (dal server Armony, verso i tag GitHub) ================= */
 async function refreshUpdate(force) {
@@ -1707,6 +1767,7 @@ view.addEventListener('click', async e => {
       }
       case 'staralbum': await api(el.dataset.on === '1' ? 'unstar' : 'star', { albumId: id }); route(); break;
       case 'shareitem': shareItem(id, el.dataset.name); break;
+      case 'spall': sessionStorage.setItem('armony:sp', 'all'); vStats(); break;
       case 'radio': { const r = await api('getRandomSongs', { size: 80 }); setQueue(arr(r.randomSongs.song).map(x => norm(x)), 0); break; }
       case 'mixfav': { const r = (await api('getStarred2')).starred2; const so = arr(r.song).map(x => norm(x)); if (!so.length) return toast('Non hai ancora brani preferiti.'); setQueue(so, 0, true); break; }
       case 'mixforgot': {
