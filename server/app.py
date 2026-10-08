@@ -10,6 +10,7 @@ Armony - server di supporto.
   /api/login, /api/logout, /api/me   accesso con le credenziali Navidrome (token + sale
                         Subsonic); la sessione va nell'intestazione X-Token
   /api/users            permessi per utente (solo amministratori)
+  /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download")
   /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
@@ -59,11 +60,12 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/upload", "upload"),
          ("/api/download", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
-         ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"))
+         ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"),
+         ("/api/history", "user"), ("/api/prefs", "user"))
 SESSION_DAYS = 180
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,48}$")
 
@@ -380,6 +382,68 @@ def mcast_listener():
 def lan_servers():
     return jsonify({"self": dict(name=NAME, multicast=MULTICAST),
                     "peers": [dict(name=s["name"], url=s["url"]) for s in lan_peers.values() if time.time() - s["seen"] < 20]})
+
+
+# ------------------------------------------------------------------ storico e preferenze per utente
+HIST_FIELDS = ("id", "title", "artist", "artistId", "album", "albumId", "coverArt", "duration", "genre")
+
+
+def user_or_400():
+    # l'accesso di emergenza (ARMONY_TOKEN) non è un utente: non ha storico né preferenze
+    if not g.who["user"]:
+        abort(app.make_response((jsonify(error="Serve l'accesso di un utente, non il codice di emergenza"), 400)))
+    return g.who["user"]
+
+
+@app.post("/api/history")
+def history_add():
+    # idempotente: lo stesso ascolto (hid = dispositivo:istante) mandato due volte resta uno
+    u, items = user_or_400(), request.get_json(silent=True) or []
+    if not isinstance(items, list) or len(items) > 1000:
+        return jsonify(error="Al massimo 1000 ascolti per richiesta"), 400
+    rows = []
+    for x in items:
+        if not isinstance(x, dict) or not isinstance(x.get("hid"), str) or not isinstance(x.get("ts"), (int, float)):
+            continue
+        data = {k: x[k] for k in HIST_FIELDS if isinstance(x.get(k), (str, int, float))}
+        rows.append((u, x["hid"][:80], float(x["ts"]), json.dumps(data)[:4000]))
+    db.conn().executemany("INSERT OR IGNORE INTO history (user, hid, ts, data) VALUES (?, ?, ?, ?)", rows)
+    return jsonify(ok=True, received=len(rows))
+
+
+@app.get("/api/history")
+def history_list():
+    # a pagine per numero progressivo: il client chiede solo ciò che non ha ancora visto
+    u, since = user_or_400(), int(request.args.get("since", 0) or 0)
+    rows = db.all_("SELECT seq, hid, ts, data FROM history WHERE user = ? AND seq > ? ORDER BY seq LIMIT 2000", u, since)
+    items = [dict(json.loads(r["data"]), hid=r["hid"], ts=r["ts"]) for r in rows]
+    return jsonify(items=items, next=rows[-1]["seq"] if rows else since, more=len(rows) == 2000)
+
+
+@app.delete("/api/history")
+def history_clear():
+    db.run("DELETE FROM history WHERE user = ?", user_or_400())
+    return jsonify(ok=True)
+
+
+@app.get("/api/prefs")
+def prefs_get():
+    r = db.one("SELECT data, updated FROM prefs WHERE user = ?", user_or_400())
+    return jsonify(data=json.loads(r["data"]) if r else None, updated=r["updated"] if r else 0)
+
+
+@app.put("/api/prefs")
+def prefs_put():
+    # vince la modifica più recente: il client manda l'istante in cui ha cambiato le preferenze
+    u, d = user_or_400(), request.get_json(silent=True) or {}
+    if not isinstance(d.get("data"), dict) or not isinstance(d.get("updated"), (int, float)):
+        return jsonify(error="Preferenze non valide"), 400
+    data = json.dumps(d["data"])
+    if len(data) > 20000:
+        return jsonify(error="Preferenze troppo grandi"), 400
+    db.run("INSERT INTO prefs VALUES (?, ?, ?) ON CONFLICT(user) DO UPDATE SET data = excluded.data, "
+           "updated = excluded.updated WHERE excluded.updated > prefs.updated", u, data, float(d["updated"]))
+    return prefs_get()
 
 
 # ------------------------------------------------------------------ download

@@ -127,10 +127,12 @@ const QUALITIES = {
 const DEFAULT_PREFS = {
   quality: '192', qualityMobile: 'same', offlineQ: '192', crossfade: 0, rg: 'track', rgPre: 0, night: false, speed: 1,
   eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqOn: true, compat: false, lyricsOnline: true, syncQueue: true,
-  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true
+  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true
 };
 const P = Object.assign({}, DEFAULT_PREFS, store.get('prefs', {}));
-const savePrefs = () => store.set('prefs', P);
+// restano su questo dispositivo anche con la sincronizzazione attiva
+const DEVICE_PREFS = ['compat', 'volume', 'sync'];
+const savePrefs = () => { store.set('prefs', P); store.set('prefsAt', Date.now()); PrefSync.schedule(); };
 const S = {
   servers: store.get('servers', []),
   active: store.get('active', null),
@@ -526,7 +528,8 @@ const DB = {
   del: (st, k) => DB.run(st, 'readwrite', s => s.delete(k)),
   all: st => DB.run(st, 'readonly', s => s.getAll()),
   keys: st => DB.run(st, 'readonly', s => s.getAllKeys()),
-  clear: st => DB.run(st, 'readwrite', s => s.clear())
+  clear: st => DB.run(st, 'readwrite', s => s.clear()),
+  putMany: (st, list) => DB.run(st, 'readwrite', s => { list.forEach(v => s.put(v)); })
 };
 
 /* ================= offline ================= */
@@ -561,8 +564,69 @@ const Offline = {
 
 /* ================= storico e statistiche ================= */
 const Stats = {
-  async add(t) { try { await DB.put('history', { ts: Date.now(), key: key(t), id: t.id, serverId: t.serverId, title: t.title, artist: t.artist, artistId: t.artistId, album: t.album, albumId: t.albumId, coverArt: t.coverArt, duration: t.duration || 0, genre: t.genre || '' }); } catch {} },
+  async add(t) {
+    const ts = Date.now();
+    try { await DB.put('history', { ts, hid: `${S.device}:${ts}`, synced: false, key: key(t), id: t.id, serverId: t.serverId, title: t.title, artist: t.artist, artistId: t.artistId, album: t.album, albumId: t.albumId, coverArt: t.coverArt, duration: t.duration || 0, genre: t.genre || '' }); } catch {}
+    HistSync.schedule();
+  },
   all() { return DB.all('history').catch(() => []); }
+};
+
+/* ================= storico e preferenze condivisi fra i dispositivi (sul server, per utente) ================= */
+const syncable = s => P.sync && s?.session && s.me?.caps?.includes('history');
+async function srvApi(s, path, opts = {}) {
+  const r = await fetch(absUrl(s.url) + path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Token': s.session, ...(opts.headers || {}) } });
+  if (!r.ok) throw new Error(`Errore ${r.status}`);
+  return r.json();
+}
+const HistSync = {
+  busy: false, t: null,
+  schedule(ms = 30000) { clearTimeout(this.t); this.t = setTimeout(() => this.run(), ms); },
+  async run() {
+    if (this.busy || !P.sync) return; this.busy = true;
+    try {
+      const all = await DB.all('history');
+      // invio: gli ascolti fatti qui (anche quelli di prima della sincronizzazione) al server del brano
+      const out = new Map();
+      for (const x of all) if (!x.synced && syncable(srv(x.serverId))) { x.hid ||= `${S.device}:${x.ts}`; (out.get(x.serverId) || out.set(x.serverId, []).get(x.serverId)).push(x); }
+      for (const [sid, list] of out) for (let i = 0; i < list.length; i += 500) {
+        const part = list.slice(i, i + 500);
+        await srvApi(srv(sid), '/api/history', { method: 'POST', body: JSON.stringify(part.map(({ n, key, serverId, synced, ...x }) => x)) });
+        await DB.putMany('history', part.map(x => ({ ...x, synced: true })));
+      }
+      // ricezione: gli ascolti degli altri dispositivi, solo quelli nuovi dall'ultima volta
+      const known = new Set(all.map(x => x.hid).filter(Boolean));
+      for (const s of S.servers) {
+        if (!syncable(s)) continue;
+        for (let more = true; more;) {
+          const r = await srvApi(s, `/api/history?since=${store.get('histSeq:' + s.id, 0)}`);
+          const fresh = r.items.filter(x => !known.has(x.hid)).map(x => ({ ...x, key: s.id + ':' + x.id, serverId: s.id, synced: true }));
+          if (fresh.length) await DB.putMany('history', fresh);
+          fresh.forEach(x => known.add(x.hid)); store.set('histSeq:' + s.id, r.next); more = r.more;
+        }
+      }
+    } catch {} finally { this.busy = false; }
+  }
+};
+const PrefSync = {
+  t: null, last: null,
+  shared() { const o = { ...P }; DEVICE_PREFS.forEach(k => delete o[k]); return o; },
+  schedule() { clearTimeout(this.t); this.t = setTimeout(() => this.push(), 3000); },
+  async push() {
+    const s = srv(); if (!syncable(s) || !s.me.caps.includes('prefs')) return;
+    const data = this.shared(), j = JSON.stringify(data); if (j === this.last) return;  // es. solo il volume è cambiato
+    try { await srvApi(s, '/api/prefs', { method: 'PUT', body: JSON.stringify({ data, updated: store.get('prefsAt', Date.now()) }) }); this.last = j; } catch {}
+  },
+  async pull() {
+    const s = srv(); if (!syncable(s) || !s.me.caps.includes('prefs')) return;
+    let r; try { r = await srvApi(s, '/api/prefs'); } catch { return; }
+    if (r.data && r.updated > store.get('prefsAt', 0)) {
+      for (const [k, v] of Object.entries(r.data)) if (!DEVICE_PREFS.includes(k) && k in DEFAULT_PREFS) P[k] = v;
+      store.set('prefs', P); store.set('prefsAt', r.updated); this.last = JSON.stringify(this.shared());
+      if (P.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = P.theme;
+      Engine.applyEq(); Engine.applyNight(); Engine.decks.forEach(a => a.playbackRate = P.speed); fillSelectors();
+    } else if (store.get('prefsAt', 0) > r.updated) this.push();
+  }
 };
 
 /* ================= testi ================= */
@@ -1028,7 +1092,7 @@ async function vStats() {
   const days = new Set(all.map(x => new Date(x.ts).toDateString()));
   let streak = 0; for (let d = new Date(); days.has(d.toDateString()); d.setDate(d.getDate() - 1)) streak++;
   const top = (list, label) => list.length ? `<ol class="rank">${list.slice(0, 10).map(e => `<li><span class="grow"><b>${label(e.x)}</b></span><small>${e.n} ascolti</small></li>`).join('')}</ol>` : '<p class="sub">Ancora nessun dato.</p>';
-  view.innerHTML = `<h1>Statistiche</h1><p class="sub">Calcolate sui tuoi ascolti da questo dispositivo. Restano qui, non vengono inviate a nessuno.</p>
+  view.innerHTML = `<h1>Statistiche</h1><p class="sub">${syncable(srv()) ? `Calcolate sui tuoi ascolti da tutti i tuoi dispositivi collegati a ${esc(srv().name)}.` : 'Calcolate sui tuoi ascolti da questo dispositivo. Restano qui, non vengono inviate a nessuno.'}</p>
     <div class="row" style="margin-bottom:18px"><div class="seg">${[['7', '7 giorni'], ['30', '30 giorni'], ['year', 'Quest\'anno'], ['all', 'Sempre']].map(([v, l]) => `<label><input type="radio" name="sp" value="${v}" ${v === period ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
       <button class="btn" data-act="wrapped">${ic('image')} Crea immagine da condividere</button></div>
     <div class="bigstat"><div><b>${Math.round(secs / 60).toLocaleString('it-IT')}</b><small>minuti di musica</small></div><div><b>${h.length.toLocaleString('it-IT')}</b><small>ascolti</small></div>
@@ -1443,7 +1507,8 @@ function vSettings() {
   const opt = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${String(k) === String(cur) ? 'selected' : ''}>${v}</option>`).join('');
   const qOpts = Object.fromEntries(Object.entries(QUALITIES).map(([k, q]) => [k, q.label]));
   view.innerHTML = `<h1>Impostazioni</h1><p class="sub">Tutto resta su questo dispositivo, salvo ciò che sta sui server.</p>
-  <h2>Profilo</h2><div class="panel"><label class="f">Il tuo nome nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label></div>
+  <h2>Profilo</h2><div class="panel stack"><label class="f">Il tuo nome nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
+    <label class="check"><input type="checkbox" data-pb="sync" ${P.sync ? 'checked' : ''}><span>Stesse statistiche e impostazioni su tutti i dispositivi<small>Storico d'ascolto e preferenze vengono salvati sul server, legati al tuo utente. Chi gestisce il server può vederli. Volume e modalità compatibile restano di ogni dispositivo.</small></span></label></div>
 
   <h2>Server musicali</h2><p class="sub">Qualsiasi server compatibile Subsonic: Navidrome, Gonic, Airsonic, Ampache.</p>
   <div>${S.servers.map(s => `<div class="list-item" style="cursor:default">
@@ -1499,6 +1564,7 @@ function vSettings() {
     P[el.dataset.pb] = el.checked; savePrefs();
     if (el.dataset.pb === 'night') Engine.applyNight();
     if (el.dataset.pb === 'compat') toast('Ricarica la pagina per applicare.');
+    if (el.dataset.pb === 'sync' && P.sync) { PrefSync.pull(); HistSync.run(); }
   });
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
@@ -1699,7 +1765,13 @@ view.addEventListener('click', async e => {
       case 'delvideo': if (confirm('Eliminare questo video dal server?')) { await dlApi('/api/videos/' + el.dataset.path.split('/').map(encodeURIComponent).join('/'), { method: 'DELETE' }); refreshVideos(); } break;
       case 'offclear': if (confirm('Eliminare tutti i brani salvati per l\'offline?')) { await DB.clear('offline'); Offline.keys.clear(); route(); } break;
       case 'histexport': { const h = await Stats.all(); saveFile('armony-storico.csv', 'Data,Titolo,Artista,Album,Durata (s)\n' + h.map(x => [new Date(x.ts).toISOString(), x.title, x.artist, x.album, x.duration].map(csvCell).join(',')).join('\n'), 'text/csv'); break; }
-      case 'histclear': if (confirm('Cancellare tutto lo storico di ascolto da questo dispositivo?')) { await DB.clear('history'); route(); } break;
+      case 'histclear': {
+        if (!confirm('Cancellare tutto lo storico di ascolto da questo dispositivo?')) break;
+        await DB.clear('history');
+        const remote = S.servers.filter(syncable);
+        if (remote.length && confirm('Cancellarlo anche dal server, cioè da tutti i tuoi dispositivi?')) for (const s of remote) { await srvApi(s, '/api/history', { method: 'DELETE' }).catch(() => {}); store.set('histSeq:' + s.id, 0); }
+        route(); break;
+      }
       case 'wrapped': makeWrapped(); break;
       case 'nowmore': songMenu(currentTrack()); break;
       case 'sleep': sleepDialog(); break;
@@ -1817,5 +1889,6 @@ async function boot() {
   Jam.init();
   route();
   setTimeout(resolvePending, 8000);
-  syncSessions().then(() => { notifyUpdate(); if (/^#\/(impostazioni|scarica)/.test(location.hash)) route(); });
+  addEventListener('online', () => HistSync.run());
+  syncSessions().then(async () => { notifyUpdate(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche)/.test(location.hash)) route(); });
 }

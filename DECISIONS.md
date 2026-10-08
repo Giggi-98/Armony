@@ -27,6 +27,30 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Storico e preferenze: copia locale completa, server come punto d'incontro
+
+**Contesto:** passo B di `docs/EVOLUZIONE.md`: con web, PC e Android le
+statistiche e le preferenze si dividevano per dispositivo.
+**Scelta:** ogni dispositivo tiene lo storico completo in IndexedDB, come
+prima, e lo sincronizza con il server: invia gli ascolti con un identificativo
+`dispositivo:istante` (idempotente), riceve quelli nuovi a pagine per numero
+progressivo. Le statistiche si calcolano ancora sul dispositivo. Le preferenze
+sono un documento per utente: vince la modifica più recente; volume, modalità
+compatibile e l'interruttore stesso restano locali.
+**Alternative scartate:**
+- Leggere lo storico di Navidrome (`scrobbles`): tabella interna, senza
+  durata, generi o copertina, e senza gli ascolti fatti offline.
+- Statistiche calcolate sul server: il client offline non le avrebbe, e la
+  vista andrebbe riscritta.
+- Unire le preferenze campo per campo: complessità senza un caso reale; due
+  dispositivi che cambiano impostazioni diverse nello stesso minuto sono rari.
+**Conseguenze:** lo storico è sul server in chiaro, leggibile da chi gestisce
+il server (lo dice l'interruttore). Ogni dispositivo scarica tutto lo storico
+la prima volta. Ogni ascolto va al server del brano: con più server, ogni
+server ha la sua parte.
+**Da rivedere se:** lo storico diventa così grande da pesare sui telefoni,
+oppure serve unire le preferenze campo per campo.
+
 ## 2026-10-08 — Accesso per utente: sessioni Armony sopra le credenziali Navidrome
 
 **Contesto:** passo A di `docs/EVOLUZIONE.md`. Un codice condiviso dava a chi

@@ -139,12 +139,113 @@ così com'è.
 - Play Store solo in un secondo momento: richiede account, revisione e una
   politica sui contenuti scaricati da YouTube che oggi l'app non passerebbe.
 
+## 3b. Grafica e movimento
+
+Analisi fatta il 2026-10-08 su schermate reali (libreria di 551 brani, desktop
+scuro e telefono chiaro, con un brano in riproduzione).
+
+### Cosa tenere
+
+Armony ha già un'identità che non sembra un modello: **il disco in vinile**
+(logo, lettore, schermata "In riproduzione" con il visualizzatore circolare),
+blu notte e ambra, titoli in Bricolage Grotesque 800, testo in Figtree. Il
+lavoro grafico parte da qui, non la sostituisce.
+
+| Token | Chiaro | Scuro | Ruolo |
+|---|---|---|---|
+| `--bg` | `#eef0f6` | `#1b1e36` | fondo, "la stanza" |
+| `--surface` | `#ffffff` | `#252946` | pannelli |
+| `--ink` | `#1d2140` | `#ece8dd` | testo |
+| `--accent` | `#c9750f` | `#f2a541` | ambra: azione primaria, cose che suonano |
+| `--sage` | `#2f7a64` | `#7fb7a4` | conferme, "salvato", "aggiornato" |
+
+### L'unica cosa memorabile: la luce del disco
+
+Oggi la schermata "In riproduzione" è blu notte con qualunque copertina. Il
+gesto distintivo proposto è uno solo: **la copertina accende la stanza**.
+
+- Dai pixel della copertina si estraggono due colori (dominante e secondario),
+  nel client, con un canvas da 32×32. Niente librerie, niente server.
+- In "In riproduzione" lo sfondo diventa una luce morbida di quei colori dietro
+  al disco, come una lampada colorata in una stanza buia. Il blu notte resta il
+  fondo, e il colore è luce sopra di esso, non una tinta piena.
+- Nel lettore in basso resta solo una traccia di quel colore, sulla barra di
+  avanzamento.
+- Al cambio di brano la luce **sfuma** al colore nuovo in circa 1,2 s, la
+  durata di un cambio di disco.
+- Contrasto garantito: se il colore estratto non regge il testo (WCAG AA),
+  si scurisce o si schiarisce finché lo regge. L'ambra resta il colore delle
+  azioni, che non si confondono con la luce.
+
+Tutto il resto dell'interfaccia resta quieto: è lì che si spende il coraggio,
+e solo lì.
+
+### Movimento: risponde a un gesto, non decora
+
+Un sistema piccolo, in variabili CSS:
+
+| Token | Valore | Uso |
+|---|---|---|
+| `--t-tap` | 120 ms, `ease-out` | stato premuto, interruttori |
+| `--t-move` | 240 ms, `cubic-bezier(.2,.8,.2,1)` | pannelli, fogli, elementi che si spostano |
+| `--t-scene` | 420 ms, stessa curva | cambio di pagina, apertura di "In riproduzione" |
+
+Dove serve davvero:
+
+1. **Dal lettore a "In riproduzione"**: la copertina piccola del lettore si
+   espande nel disco grande, con la *View Transitions API* (Chrome, Edge,
+   WebView di Android, Safari 18). È il momento orchestrato dell'app; dove
+   l'API non c'è, si cambia pagina come oggi.
+2. **Il disco come un giradischi**: al play accelera fino a 33 giri in circa
+   0,6 s, alla pausa rallenta e si ferma; oggi parte e si ferma di colpo.
+3. **Cambio di pagina**: dissolvenza breve del contenuto (`--t-scene`); barra
+   laterale e lettore fermi, perché sono l'arredamento della stanza.
+4. **Conferme**: il cuore del preferito fa un piccolo battito; "Aggiunto alla
+   coda" vola verso l'icona della coda; il pulsante play/pausa trasforma la
+   forma invece di scambiare icona.
+5. **Caricamento**: sagome della pagina che arriva (copertine, righe) al posto
+   della scritta "Caricamento…".
+
+Cosa **non** fare: animare l'ingresso di ogni sezione, effetti al passaggio
+del mouse su ogni scheda, parallasse. Solo `transform` e `opacity`, per
+restare fluidi sui telefoni economici. Con `prefers-reduced-motion` restano
+solo le dissolvenze; il CSS lo rispetta già in parte, va esteso a tutto.
+
+### Sezione per sezione
+
+| Sezione | Cosa si vede oggi | Proposta |
+|---|---|---|
+| **Telefono, navigazione** | 12 icone in alto da scorrere, senza indizio che continuino | Barra in basso con 4 voci (Home, Cerca, Libreria, Jam) più "Altro", attaccata al lettore. È lo schema che il pollice si aspetta, ed è quello che servirà all'app Android |
+| **In riproduzione** | Fondo fisso; senza testo metà schermo vuota dentro un riquadro tratteggiato | La luce del disco; su schermi larghi, senza testo, il disco si centra e "Prossimi" prende il posto del testo |
+| **Home** | Strisce di copertine tagliate a destra senza frecce su desktop; generi presi dalle categorie di YouTube | Frecce sulle strisce su desktop; generi ripuliti (vedi sotto) |
+| **Album, artista** | Intestazione piatta | Intestazione con la luce della copertina (stesso codice della luce del disco) |
+| **Libreria** | Righe molto alte e distanti su schermi larghi | Larghezza massima del contenuto; vista a griglia di copertine per gli album |
+| **Jam** | Il selettore "Stessa rete / Internet" ha icone enormi e una forma rotta | **Difetto da correggere subito**; poi la Jam aperta con le facce dei partecipanti attorno al disco |
+| **Statistiche** | Senza dati: cinque zeri, un grafico piatto e quattro "Ancora nessun dato" | Uno stato vuoto che invita ad ascoltare; con i dati, i numeri grandi in Bricolage come elemento grafico |
+| **Barra laterale** | "Server" e "Qualità" sono due menu a tendina pesanti in fondo | Una riga compatta "Casa · 192k" che apre un foglio |
+| **Impostazioni** | Un'unica pagina lunga | Gruppi richiudibili; ricerca fra le impostazioni |
+
+**Problema di dati, non di grafica**: i generi "People & Blogs", "Gaming",
+"Entertainment" sono le categorie dei video di YouTube, scritte nei file da
+yt-dlp durante il download. Vanno lasciate fuori dai metadati dei download
+(e i file già scaricati si possono ripulire con uno script).
+
+### Soglia di qualità, senza annunciarla
+
+- Contrasto AA in entrambi i temi, compresa la luce del disco.
+- Focus da tastiera visibile ovunque (c'è già `:focus-visible`).
+- Area di tocco di almeno 44×44 px sul telefono.
+- Collaudo come chiede `.claude/CLAUDE.md` §6: schermate degli stati (a
+  riposo, con dati, vuoto, errore) nei due temi, a larghezza telefono e
+  desktop; correzioni in un lotto solo, poi uno sguardo finale.
+
 ## 4. Ordine proposto
 
 | Passo | Contenuto | Sblocca |
 |---|---|---|
 | **A** | Fondamenta: accesso unico con ruoli (§2.1), token + sale (§2.2), indirizzo del server esplicito (§2.3), livello di API (§2.4), SQLite e coda download persistente (§2.5) | App native e federazione |
 | **B** | Statistiche e preferenze sul server, per utente | Esperienza uguale su tutti i dispositivi |
+| **G** | Grafica e movimento (§3b): prima il difetto della Jam e i generi di YouTube, poi la luce del disco, la barra in basso su telefono, il movimento | L'app Android nasce già curata |
 | **C** | App Android (Capacitor) con riproduzione in sottofondo e offline su file; APK nelle release GitHub | Android |
 | **D** | Federazione fase 1 (`docs/FEDERAZIONE.md`) | Librerie collegate |
 | **E** | Federazione fase 2, app PC (Electron) se la PWA non basta | — |
@@ -161,6 +262,10 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.3 indirizzo del server esplicito | Fatto: `NATIVE` nel client, inviti Jam e scoperta LAN non usano `location.origin` nell'app |
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
+
+**Passo B fatto (2026-10-08)**: storico d'ascolto e preferenze per utente sul
+server (`/api/history`, `/api/prefs`), sincronizzati in entrambe le direzioni;
+interruttore in Impostazioni → Profilo.
 
 ## 5. Decisioni prese (2026-10-08)
 

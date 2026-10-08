@@ -21,6 +21,12 @@ MIGRATIONS = [
                         download INTEGER NOT NULL DEFAULT 1);
     CREATE TABLE jobs (id TEXT PRIMARY KEY, data TEXT NOT NULL, created REAL NOT NULL);
     """,
+    # 2: storico d'ascolto e preferenze per utente, uguali su tutti i dispositivi
+    """
+    CREATE TABLE history (seq INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, hid TEXT NOT NULL,
+                          ts REAL NOT NULL, data TEXT NOT NULL, UNIQUE (user, hid));
+    CREATE TABLE prefs (user TEXT PRIMARY KEY, data TEXT NOT NULL, updated REAL NOT NULL);
+    """,
 ]
 
 _local = threading.local()

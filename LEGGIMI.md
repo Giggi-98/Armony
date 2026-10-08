@@ -112,7 +112,7 @@ Salva album, playlist o singoli brani sul telefono, nella qualità che preferisc
 - **Link di condivisione** di 30 giorni per album, playlist o brani, ascoltabili anche da chi non ha un account.
 
 ### Statistiche
-Minuti di ascolto, artisti, brani, album e generi preferiti, giorni consecutivi di ascolto e orari in cui ascolti, per 7 giorni, 30 giorni, anno o da sempre. Con un tasto crei un'**immagine riepilogativa** da condividere. Lo storico resta sul dispositivo e si può esportare o cancellare.
+Minuti di ascolto, artisti, brani, album e generi preferiti, giorni consecutivi di ascolto e orari in cui ascolti, per 7 giorni, 30 giorni, anno o da sempre. Con un tasto crei un'**immagine riepilogativa** da condividere. Lo storico e le preferenze (qualità, equalizzatore, dissolvenza, tema…) sono gli stessi su tutti i tuoi dispositivi: vengono salvati sul server, legati al tuo utente. Volume e modalità compatibile restano di ogni dispositivo. Si può disattivare in Impostazioni → Profilo; lo storico si può esportare o cancellare, anche dal server.
 
 ### Comodità
 Si installa come app ("Aggiungi a schermata Home"). Controlli dalla schermata di blocco e dalle cuffie, tema chiaro o scuro, scorciatoie da tastiera (premi `?`). Il backup delle impostazioni configura il telefono di un amico in dieci secondi.
