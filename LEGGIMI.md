@@ -74,7 +74,9 @@ In alternativa: un dominio con Caddy davanti alla porta 8080 (HTTPS automatico),
 ### Jam: ascoltare insieme
 Ognuno sul suo telefono sente lo stesso brano nello stesso istante. Si propongono brani, si vota l'ordine della coda, si chatta e si mandano reazioni che volano sullo schermo di tutti.
 
-**Due reti:**
+**Tramite il server** (predefinito): niente collegamento diretto fra i telefoni, i messaggi passano dal server Armony cifrati e il server fa da orologio comune. Ognuno ascolta dal server alla sua qualità, allineato all'host entro poche decine di millisecondi, da casa o in 5G. Serve un account sullo stesso server, e Armony in HTTPS oppure l'app. Se in "Stessa rete" o "Internet" il collegamento diretto non si apre entro 10 secondi, chi ha un account passa da solo al server.
+
+**Due reti dirette:**
 - **Stessa rete.** Il collegamento usa solo indirizzi locali e la musica non esce mai dal Wi-Fi. Le Jam aperte compaiono da sole a chi è sulla stessa rete. Il server Armony le annuncia con **multicast UDP** (gruppo 239.255.77.77), che permette anche a più server Armony in casa di trovarsi a vicenda. I browser non possono usare il multicast direttamente, quindi è il server a farlo per loro.
 - **Internet / 5G.** Il collegamento attraversa le reti mobili con STUN. Se un operatore lo blocca (capita con alcuni NAT mobili), attiva il TURN incluso: `docker compose --profile turn up -d`, poi inserisci indirizzo e credenziali nelle impostazioni della Jam.
 
@@ -130,6 +132,9 @@ Sul telefono le sezioni principali sono in basso, sotto il lettore; le altre son
 Se nel sistema è attivo «Riduci movimento», Armony lo rispetta: niente dischi che girano né elementi in volo, solo dissolvenze.
 
 "In riproduzione", album e artisti prendono la luce dei colori della copertina; se un brano non ha testo, al suo posto compaiono i prossimi brani.
+
+## Far entrare un amico
+In Impostazioni → Utenti → Registrazione inserisci una volta utente e password dell'amministratore di Navidrome (restano sul server, mai sul telefono). Con "Con invito" crei un codice e lo mandi (link o QR): l'amico apre il link, o nell'app scrive indirizzo del server e codice, sceglie nome e password ed entra subito, come utente normale. "Aperta" fa registrare chiunque raggiunga il server; "Chiusa" la spegne. Chi ha già un account sceglie "Accedi". L'amministratore resta uno solo.
 
 ## App Android
 Armony per Android è la stessa app che apri nel browser, con in più ciò che il browser non dà: la musica continua a schermo spento, i comandi stanno nella notifica e nella schermata di blocco, i tasti delle cuffie funzionano, e il tasto indietro non la chiude mentre suona.

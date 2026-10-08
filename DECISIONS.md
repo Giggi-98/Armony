@@ -27,6 +27,50 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Registrazione degli amici: utenti Navidrome creati con le credenziali dell'admin, su invito
+
+**Contesto:** un amico che installa l'app deve potersi creare un account o
+accedere con uno esistente; un solo amministratore per server.
+**Scelta:** l'admin inserisce una volta utente e password dell'amministratore
+di Navidrome (verificati, file 600 in /data, mai restituiti; o
+NAVIDROME_ADMIN_USER/PASS). `POST /api/register` crea utenti normali con l'API
+nativa (JWT rinnovato se scade). Modalità chiusa/invito/aperta, predefinita
+invito; inviti monouso di 8 caratteri senza ambigui, 7 giorni, prenotati prima
+della creazione e liberati se fallisce. Limiti: 10 errori in 10 minuti e 20
+account all'ora per IP.
+**Alternative scartate:** account propri di Armony (due anagrafiche da
+allineare, Subsonic non li vede); credenziali dell'admin chieste a ogni invito
+(scomodo); registrazione sempre aperta (chiunque raggiunga il server entra);
+far creare gli utenti all'admin solo dalla UI di Navidrome (l'amico deve
+aspettare e ricevere una password).
+**Conseguenze:** la password dell'amministratore di Navidrome sta in chiaro sul
+server (file 600); se viene cambiata la registrazione si ferma finché non la si
+reinserisce. In modalità aperta valgono solo i limiti per IP, niente captcha.
+**Da rivedere se:** Navidrome offre token di servizio o un'API per gli inviti.
+
+## 2026-10-08 — Jam tramite il server: relay cifrato e orologio comune
+
+**Contesto:** la Jam deve funzionare anche quando il collegamento diretto non
+si apre (5G, NAT), usando il server come sincronizzatore.
+**Scelta:** terzo collegamento «Server»: niente WebRTC; i messaggi passano dal
+relay `/api/jam` dentro la segnalazione (AES-GCM con la chiave della stanza) e
+in un secondo strato AES-GCM con chiave ECDH per coppia host↔ospite; codice di
+sicurezza dallo SHA-256 delle due chiavi pubbliche. Orologio comune
+`/api/jam/ora` con stima stile NTP (campione con RTT minimo); lo stato
+dell'host porta l'ora del server (`sat`). Solo ascolto sincronizzato (serve un
+account sul server). Predefinito quando c'è un server; ripiego automatico dal
+diretto dopo 10 s. Senza HTTPS il modo non c'è.
+**Alternative scartate:** TURN obbligatorio (un servizio in più da gestire, e
+la trasmissione resterebbe pesante); ping verso l'host attraverso il relay per
+l'orologio (latenza del long-poll, asimmetrica); trasmissione dell'audio
+dell'host tramite il server (banda e latenza); modo server anche senza HTTPS
+(messaggi in chiaro sul server).
+**Conseguenze:** ogni partecipante tiene un `/recv` aperto (un thread di
+waitress: 8 su 96 per una Jam di 8); l'allineamento dipende dalla simmetria
+della rete (misurato entro ±41 ms, ~170 ms con ritardo molto asimmetrico).
+**Da rivedere se:** le Jam diventano grandi (decine di persone): allora un
+canale SSE unico per stanza invece del long-poll.
+
 ## 2026-10-08 — Album completi: scaletta da Deezer, tracce mancanti in grigio
 
 **Contesto:** aprendo un album si vogliono vedere e scaricare anche le tracce
