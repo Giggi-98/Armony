@@ -51,8 +51,8 @@ function saveFile(name, data, type = 'text/plain') {
   a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type })); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
-function pickFile(accept) {
-  return new Promise(res => { const f = $('#filePick'); f.accept = accept; f.value = ''; f.onchange = () => res(f.files[0] || null); f.click(); });
+function pickFile(accept, multiple = false) {
+  return new Promise(res => { const f = $('#filePick'); f.accept = accept; f.multiple = multiple; f.value = ''; f.onchange = () => res(multiple ? [...f.files] : f.files[0] || null); f.click(); });
 }
 async function copyText(t) { try { await navigator.clipboard.writeText(t); return true; } catch { prompt('Copia questo testo:', t); return false; } }
 const safeName = n => String(n).replace(/[\\/:*?"<>|]/g, '_');
@@ -1036,6 +1036,12 @@ function ctlSeek(sec) {
   try { Engine.el.currentTime = Math.max(0, sec); } catch {}
   emit('seek');
 }
+function ctlShuffle() {
+  S.shuffle = !S.shuffle; store.set('shuffle', S.shuffle);
+  if (S.shuffle && S.queue.length > S.index + 2) { S.queue = [...S.queue.slice(0, S.index + 1), ...shuffleArr(S.queue.slice(S.index + 1))]; persistQueue(); emit('queue'); if (location.hash.startsWith('#/coda')) vQueue(); }
+  paintButtons();
+}
+function ctlRepeat() { S.repeat = { off: 'all', all: 'one', one: 'off' }[S.repeat]; store.set('repeat', S.repeat); paintButtons(); }
 function updateNowPlaying() {
   const t = currentTrack();
   $('#npT').textContent = t ? t.title : 'Niente in riproduzione';
@@ -1060,10 +1066,11 @@ function paintButtons() {
   $('#disc').classList.toggle('spin', playing);
   $('#bigdisc')?.classList.toggle('spin', playing);
   Turntable.set($('#disc'), playing); Turntable.set($('#bigdisc .rec'), playing); Wave.set(playing);
-  $('#bShuf').innerHTML = ic('shuffle'); $('#bShuf').classList.toggle('on', S.shuffle);
-  $('#bRep').innerHTML = ic('repeat') + (S.repeat === 'one' ? '<span class="mini">1</span>' : '');
-  $('#bRep').classList.toggle('on', S.repeat !== 'off');
-  $('#bRep').title = { off: 'Ripeti: no', all: 'Ripeti: tutta la coda', one: 'Ripeti: questo brano' }[S.repeat];
+  const rs = Live.remote() ? Live.st() : null, shuf = rs ? !!rs.shuffle : S.shuffle, rep = rs ? rs.repeat || 'off' : S.repeat;
+  $('#bShuf').innerHTML = ic('shuffle'); $('#bShuf').classList.toggle('on', shuf);
+  $('#bRep').innerHTML = ic('repeat') + (rep === 'one' ? '<span class="mini">1</span>' : '');
+  $('#bRep').classList.toggle('on', rep !== 'off');
+  $('#bRep').title = { off: 'Ripeti: no', all: 'Ripeti: tutta la coda', one: 'Ripeti: questo brano' }[rep];
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
   NativeMedia.sync(); Live.publish();
 }
@@ -1682,7 +1689,8 @@ function parsePlaylistFile(name, text) {
     const j = JSON.parse(text); title = j.name || title;
     items = arr(j.tracks).map(t => ({ title: t.title, artist: t.artist, album: t.album }));
   } else if (/\.csv$/i.test(name)) {
-    const rows = parseCSV(text); const h = rows.shift().map(x => x.toLowerCase());
+    const rows = parseCSV(text); const h = rows.shift().map(x => x.trim().toLowerCase());
+    if (h.includes('track name') && h.includes('artist name(s)')) return { title, items: rows.map(r => exportifyRow(h, r)).filter(x => x.title) };
     const ti = h.findIndex(x => /track name|^title$|titolo|^name$|song/.test(x)), ai = h.findIndex(x => /artist/.test(x)), li = h.findIndex(x => /album name|^album$/.test(x));
     if (ti < 0) throw new Error('Nel CSV manca una colonna con il titolo.');
     items = rows.map(r => ({ title: r[ti], artist: ai >= 0 ? (r[ai] || '').split(/[;,]/)[0].trim() : '', album: li >= 0 ? r[li] : '' })).filter(x => x.title);
@@ -1700,12 +1708,35 @@ function parsePlaylistFile(name, text) {
   }
   return { title, items };
 }
+// una riga di Exportify (formato vecchio e nuovo) con tutto ciò che serve a riconoscere e a etichettare il brano;
+// lo stesso schema lo legge il server (server/metadati.py, da_exportify)
+function exportifyRow(h, r) {
+  const g = (...ks) => { for (const k of ks) { const i = h.indexOf(k); if (i >= 0 && (r[i] || '').trim()) return r[i].trim(); } return ''; };
+  const ms = +g('duration (ms)', 'track duration (ms)');
+  // Exportify separa gli artisti con ";": la virgola può far parte del nome ("Tyler, The Creator")
+  const artists = g('artist name(s)').split(';').map(x => x.trim()).filter(Boolean);
+  return { title: g('track name'), artist: artists[0] || '', artists, album: g('album name'), albumartist: g('album artist name(s)').split(';')[0].trim(),
+    date: g('release date', 'album release date'), duration: ms ? Math.round(ms / 1000) : null, isrc: g('isrc').toUpperCase(),
+    genres: g('genres').split(',').map(x => x.trim()).filter(Boolean), label: g('record label', 'label'),
+    track: +g('track number') || null, disc: +g('disc number') || null, cover: g('album image url'), spotify: g('track uri') };
+}
 const cleanTxt = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\(.*?\)|\[.*?\]|- .*remaster.*$|feat\..*$/g, '').replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
+// riconoscere un brano già in libreria: titolo, artisti, durata (il segnale più affidabile) e album
 async function matchTrack(it, s = srv()) {
-  const r = (await api('search3', { query: cleanTxt(it.title), songCount: 20, artistCount: 0, albumCount: 0 }, s)).searchResult3;
-  const songs = arr(r.song), T = cleanTxt(it.title), A = cleanTxt(it.artist);
-  const art = x => !A || cleanTxt(x.artist).includes(A) || A.includes(cleanTxt(x.artist));
-  return songs.find(x => cleanTxt(x.title) === T && art(x)) || songs.find(x => cleanTxt(x.title).startsWith(T) && art(x)) || (A ? null : songs[0]);
+  const T = cleanTxt(it.title); if (!T) return null;
+  const arts = (it.artists?.length ? it.artists : [it.artist]).map(cleanTxt).filter(Boolean);
+  const r = (await api('search3', { query: T, songCount: 30, artistCount: 0, albumCount: 0 }, s)).searchResult3;
+  const score = x => {
+    const xt = cleanTxt(x.title), xa = cleanTxt(`${x.artist || ''} ${x.displayArtist || ''}`);
+    let sc = xt === T ? 3 : xt.startsWith(T) || T.startsWith(xt) ? 1.5 : -9;
+    if (arts.length) sc += arts.some(a => xa.includes(a) || (xa && a.includes(xa))) ? 2 : -2;
+    if (it.duration && x.duration) { const dd = Math.abs(x.duration - it.duration); sc += dd <= 3 ? 2 : dd <= 8 ? .5 : -2; }
+    if (it.album && cleanTxt(x.album) === cleanTxt(it.album)) sc += 1;
+    return sc;
+  };
+  let best = null, bs = -Infinity;
+  for (const x of arr(r.song)) { const sc = score(x); if (sc > bs) { bs = sc; best = x; } }
+  return best && bs >= (arts.length ? 4.5 : 3) ? best : null;
 }
 async function addSongsToPlaylist(pid, ids, sid) { for (let i = 0; i < ids.length; i += 200) await api('updatePlaylist', { playlistId: pid, songIdToAdd: ids.slice(i, i + 200) }, srv(sid), true); }
 async function createPlaylist(name, ids, sid = S.active) {
@@ -1713,44 +1744,74 @@ async function createPlaylist(name, ids, sid = S.active) {
   const pid = r.playlist?.id; if (pid && ids.length > 200) await addSongsToPlaylist(pid, ids.slice(200), sid);
   return pid;
 }
+// importazione: uno o più file (es. tutte le playlist esportate con Exportify). Ogni file diventa una playlist
+// (se esiste già con lo stesso nome vi si aggiungono i brani mancanti, così si può rifare dopo i download);
+// i brani assenti si scaricano una volta sola anche se stanno in più playlist (/api/import).
 async function importPlaylist() {
   if (!srv()) return toast('Prima aggiungi un server.');
-  const file = await pickFile('.m3u,.m3u8,.json,.csv,.txt'); if (!file) return;
-  let parsed; try { parsed = parsePlaylistFile(file.name, await file.text()); } catch (e) { return toast(e.message || 'File non valido.'); }
-  const { title, items } = parsed; if (!items.length) return toast('Nessun brano trovato nel file.');
-  const d = $('#dlg');
-  d.innerHTML = `<h3>Importo "${esc(title)}"</h3><p class="sub" id="impMsg">0 di ${items.length}</p><div class="bar"><i id="impBar" style="width:0"></i></div>`; d.showModal();
-  const found = [], missing = [];
-  for (let i = 0; i < items.length; i++) {
-    try { const m = await matchTrack(items[i]); m ? found.push(m.id) : missing.push(items[i]); } catch { missing.push(items[i]); }
-    if ($('#impMsg')) { $('#impMsg').textContent = `${i + 1} di ${items.length}`; $('#impBar').style.width = ((i + 1) / items.length * 100) + '%'; }
-  }
-  const pid = await createPlaylist(title, found);
-  d.innerHTML = `<h3>Importazione conclusa</h3><p>${found.length} brani trovati su ${items.length}.</p>
-    ${missing.length ? `<p class="sub" style="margin-bottom:6px">Mancano sul server:</p><div class="code" style="font-family:inherit;font-size:.88rem">${missing.map(m => esc((m.artist ? m.artist + ' - ' : '') + m.title)).join('<br>')}</div>
-    <p class="small" style="color:var(--muted)">Armony può cercarli online, scaricarli e aggiungerli alla playlist appena la libreria si aggiorna.</p>` : ''}
-    <div class="row">${missing.length ? '<button class="btn primary" id="getMissing">Scarica i mancanti</button>' : ''}<button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
-  if (missing.length) $('#getMissing').onclick = async () => {
+  const files = await pickFile('.m3u,.m3u8,.json,.csv,.txt', true); if (!files?.length) return;
+  const lists = [];
+  for (const f of files) { try { const p = parsePlaylistFile(f.name, await f.text()); if (p.items.length) lists.push(p); } catch (e) { toast(`${f.name}: ${e.message || 'file non valido'}`); } }
+  if (!lists.length) return toast('Nessun brano trovato nei file.');
+  const total = lists.reduce((n, l) => n + l.items.length, 0), d = $('#dlg'); d.className = '';
+  d.innerHTML = `<h3>Importo ${lists.length > 1 ? `${lists.length} playlist` : `"${esc(lists[0].title)}"`}</h3><p class="sub" id="impMsg">0 di ${total}</p><div class="bar"><i id="impBar" style="width:0"></i></div>`; d.showModal();
+  const k = it => it.isrc || cleanTxt(`${it.artist} ${it.title}`), seen = new Map(), missing = new Map(), report = [];
+  let done = 0, existing = [];
+  try { existing = arr((await api('getPlaylists')).playlists?.playlist); } catch {}
+  for (const l of lists) {
+    const ids = [], miss = [];
+    for (const it of l.items) {
+      const key = k(it);
+      if (!seen.has(key)) { let m = null; try { m = await matchTrack(it); } catch {} seen.set(key, m?.id || null); }
+      const id = seen.get(key); id ? ids.push(id) : (miss.push(it), missing.set(key, it));
+      if (++done % 5 === 0 || done === total) { const b = $('#impBar'); if (b) { $('#impMsg').textContent = `${done} di ${total} · ${l.title}`; b.style.width = (done / total * 100) + '%'; } }
+    }
+    let pid = existing.find(p => p.name === l.title)?.id;
     try {
-      for (const m of missing) await dlApi('/api/download', { method: 'POST', body: JSON.stringify({ url: `ytsearch1:${m.artist || ''} ${m.title} audio`, mode: 'audio', format: 'mp3', quality: 'best', folder: store.get('dlDir', 'Scaricati'), sponsorblock: true, meta: { artist: m.artist || '', title: m.title, album: m.album || '' } }) });
-      const pend = store.get('pending', []); pend.push({ pid, sid: S.active, name: title, items: missing, created: Date.now() }); store.set('pending', pend);
-      d.close(); toast(`${missing.length} download avviati. Li aggiungo alla playlist quando sono pronti.`); location.hash = '#/scarica';
+      if (pid) { const have = new Set(arr((await api('getPlaylist', { id: pid })).playlist?.entry).map(x => x.id)); const add = [...new Set(ids)].filter(x => !have.has(x)); if (add.length) await addSongsToPlaylist(pid, add, S.active); }
+      else pid = await createPlaylist(l.title, [...new Set(ids)]);
+    } catch (e) { toast(`${l.title}: ${e.message}`); }
+    report.push({ title: l.title, pid, found: ids.length, total: l.items.length, miss });
+  }
+  const nMiss = missing.size, canDl = !!S.dl.url && access().download;
+  d.innerHTML = `<h3>Importazione conclusa</h3>
+    <p>${total - [...report].reduce((n, r) => n + r.miss.length, 0)} brani su ${total} erano già in libreria${lists.length > 1 ? `, in ${lists.length} playlist` : ''}.</p>
+    ${lists.length > 1 ? `<div class="code" style="font-family:inherit;font-size:.88rem;max-height:180px">${report.map(r => `${esc(r.title)}: ${r.found} di ${r.total}`).join('<br>')}</div>` : ''}
+    ${nMiss ? `<p class="sub" style="margin:12px 0 6px">${nMiss} brani mancano sul server${nMiss < 40 ? ':' : '.'}</p>
+      ${nMiss < 40 ? `<div class="code" style="font-family:inherit;font-size:.88rem">${[...missing.values()].map(m => esc(`${(m.artists || [m.artist]).filter(Boolean).join(', ')} - ${m.title}`)).join('<br>')}</div>` : ''}
+      <p class="small" style="color:var(--muted)">${canDl ? 'Armony li cerca online con la durata giusta, li scarica con copertina, album, numero di traccia e data, e li aggiunge alle playlist appena la libreria si aggiorna.' : 'Per scaricarli serve il permesso di download.'}</p>` : ''}
+    <div class="row">${nMiss && canDl ? `<button class="btn primary" id="getMissing">Scarica i ${nMiss} mancanti</button>` : ''}<button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
+  if (nMiss && canDl) $('#getMissing').onclick = async () => {
+    try {
+      const r = await dlApi('/api/import', { method: 'POST', body: JSON.stringify({ tracks: [...missing.values()], folder: store.get('impDir', 'Spotify') }) });
+      // in attesa: solo ciò che serve a riconoscerli quando arrivano in libreria
+      const slim = it => ({ title: it.title, artist: it.artist, artists: it.artists, album: it.album, duration: it.duration, isrc: it.isrc });
+      const pend = store.get('pending', []);
+      for (const rp of report) if (rp.pid && rp.miss.length) pend.push({ pid: rp.pid, sid: S.active, name: rp.title, items: rp.miss.map(slim), created: Date.now() });
+      store.set('pending', pend);
+      d.close(); toast(`${r.added} download in coda${r.skipped ? `, ${r.skipped} già in coda` : ''}. Li aggiungo alle playlist quando sono pronti.`); location.hash = '#/scarica';
     } catch (e) { toast(e.message); }
   };
   if (location.hash.startsWith('#/playlist')) route();
 }
+let pendingBusy = false;
 async function resolvePending() {
-  let pend = store.get('pending', []); if (!pend.length) return;
-  let added = 0;
+  let pend = store.get('pending', []); if (!pend.length || pendingBusy) return;
+  pendingBusy = true; let added = 0, budget = 150;  // per giro: con migliaia di brani in attesa non si blocca il server
   for (const p of pend) {
     const s = srv(p.sid); if (!s) continue;
     const still = [], ids = [];
-    for (const it of p.items) { try { const m = await matchTrack(it, s); m ? ids.push(m.id) : still.push(it); } catch { still.push(it); } }
+    for (const it of p.items) {
+      if (budget-- <= 0) { still.push(it); continue; }
+      try { const m = await matchTrack(it, s); m ? ids.push(m.id) : still.push(it); } catch { still.push(it); }
+    }
     if (ids.length) { try { await addSongsToPlaylist(p.pid, ids, p.sid); added += ids.length; } catch { still.push(...p.items.filter((_, i) => i < ids.length)); } }
     p.items = still;
   }
-  pend = pend.filter(p => p.items.length && Date.now() - p.created < 7 * 864e5); store.set('pending', pend);
+  pend = pend.filter(p => p.items.length && Date.now() - p.created < 14 * 864e5); store.set('pending', pend);
+  pendingBusy = false;
   if (added) toast(`${added} brani scaricati aggiunti alle playlist.`);
+  if (pend.length && budget <= 0) setTimeout(resolvePending, 60000);
 }
 function toM3U(name, tracks) {
   return '#EXTM3U\n#PLAYLIST:' + name + '\n' + tracks.map(t => `#EXTINF:${Math.round(t.duration)},${t.artist} - ${t.title}\n${safeName(t.artist + ' - ' + t.title)}.${t.suffix || 'mp3'}`).join('\n') + '\n';
@@ -2410,7 +2471,7 @@ const Live = {
     if (m.cmd === 'handoff') { if (v?.to && v.to !== S.device) this.give(v.to); return; }
     if (this.remote() || !S.queue[S.index]) return;  // i comandi valgono solo per chi suona
     ({ play: () => Engine.el.paused && ctlToggle(), pause: () => !Engine.el.paused && ctlToggle(), toggle: ctlToggle,
-      next: () => ctlNext(false), prev: ctlPrev, seek: () => typeof v === 'number' && ctlSeek(v) })[m.cmd]?.();
+      next: () => ctlNext(false), prev: ctlPrev, seek: () => typeof v === 'number' && ctlSeek(v), shuffle: ctlShuffle, repeat: ctlRepeat })[m.cmd]?.();
   },
   async play(i, pos) {
     persistQueue(); await playIndex(i, { startAt: pos });
@@ -2434,6 +2495,8 @@ const Live = {
       if (cmd === 'pause' || cmd === 'toggle' && st.playing) Object.assign(st, { position: p, playing: false, recvAt: now });
       else if (cmd === 'play' || cmd === 'toggle') Object.assign(st, { position: p, playing: true, recvAt: now });
       else if (cmd === 'seek') Object.assign(st, { position: value, recvAt: now });
+      else if (cmd === 'shuffle') st.shuffle = !st.shuffle;
+      else if (cmd === 'repeat') st.repeat = { off: 'all', all: 'one', one: 'off' }[st.repeat || 'off'];
       this.paint();
     }
     try { await srvApi(s, '/api/live/cmd', { method: 'POST', body: JSON.stringify({ to, cmd, value, from: S.device }) }); }
@@ -2443,10 +2506,10 @@ const Live = {
     if (!this.es || !this.on() || Jam.role === 'guest') return;
     const t = S.queue[S.index]; if (!t) return;
     if (this.remote() && !this.sent?.playing) return;  // telecomando: niente da dire, salvo la pausa appena fatta
-    const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: Engine.time(), duration: Engine.duration(), rate: P.speed, track: wire(t) };
+    const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: Engine.time(), duration: Engine.duration(), rate: P.speed, shuffle: S.shuffle, repeat: S.repeat, track: wire(t) };
     if (now.playing && this.target) { this.target = null; this.pill(); }
     const s = this.sent, exp = s ? s.position + (s.playing ? (Date.now() - s.at) / 1000 * s.rate : 0) : 0;
-    if (s && s.track.id === now.track.id && s.playing === now.playing && s.rate === now.rate && s.solo === now.solo && Math.abs(exp - now.position) < 2) return;
+    if (s && s.track.id === now.track.id && s.playing === now.playing && s.rate === now.rate && s.solo === now.solo && s.shuffle === now.shuffle && s.repeat === now.repeat && Math.abs(exp - now.position) < 2) return;
     this.sent = { ...now, at: Date.now() };
     srvApi(srv(), '/api/live/state', { method: 'POST', body: JSON.stringify(now) }).catch(() => {});
   },
@@ -2506,11 +2569,9 @@ function wirePlayer() {
   $('#sleepPill').onclick = sleepDialog; $('#jamPill').onclick = () => location.hash = '#/jam';
   $('#bShuf').onclick = () => {
     if (Jam.role === 'guest') return toast('Durante una Jam l\'ordine lo decide l\'host.');
-    S.shuffle = !S.shuffle; store.set('shuffle', S.shuffle);
-    if (S.shuffle && S.queue.length > S.index + 2) { S.queue = [...S.queue.slice(0, S.index + 1), ...shuffleArr(S.queue.slice(S.index + 1))]; persistQueue(); emit('queue'); if (location.hash.startsWith('#/coda')) vQueue(); }
-    paintButtons();
+    Live.remote() ? Live.cmd('shuffle') : ctlShuffle();
   };
-  $('#bRep').onclick = () => { S.repeat = { off: 'all', all: 'one', one: 'off' }[S.repeat]; store.set('repeat', S.repeat); paintButtons(); };
+  $('#bRep').onclick = () => Live.remote() ? Live.cmd('repeat') : ctlRepeat();
   $('#vol').value = P.volume * 100;
   $('#vol').oninput = e => { P.volume = e.target.value / 100; savePrefs(); Engine.applyVolume(); rangeFill(e.target); };
   $('#seek').oninput = () => { seeking = true; $('#tCur').textContent = fmt($('#seek').value / 1000 * playDur()); rangeFill($('#seek')); };
