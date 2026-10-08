@@ -226,7 +226,7 @@ label.check small{display:block;color:var(--muted)}
   .play.on svg.pp path:first-child{d:path("M7 4L11 4L11 20L7 20Z")}
   .play.on svg.pp path:last-child{d:path("M13 4L17 4L17 20L13 20Z")}
 }
-@media (prefers-reduced-motion:reduce){#glow{transition:opacity .3s ease}#seek{transition:none}}
+@media (prefers-reduced-motion:reduce){#glow{transition:opacity .3s ease}.wave canvas{transition:none}}
 .np .t{min-width:0}
 .np b{display:block;font-weight:700;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np small{display:block;color:var(--muted);font-size:.86rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -247,7 +247,13 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 input[type=range]:active::-webkit-slider-thumb{transform:scale(1.35)}
 input[type=range]:focus-visible{outline:none}
 input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 35%,transparent)}
-#seek{filter:drop-shadow(0 0 5px var(--tint));transition:--tint 1.2s ease}
+/* barra di avanzamento a onda (Wave in armony.js): l'onda è un canvas sotto l'input, che resta per
+   trascinamento, tastiera e accessibilità; del cursore si vede solo il pomello */
+.wave{position:relative;flex:1;min-width:0;display:flex;align-items:center}
+.wave canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;filter:drop-shadow(0 0 5px var(--tint));transition:--tint 1.2s ease}
+#seek{position:relative;z-index:1}
+#seek::-webkit-slider-runnable-track{background:transparent}
+#seek::-moz-range-track,#seek::-moz-range-progress{background:transparent}
 .extra{display:flex;justify-content:flex-end;align-items:center;gap:4px;flex-wrap:wrap}
 .extra input[type=range]{max-width:100px}
 .pill{font-size:.74rem;font-weight:700;color:var(--muted);border:0;border-radius:99px;padding:4px 10px;white-space:nowrap;background:var(--surface2);cursor:pointer;font-variant-numeric:tabular-nums}
@@ -469,7 +475,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
       <button class="icon-btn" id="bNext" aria-label="Successivo"></button>
       <button class="icon-btn" id="bRep" aria-label="Ripeti"></button>
     </div>
-    <div class="seek"><span id="tCur">0:00</span><input type="range" id="seek" min="0" max="1000" value="0" aria-label="Posizione"><span id="tDur">0:00</span></div>
+    <div class="seek"><span id="tCur">0:00</span><span class="wave"><canvas id="seekWave" aria-hidden="true"></canvas><input type="range" id="seek" min="0" max="1000" value="0" aria-label="Posizione"></span><span id="tDur">0:00</span></div>
   </div>
   <div class="extra">
     <button class="pill live" id="livePill" hidden aria-haspopup="dialog"></button>
