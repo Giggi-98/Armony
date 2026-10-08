@@ -1051,7 +1051,7 @@ function paintButtons() {
   bp.setAttribute('aria-label', playing ? 'Pausa' : 'Riproduci');
   $('#disc').classList.toggle('spin', playing);
   $('#bigdisc')?.classList.toggle('spin', playing);
-  Turntable.set($('#disc'), playing); Turntable.set($('#bigdisc .rec'), playing);
+  Turntable.set($('#disc'), playing); Turntable.set($('#bigdisc .rec'), playing); Wave.set(playing);
   $('#bShuf').innerHTML = ic('shuffle'); $('#bShuf').classList.toggle('on', S.shuffle);
   $('#bRep').innerHTML = ic('repeat') + (S.repeat === 'one' ? '<span class="mini">1</span>' : '');
   $('#bRep').classList.toggle('on', S.repeat !== 'off');
@@ -1060,7 +1060,67 @@ function paintButtons() {
   NativeMedia.sync();
 }
 let seeking = false;
-const rangeFill = el => { if (el) el.style.setProperty('--p', ((el.value - (el.min || 0)) / ((el.max || 100) - (el.min || 0)) * 100) + '%'); };
+const rangeFill = el => { if (!el) return; el.style.setProperty('--p', ((el.value - (el.min || 0)) / ((el.max || 100) - (el.min || 0)) * 100) + '%'); if (el.id === 'seek') Wave.draw(); };
+/* barra di avanzamento a onda, come i controlli multimediali di Android: la parte ascoltata è un'onda
+   morbida che scorre mentre suona, somma di tre sinusoidi con lunghezze e velocità che non si ripetono
+   insieme; in pausa si spegne in una linea dritta. Il disegno gira solo mentre serve. */
+const Wave = {
+  cv: null, g: null, amp: 0, target: 0, t: 0, last: 0, raf: 0, w: 0, h: 0, col: {},
+  // lunghezza d'onda (px), velocità (rad/ms), fase, peso: valori senza multipli comuni, così il disegno non torna mai uguale
+  parts: [[38, .0034, 0, .55], [23, -.0051, 1.7, .28], [61, .0019, 3.1, .3]],
+  init() {
+    this.cv = $('#seekWave'); if (!this.cv) return;
+    this.g = this.cv.getContext('2d');
+    new ResizeObserver(() => this.size()).observe(this.cv);
+    const recolor = () => { this.colors(); this.draw(); };
+    new MutationObserver(recolor).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', recolor);
+    matchMedia('(prefers-reduced-motion: reduce)').addEventListener?.('change', () => this.set(isPlaying()));
+    document.addEventListener('visibilitychange', () => this.kick());
+    this.colors(); this.size();
+  },
+  // la parte da ascoltare: --surface2 schiarita verso --muted, perché sul fondo del lettore da sola quasi sparisce
+  colors() {
+    const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
+    const rgb = h => (h.match(/^#([0-9a-f]{6})$/i) ? [0, 2, 4].map(i => parseInt(h.slice(1 + i, 3 + i), 16)) : null);
+    const [a, m] = [rgb(v('--surface2')), rgb(v('--muted'))];
+    this.col = { on: v('--accent'), off: a && m ? `rgb(${a.map((x, i) => Math.round(x * .7 + m[i] * .3)).join(' ')})` : v('--surface2') };
+  },
+  size() {
+    const r = this.cv.getBoundingClientRect(), d = devicePixelRatio || 1;
+    this.w = r.width; this.h = r.height; this.cv.width = Math.round(r.width * d); this.cv.height = Math.round(r.height * d);
+    this.g.setTransform(d, 0, 0, d, 0, 0); this.draw();
+  },
+  set(playing) { this.target = playing && !calm() ? 1 : 0; if (calm()) this.amp = this.target; this.kick(); },
+  kick() {
+    if (this.raf || document.hidden || (this.amp === 0 && this.target === 0)) return this.draw();
+    this.last = performance.now(); this.raf = requestAnimationFrame(n => this.frame(n));
+  },
+  frame(now) {
+    const dt = Math.min(now - this.last, 50); this.last = now; this.t += dt;
+    // ampiezza verso l'obiettivo con un'uscita morbida: ~400 ms per spegnersi o riaccendersi
+    this.amp += (this.target - this.amp) * (1 - Math.exp(-dt / 110));
+    if (Math.abs(this.target - this.amp) < .004) this.amp = this.target;
+    this.draw();
+    this.raf = document.hidden || (this.amp === 0 && this.target === 0) ? 0 : requestAnimationFrame(n => this.frame(n));
+  },
+  draw() {
+    const { g, w, h } = this; if (!g || !w) return;
+    const s = $('#seek'), p = s ? s.value / 1000 : 0, r = 7, x0 = r, x1 = w - r, px = x0 + p * (x1 - x0), y = h / 2, A = 3.2 * this.amp;
+    g.clearRect(0, 0, w, h); g.lineCap = 'round'; g.lineJoin = 'round';
+    g.lineWidth = 3; g.strokeStyle = this.col.off; g.beginPath(); g.moveTo(Math.min(px + r, x1), y); g.lineTo(x1, y); if (px + r < x1) g.stroke();
+    if (px <= x0) return;
+    g.lineWidth = 3.5; g.strokeStyle = this.col.on; g.beginPath();
+    // ogni componente respira lentamente con un suo ritmo: le onde restano dolci e non sincronizzate
+    const k = this.parts.map(([l, v, f, a], i) => [2 * Math.PI / l, v * this.t + f, a * (.75 + .25 * Math.sin(this.t * (.0006 + i * .00023) + f))]);
+    for (let x = x0; x <= px; x += 1.5) {
+      const env = Math.min(1, (x - x0) / 10, (px - x) / 10 + .15);  // l'onda nasce dal bordo e si posa sotto il pomello
+      let o = 0; for (const [kk, ph, a] of k) o += Math.sin(x * kk - ph) * a;
+      x === x0 ? g.moveTo(x, y + o * A * env) : g.lineTo(x, y + o * A * env);
+    }
+    g.lineTo(px, y); g.stroke();
+  }
+};
 function paintTime() {
   const d = playDur(), p = playPos();
   if (!seeking) { $('#seek').value = d ? p / d * 1000 : 0; $('#tCur').textContent = fmt(p); }
@@ -1206,7 +1266,7 @@ const Glow = {
   // la traccia nel lettore: il colore del brano in riproduzione sulla barra di avanzamento
   async track(t) {
     const url = t && t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 300, t.serverId) : '';
-    const c = await this.colors(url), seek = $('#seek'); if (!seek || currentTrack() !== t) return;
+    const c = await this.colors(url), seek = $('#seekWave'); if (!seek || currentTrack() !== t) return;
     if (this.usable(c)) seek.style.setProperty('--tint', this.tone(c.c1, .9, c.neutral)); else seek.style.removeProperty('--tint');
   }
 };
@@ -2336,6 +2396,7 @@ async function boot() {
   $('#tabs').innerHTML = NAV.filter(([h]) => TABS.includes(h)).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span>${l}</span></a>`).join('')
     + `<button type="button" id="tabMore" aria-haspopup="dialog">${ic('more')}<span>Altro</span></button>`;
   $('#tabMore').onclick = moreSheet;
+  Wave.init();
   Engine.init(); wirePlayer();
   await Offline.init();
   fillSelectors(); updateNowPlaying(); paintTime();
