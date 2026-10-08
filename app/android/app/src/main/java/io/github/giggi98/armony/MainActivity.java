@@ -6,7 +6,9 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        registerPlugin(ArmonyMediaPlugin.class);  // plugin locale: va registrato prima di super.onCreate
+        // plugin locali: vanno registrati prima di super.onCreate
+        registerPlugin(ArmonyMediaPlugin.class);
+        registerPlugin(ArmonyUpdatePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

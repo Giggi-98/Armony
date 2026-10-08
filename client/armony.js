@@ -2173,7 +2173,18 @@ const NativeMedia = {
   }
 };
 const AppUpdate = {
-  // l'APK arriva dalle release GitHub, allegato dalla Action a ogni tag (.github/workflows/android.yml)
+  // l'APK arriva dalle release GitHub, allegato dalla Action a ogni tag (.github/workflows/android.yml) insieme
+  // al suo .sha256; lo scarica, lo verifica e lo passa all'installatore di Android il plugin ArmonyUpdate
+  // (app/android). Android chiede sempre conferma: fuori dal Play Store non c'è installazione silenziosa.
+  p: null, last: 0, later: null, pending: null, u: null, busy: false,
+  init() {
+    if (!window.ARMONY_APP) return;
+    this.p = window.Capacitor?.Plugins?.ArmonyUpdate || null;
+    this.p?.addListener('progress', e => this.state('scarico', e));
+    this.p?.addListener('status', e => this.state('errore', { msg: e.status === 'annullato' ? 'Installazione annullata.' : 'Android non ha installato l\'aggiornamento' + (e.message ? `: ${e.message}` : '.') }));
+    window.Capacitor?.Plugins?.App?.addListener('resume', () => this.pending ? this.retry() : this.auto());
+    setTimeout(() => this.auto(), 8000);
+  },
   async check() {
     const a = window.ARMONY_APP; if (!a?.repo) return null;
     try {
@@ -2181,22 +2192,80 @@ const AppUpdate = {
       if (r.status === 404) return { current: a.version, latest: null, available: false };  // nessun APK pubblicato
       if (!r.ok) return null;
       const j = await r.json(), apk = arr(j.assets).find(x => /\.apk$/.test(x.name));
+      const sha = apk && arr(j.assets).find(x => x.name === apk.name + '.sha256');
       const v = s => (String(s).match(/(\d+)\.(\d+)\.(\d+)/) || []).slice(1).map(Number);
       const [n, c] = [v(j.tag_name), v(a.version)];
       const newer = n.length === 3 && c.length === 3 && (n[0] - c[0] || n[1] - c[1] || n[2] - c[2]) > 0;
-      return { current: a.version, latest: j.tag_name, url: apk?.browser_download_url, available: newer && !!apk };
+      return { current: a.version, latest: j.tag_name, url: apk?.browser_download_url, shaUrl: sha?.browser_download_url, notes: this.notes(j.body), available: newer && !!apk };
     } catch { return null; }
   },
-  async notify() {
+  // le note generate da GitHub, ridotte a poche righe leggibili: senza titoli, autori e link
+  notes(body) {
+    return String(body || '').split('\n').map(l => l.trim()).filter(l => /^[-*] /.test(l))
+      .map(l => l.replace(/^[-*] /, '').replace(/ by @\S+ in \S+$/, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')).slice(0, 5);
+  },
+  // al massimo un controllo ogni 6 ore; "Più tardi" vale per quella versione fino al prossimo avvio
+  async auto() {
+    if (Date.now() - this.last < 6 * 3600e3 || $('dialog[open]')) return;
+    this.last = Date.now();
     const u = await this.check();
-    if (u?.available && store.get('appSeen') !== u.latest) { store.set('appSeen', u.latest); toast(`Nuova versione dell'app: ${u.latest}. Scaricala da Impostazioni → App Android.`, 6000); }
+    if (u?.available && this.later !== u.latest) this.offer(u);
+  },
+  offer(u, start) {
+    this.u = u;
+    const d = $('#dlg'); d.className = 'sheet';
+    d.innerHTML = `<div class="head"><b>Armony ${esc(u.latest.replace(/^v/, ''))} è disponibile</b></div><div id="aupd" class="stack"></div>`;
+    closeOutside(d);
+    const base = d.onclose; d.onclose = () => { if (!this.pending && !this.busy) this.later = u.latest; base(); };
+    // contenuto prima di aprire: il focus va al primo tasto, non al foglio intero
+    if (start) this.run(); else this.state('offerta');
+    d.showModal();
+  },
+  state(kind, x = {}) {
+    const box = $('#aupd'); if (!box) return;
+    const btns = (main, mainLabel) => `<div class="row">${main ? `<button class="btn primary" data-up="${main}">${mainLabel}</button>` : ''}<button class="btn" data-up="dopo">Più tardi</button></div>`;
+    const u = this.u || {};
+    box.innerHTML = {
+      offerta: `${u.notes?.length ? `<ul class="notes">${u.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '<p class="sub">Correzioni e miglioramenti.</p>'}
+        <p class="small" style="color:var(--muted);margin:0">Versione installata ${esc(u.current || '')}. L'aggiornamento si installa sopra, senza perdere niente.</p>${btns('vai', 'Aggiorna ora')}`,
+      scarico: `<p style="margin:0">Scarico l'aggiornamento${x.total > 0 ? ` · ${Math.round(x.received / x.total * 100)}%` : '…'}</p>
+        <div class="bar"><i style="width:${x.total > 0 ? Math.round(x.received / x.total * 100) : 4}%"></i></div>`,
+      permesso: `<p style="margin:0">Consenti ad Armony di installare app, poi torna qui: l'aggiornamento riparte da solo.</p>
+        <p class="small" style="color:var(--muted);margin:0">Android lo chiede una volta sola, nella schermata che si è appena aperta.</p>${btns('vai', 'Apri di nuovo le impostazioni')}`,
+      conferma: '<p style="margin:0">Conferma l\'installazione nella finestra di Android. Armony si riapre aggiornata.</p>',
+      errore: `<p style="margin:0;color:var(--danger)">${esc(x.msg || 'Aggiornamento non riuscito.')}</p>${btns('vai', 'Riprova')}`
+    }[kind];
+    box.querySelector('[data-up=vai]')?.addEventListener('click', () => this.run());
+    box.querySelector('[data-up=dopo]')?.addEventListener('click', () => $('#dlg').close());
+  },
+  async run() {
+    const u = this.u; if (!u || this.busy) return;
+    if (!this.p) { location.href = u.url; return; }  // senza il plugin: il link al file, come prima
+    this.busy = true; this.state('scarico');
+    try {
+      // l'impronta pubblicata con la release: senza, non si installa niente. La legge il plugin, perché il
+      // redirect di GitHub verso i file delle release non ha CORS e dalla pagina il fetch verrebbe bloccato
+      if (!u.shaUrl) throw new Error('Manca l\'impronta sha256 della release: aggiornamento non installato.');
+      const r = await this.p.install({ url: u.url, shaUrl: u.shaUrl });
+      if (r.status === 'permesso') { this.pending = u; this.state('permesso'); }
+      else { this.pending = null; this.state('conferma'); }
+    } catch (e) { this.state('errore', { msg: e.message || String(e) }); }
+    finally { this.busy = false; }
+  },
+  // di ritorno dalle impostazioni di Android: se il permesso ora c'è, si riparte senza chiedere niente
+  async retry() {
+    const ok = await this.p?.canInstall().then(r => r.allowed).catch(() => false);
+    if (!ok) return;
+    const u = this.pending; this.pending = null;
+    if (!$('#aupd')) this.offer(u, true); else { this.u = u; this.run(); }
   },
   async paint() {
     const box = $('#appBox'); if (!box) return;
     const u = await this.check();
     box.innerHTML = `<p style="margin:0 0 8px">Versione dell'app <b>${esc(window.ARMONY_APP.version)}</b>${u?.latest ? ` · ultima ${esc(u.latest)}` : ''}</p>
       ${!u ? '<p class="sub">Non riesco a controllare gli aggiornamenti adesso.</p>' : !u.latest ? '<p class="sub">Su GitHub non c\'è ancora nessuna versione dell\'app.</p>' : ''}
-      <div class="row">${u?.available ? `<a class="btn primary" href="${esc(u.url)}">Scarica ${esc(u.latest)}</a><span class="small" style="color:var(--muted)">Si apre nel browser: poi apri il file per installarlo.</span>` : u?.latest ? '<span class="tag ok">Aggiornata</span>' : ''}</div>`;
+      <div class="row">${u?.available ? `<button class="btn primary" id="appUpd">Aggiorna ora a ${esc(u.latest.replace(/^v/, ''))}</button>` : u?.latest ? '<span class="tag ok">Aggiornata</span>' : ''}</div>`;
+    $('#appUpd')?.addEventListener('click', () => this.offer(u, true));
   }
 };
 function nativeBack() {
@@ -2277,7 +2346,7 @@ async function boot() {
   addEventListener('offline', () => toast('Sei offline: puoi ascoltare i brani salvati.'));
   navigator.connection?.addEventListener?.('change', fillSelectors);
   if ('serviceWorker' in navigator && /^https?:/.test(location.protocol) && !NATIVE) navigator.serviceWorker.register('sw.js').catch(() => {});
-  NativeMedia.init(); if (NATIVE) { nativeBack(); setTimeout(() => AppUpdate.notify(), 8000); }
+  NativeMedia.init(); if (NATIVE) { nativeBack(); AppUpdate.init(); }
   Jam.init();
   route();
   setTimeout(resolvePending, 8000);
