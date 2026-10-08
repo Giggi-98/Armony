@@ -1,0 +1,161 @@
+# Evoluzione di Armony — funzioni, limiti, client multipiattaforma
+
+Stato: **analisi**, 2026-10-08, su Armony 0.2.0. Le proposte diventano voci di
+`DECISIONS.md` quando vengono scelte. La federazione ha il suo documento
+(`docs/FEDERAZIONE.md`); qui compare solo dove si incastra con il resto.
+
+## 1. Le funzioni di oggi e come possono crescere
+
+Peso: **S** ore · **M** giorni · **L** settimane.
+
+| Area | Cosa c'è | Limite che si vede | Sviluppo proposto | Peso |
+|---|---|---|---|---|
+| **Ascolto** | 6 qualità, dissolvenza, ReplayGain, EQ 10 bande, volume notte, velocità, timer, più server in coda | Su telefono il browser può sospendere l'audio a schermo spento (iPhone: "modalità compatibile" che spegne EQ e dissolvenza) | Nell'app Android: servizio di riproduzione in primo piano con notifica e controlli (§3) | M |
+| **Coda fra dispositivi** | `savePlayQueue` di Navidrome | Solo i brani del server del brano corrente | Va bene così finché la coda multi-server è rara | — |
+| **Testi** | Sincronizzati, da server o LRCLIB, correzione sincronia | — | Salvare le correzioni di sincronia sul server, per tutti i dispositivi | S |
+| **Scoperta** | Radio da brano/artista, mix, artisti simili | Calcolata solo su questo server | Playlist intelligenti di Navidrome (`.nsp`); con la federazione, "cosa ascoltano sui server collegati" | M |
+| **Amici** | `getNowPlaying` del server, ascolta anche tu | Solo amici dello stesso server | Dopo la federazione: amici dei server collegati | M |
+| **Jam** | P2P cifrata, sincronizzata o trasmessa, inviti, codice di sicurezza | Il link d'invito è costruito da `location.origin`: in un'app nativa punterebbe al telefono | Indirizzo pubblico del server negli inviti; Jam fra utenti di server collegati | S / L |
+| **Offline** | Brani in IndexedDB nel browser | Spazio deciso dal browser, che può svuotarlo; su iPhone fragile | App native: file veri su disco; "tieni sempre offline" per playlist e preferiti, aggiornati da soli | M |
+| **Download** | yt-dlp, ricerca, SponsorBlock, video | **La coda vive in memoria**: un riavvio (anche un aggiornamento dal tasto) la perde | Coda su SQLite, ripresa dopo il riavvio | S |
+| **Caricamento** | Fase 0: file e cartelle, doppioni, verifica audio | Un file interrotto riparte da zero; pagina da tenere aperta | Caricamento a blocchi ripartibile; nell'app Android continua in sottofondo | M |
+| **Playlist** | Import Spotify (Exportify) con download dei mancanti, M3U/JSON/CSV, link 30 giorni | — | Playlist offerte ai server collegati (federazione fase 2) | — |
+| **Statistiche** | Complete e belle, immagine riepilogativa | **Solo sul dispositivo**: con web, PC e Android diventano tre storici diversi | Storico sul server, per utente. Navidrome lo tiene già (`scrobbles`, `annotation`): Armony lo legge e il client lo unisce al locale | M |
+| **Impostazioni** | Backup/ripristino via file | Ogni dispositivo ha le sue, da rifare a mano | Preferenze di ascolto sincronizzate per utente sul server | S |
+| **Accesso** | Server Navidrome (utente e password) **più** "servizio di download" (indirizzo e codice) | Due configurazioni per lo stesso server; un solo codice per tutto (download, caricamenti, aggiornamenti) | Accesso unico con le credenziali Navidrome, permessi dai ruoli (§2.1) | M |
+| **Aggiornamenti** | Tag GitHub, avviso, tasto | Solo il server | Le app native controllano le release GitHub allo stesso modo (§3.4) | S |
+
+## 2. Cosa blocca i client multipiattaforma
+
+Quattro problemi da risolvere **prima** delle app. Sono anche le fondamenta
+della federazione.
+
+### 2.1 Accesso: un codice condiviso non basta
+
+Oggi chi ha `ARMONY_TOKEN` può scaricare, caricare **e aggiornare il server**.
+Per permettere a un amico di caricare musica bisogna dargli il potere di
+aggiornare il server. Con app installate su telefoni di persone diverse peggiora.
+
+**Proposta**: l'utente entra **una volta sola** con indirizzo, utente e password
+Navidrome. Il server Armony verifica le credenziali con Navidrome, emette un
+proprio token di sessione e ne ricava i permessi dal ruolo:
+
+| Ruolo Navidrome | Ascolto, Jam | Download, caricamento | Aggiornamenti, federazione, utenti |
+|---|---|---|---|
+| utente | sì | sì (disattivabile per utente) | no |
+| amministratore | sì | sì | sì |
+
+`ARMONY_TOKEN` resta solo come accesso di emergenza dell'amministratore.
+"Server" e "Servizio di download" nelle impostazioni diventano **una cosa sola**.
+
+### 2.2 La password non deve stare negli URL
+
+Il client usa l'autenticazione Subsonic `p=enc:<password in esadecimale>`, che
+è la password in chiaro, reversibile. Finisce in ogni URL di flusso e di
+copertina, quindi nei log, nella cronologia e nei link copiati. È anche
+salvata in chiaro in `localStorage`.
+
+**Proposta**: autenticazione Subsonic **token + sale** (`t=md5(password+sale)`,
+`s=sale`), calcolata una volta al login. Si salva il token, non la password.
+*(Da verificare in implementazione: se Navidrome 0.64 supporta le chiavi API
+OpenSubsonic, sono ancora meglio, perché si revocano una per una.)*
+
+### 2.3 Il client non deve dipendere da chi lo serve
+
+Oggi il client web è servito dal server, quindi usa `location.origin` come
+indirizzo predefinito, per i link Jam e per la scoperta LAN. Un client
+nell'app Android o PC è servito **da sé stesso**.
+
+**Proposta**: un solo "indirizzo del server" scelto al primo avvio (o
+precompilato quando il client è servito dal server), usato ovunque; mai
+`location.origin` per costruire link da condividere.
+
+### 2.4 Client e server avranno versioni diverse
+
+Oggi client e server sono sempre allineati: il client arriva dal server.
+Un'app installata può essere più nuova o più vecchia del server a cui si collega.
+
+**Proposta**: `GET /api/health` restituisce anche un **livello di API** (intero)
+e un elenco di capacità (`upload`, `stats`, `federazione`…). Il client
+nasconde ciò che il server non ha e, se il livello è troppo vecchio, dice di
+aggiornare il server. È lo stesso principio del `proto` della federazione.
+
+### 2.5 Due fragilità del server da sistemare insieme
+
+- **Stato in memoria**: coda dei download, stanze Jam. Serve SQLite (già
+  previsto per la federazione): introdurlo una volta, per tutti.
+- **48 thread di waitress**: ogni flusso audio passato dal proxy e ogni attesa
+  della Jam (25 s) occupa un thread per tutta la durata. Con più utenti, più
+  dispositivi e la federazione che trasferisce file si esauriscono. Da misurare
+  con un test di carico, poi alzare il numero di thread o servire i flussi
+  diversamente.
+
+## 3. Client web, PC e Android
+
+### 3.1 Un solo client, tre involucri
+
+Il client è già HTML + JS puro senza passi di build (`DECISIONS.md`), e
+questo è un vantaggio: **lo stesso codice di `client/`** si può impacchettare
+così com'è.
+
+| Piattaforma | Proposta | Perché | Alternativa scartata |
+|---|---|---|---|
+| **Web** | Come oggi, servito dal server | Zero installazione, sempre aggiornato | — |
+| **Android** | **Capacitor** con `client/` come cartella web, più plugin nativi per riproduzione in sottofondo, notifica multimediale e file offline | Riusa tutto il codice; la WebView di Android ha WebRTC e Web Audio, quindi Jam, EQ e dissolvenza funzionano | **TWA** (Play Store sopra la PWA): è legata a **un** dominio, ma ogni utente ha il suo server, spesso su Tailscale. **App nativa Kotlin**: si riscrive tutto e si perdono EQ, dissolvenza e trasmissione Jam |
+| **PC** | Prima la **PWA installabile** (Chrome/Edge: "Installa Armony"), che c'è già; poi **Electron**, se servono vassoio di sistema, avvio automatico o una cartella offline su disco | La PWA su PC è già un'app con tasti multimediali (Media Session). Electron porta lo stesso Chromium: tutto funziona uguale | **Tauri**: su Linux usa WebKitGTK, dove WebRTC e parti di Web Audio sono incomplete, e la Jam ne soffrirebbe |
+| **iPhone** | Resta la PWA | Fuori dalla richiesta; un'app iOS richiede un account sviluppatore e un Mac | — |
+
+### 3.2 Cosa serve davvero nell'app Android
+
+1. **Riproduzione in sottofondo affidabile**: servizio in primo piano con
+   notifica e controlli (schermata di blocco, cuffie, Android Auto in futuro).
+   È il punto che giustifica l'app: il resto la PWA lo fa già.
+2. **Offline su file**: brani salvati nel filesystem dell'app invece che in
+   IndexedDB, senza il limite di spazio del browser.
+3. **Rete in chiaro verso la LAN**: molti server sono `http://192.168.x.x`.
+   Serve una `network_security_config` che lo permetta (con HTTPS raccomandato
+   come oggi).
+4. **Condividi con Armony**: un link YouTube condiviso da un'altra app finisce
+   nei download.
+5. **Caricamento in sottofondo** dalla galleria musicale del telefono.
+
+### 3.3 Cosa cambia nel codice
+
+- Uno strato sottile `Platform` nel client (web, android, desktop) per le
+  poche cose che differiscono: dove salvare i file offline, come controllare la
+  riproduzione in sottofondo, come aprire i link. Il resto del client non sa
+  dove gira.
+- Una cartella `app/android/` (progetto Capacitor) e poi `app/desktop/`, che
+  **copiano** `client/` al momento del build: nessuna modifica al modo in cui
+  il server serve il client.
+- `sw.js` e `manifest.json` valgono solo per il web.
+
+### 3.4 Distribuzione e aggiornamenti delle app
+
+- Una GitHub Action, a ogni tag `vX.Y.Z`, costruisce l'APK Android (e poi
+  gli installer PC) e li allega alla **Release** GitHub dello stesso tag.
+- L'app controlla le release GitHub come fa già il server con i tag, e
+  propone l'aggiornamento.
+- Play Store solo in un secondo momento: richiede account, revisione e una
+  politica sui contenuti scaricati da YouTube che oggi l'app non passerebbe.
+
+## 4. Ordine proposto
+
+| Passo | Contenuto | Sblocca |
+|---|---|---|
+| **A** | Fondamenta: accesso unico con ruoli (§2.1), token + sale (§2.2), indirizzo del server esplicito (§2.3), livello di API (§2.4), SQLite e coda download persistente (§2.5) | App native e federazione |
+| **B** | Statistiche e preferenze sul server, per utente | Esperienza uguale su tutti i dispositivi |
+| **C** | App Android (Capacitor) con riproduzione in sottofondo e offline su file; APK nelle release GitHub | Android |
+| **D** | Federazione fase 1 (`docs/FEDERAZIONE.md`) | Librerie collegate |
+| **E** | Federazione fase 2, app PC (Electron) se la PWA non basta | — |
+| **F** | Federazione fase 3 (ascolto a distanza) | — |
+
+C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
+
+## 5. Domande
+
+1. Ordine: fondamenta (A) prima di tutto, e poi app Android o federazione?
+2. Caricamento e download: aperti a tutti gli utenti per default, o solo
+   agli amministratori finché non li abiliti?
+3. Android: va bene l'APK dalle release GitHub, senza Play Store per ora?
+4. PC: si parte dalla PWA installabile, con Electron solo se manca qualcosa?

@@ -21,6 +21,7 @@ client/              HTML + JS puro, nessun bundler, nessuna compilazione
   sw.js              solo la shell dell'app; /rest /api /share non passano dal service worker
 deploy/              aggiornamento eseguito dall'host (systemd .path → armony-update.sh)
 docs/FEDERAZIONE.md  progetto (non ancora implementato) dei collegamenti fra server
+docs/EVOLUZIONE.md   analisi delle funzioni, client web/PC/Android e ordine dei lavori
 VERSION · .env       versione dell'app (= tag vX.Y.Z) · segreti, fuori da git
 musica/ video/ data/ dati dell'utente (root, montati nei container): non toccarli
 ```
