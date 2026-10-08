@@ -2319,13 +2319,17 @@ const NativeMedia = {
   // manda lo stato solo se cambia qualcosa che la notifica non può dedurre da sola (brano, play/pausa, salti)
   sync() {
     if (!this.p) return;
-    const t = Live.remote() ? null : currentTrack();
+    // telecomando: la notifica mostra il dispositivo che suona (come Spotify Connect). Così l'app resta viva in
+    // sottofondo con il servizio in primo piano, il canale dal vivo resta aperto e i comandi della notifica
+    // (che passano da ctlToggle/ctlNext/ctlSeek) arrivano all'altro dispositivo
+    const remote = Live.remote(), t = currentTrack();
     if (!t) { if (this.sent) { this.p.stop(); this.sent = null; } return; }
-    const now = { title: t.title, artist: t.artist, album: t.album || '', playing: isPlaying(), position: playPos(), duration: playDur(), rate: P.speed,
+    const where = remote ? `Su ${Live.devices.get(Live.target) || 'un altro dispositivo'}` : '';
+    const now = { title: t.title, artist: t.artist, album: [where, t.album].filter(Boolean).join(' · '), playing: isPlaying(), position: playPos(), duration: playDur(), rate: remote ? (Live.st()?.rate || 1) : P.speed,
       artwork: t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 512, t.serverId) : '' };
     if (!this.sent && !now.playing) return;  // servizio e permesso delle notifiche solo dal primo play
     const s = this.sent, expected = s ? s.position + (s.playing ? (Date.now() - s.at) / 1000 * s.rate : 0) : 0;
-    if (s && s.title === now.title && s.artist === now.artist && s.playing === now.playing && s.duration === now.duration && s.rate === now.rate && Math.abs(expected - now.position) < 2) return;
+    if (s && s.title === now.title && s.artist === now.artist && s.album === now.album && s.playing === now.playing && s.duration === now.duration && s.rate === now.rate && Math.abs(expected - now.position) < 2) return;
     this.sent = { ...now, at: Date.now() };
     this.p.update(now).catch(() => {});
   }

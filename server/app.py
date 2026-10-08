@@ -680,15 +680,26 @@ def run_brano(jid, j):
     tmp = os.path.join("/tmp/armony-dl", jid)
     shutil.rmtree(tmp, ignore_errors=True)
     os.makedirs(tmp)
-    want_no = {w for w in BRANO_NO.findall(title)}
+    want_no = {w.lower() for w in BRANO_NO.findall(title)}
+    nt, na = metadati.norm(title), metadati.norm(" ".join(artists[:1]))
 
-    def match(info, *, incomplete=False):
-        d, t = info.get("duration"), info.get("title") or ""
-        if dur and d and abs(d - dur) > max(6, dur * 0.05):
-            return "durata diversa"
-        if {w.lower() for w in BRANO_NO.findall(t)} - {w.lower() for w in want_no}:
-            return "versione diversa"
-        return None
+    # ─── PERCHÉ NON BASTA filtrare per durata ───
+    # Un filtro rigido scartava brani buoni (video con qualche secondo di silenzio, edizioni diverse) e
+    # il download falliva. Qui la durata è una preferenza: si guardano i primi risultati senza scaricarli,
+    # si dà un punteggio e si prende il migliore, anche se la durata non coincide.
+    def punteggio(e):
+        t, ch, d = metadati.norm(e.get("title")), (e.get("channel") or e.get("uploader") or ""), e.get("duration")
+        sc = (3 if nt and nt in t else 0) + (1.5 if na and (na in t or na in metadati.norm(ch)) else 0)
+        if ch.endswith(" - Topic"):  # YouTube Music: audio ufficiale, durata esatta, niente intro
+            sc += 3
+        if "official audio" in (e.get("title") or "").lower():
+            sc += 1.5
+        if {w.lower() for w in BRANO_NO.findall(e.get("title") or "")} - want_no:
+            sc -= 4  # live, cover, remix… che il titolo originale non nomina
+        if dur and d:
+            dd = abs(d - dur)
+            sc += 2 if dd <= 3 else -min(dd, 180) / 15
+        return sc
 
     def progress(d):
         if d["status"] == "downloading":
@@ -700,32 +711,43 @@ def run_brano(jid, j):
     q = f"{(artists or [''])[0]} - {title}"
     fmt = j.get("format") or "m4a"
     got, last_err = None, ""
-    for src in (f"ytsearch5:{q}", f"scsearch5:{q}"):
+    cookies = COOKIES if os.path.exists(COOKIES) else None
+    for src in (f"ytsearch8:{q}", f"scsearch8:{q}"):
+        try:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "cookiefile": cookies}) as y:
+                found = [e for e in (y.extract_info(src, download=False) or {}).get("entries") or [] if e and e.get("url")]
+        except Exception as e:  # noqa: BLE001
+            last_err, found = str(e)[:300], []
+        if not found:
+            continue
+        found.sort(key=punteggio, reverse=True)
         opts = {"outtmpl": os.path.join(tmp, "%(id)s.%(ext)s"), "quiet": True, "no_warnings": True, "retries": 3,
-                "ignoreerrors": True, "max_downloads": 1, "match_filter": match, "progress_hooks": [progress],
-                "cookiefile": COOKIES if os.path.exists(COOKIES) else None,
+                "ignoreerrors": False, "progress_hooks": [progress], "cookiefile": cookies,
                 # M4A e Opus arrivano già così da YouTube: si estrae senza ricodificare
                 "format": f"bestaudio[ext={'webm' if fmt == 'opus' else fmt}]/bestaudio/best",
                 "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": fmt, "preferredquality": AUDIO_QUALITIES.get(j.get("quality") or "best", "0")}]}
         if not m.get("cover"):  # senza copertina vera si tiene almeno quella del video
             opts["writethumbnail"] = True
             opts["postprocessors"] += [{"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"}, {"key": "EmbedThumbnail"}]
-        jupdate(jid, status="in corso", source="YouTube" if src.startswith("yt") else "SoundCloud")
-        try:
-            with yt_dlp.YoutubeDL(opts) as y:
-                y.download([src])
-        except yt_dlp.utils.MaxDownloadsReached:
-            pass
-        except Exception as e:  # noqa: BLE001
-            last_err = str(e)[:300]
-        files = [f for f in os.listdir(tmp) if f.rsplit(".", 1)[-1].lower() in UPLOAD_AUDIO]
-        if files:
-            got = os.path.join(tmp, files[0])
+        # il migliore; se il download fallisce (video bloccato, rimosso) si prova il successivo
+        for e in found[:3]:
+            jupdate(jid, status="in corso", source="YouTube" if src.startswith("yt") else "SoundCloud",
+                    scelto=f"{e.get('title')} ({e.get('channel') or e.get('uploader') or '?'}, {round(e['duration']) if e.get('duration') else '?'} s)")
+            try:
+                with yt_dlp.YoutubeDL(opts) as y:
+                    y.download([e["url"]])
+            except Exception as ex:  # noqa: BLE001
+                last_err = str(ex)[:300]
+            files = [f for f in os.listdir(tmp) if f.rsplit(".", 1)[-1].lower() in UPLOAD_AUDIO]
+            if files:
+                got = os.path.join(tmp, files[0])
+                break
+        if got:
             break
     if not got:
         shutil.rmtree(tmp, ignore_errors=True)
         return jupdate(jid, status="errore", finished=time.time(),
-                       error="Nessuna versione trovata con la durata giusta" + (f" ({last_err})" if last_err else ""))
+                       error="Non trovato né su YouTube né su SoundCloud" + (f" ({last_err})" if last_err else ""))
     try:
         metadati.tagga(got, m, pulisci=bool(m.get("cover")))
         base = os.path.join(MUSIC_DIR, clean_segment(j.get("folder"), "Scaricati"))

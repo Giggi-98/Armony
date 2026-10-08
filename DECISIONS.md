@@ -27,6 +27,41 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Download importati: la durata è una preferenza, non un filtro
+
+**Contesto:** con il filtro rigido sulla durata (±5%) molti download fallivano
+per brani validi (pochi secondi di silenzio, edizioni diverse).
+**Scelta:** si guardano i primi 8 risultati senza scaricarli e si dà un
+punteggio: titolo e artista nel titolo del video, canale "- Topic" di YouTube
+Music (audio ufficiale, durata esatta), "official audio", penalità per live,
+cover, remix… non richiesti, e durata (premio entro 3 s, penalità crescente
+oltre). Si scarica il migliore, poi il secondo e il terzo se il download
+fallisce; SoundCloud solo se YouTube non dà niente.
+**Alternative scartate:** filtro rigido (scarta brani buoni); primo risultato
+(spesso il video con intro o una versione live).
+**Conseguenze:** si può scaricare una versione un po' più lunga o più corta;
+il lavoro registra il video scelto (`scelto`) per controllarlo.
+**Da rivedere se:** compaiono spesso versioni sbagliate (allora alzare il peso
+della durata).
+
+## 2026-10-08 — Telefono come telecomando: la notifica mostra il dispositivo che suona
+
+**Contesto:** l'app sul telefono deve restare sincronizzata col PC anche in
+sottofondo; senza servizio in primo piano Android la congela e il canale dal
+vivo si chiude.
+**Scelta:** quando il telefono comanda un altro dispositivo, `NativeMedia`
+mostra nella notifica il brano di quel dispositivo ("Su Computer"), come
+Spotify Connect: il servizio in primo piano tiene viva l'app e il canale SSE,
+e i comandi della notifica passano da `ctl*`, cioè diventano comandi remoti.
+**Alternative scartate:** una notifica fissa "Armony collegato" sempre accesa
+(rumore costante anche quando non suona niente); servizio di tipo dataSync
+(su Android 15 limitato a 6 ore al giorno).
+**Conseguenze:** mentre il PC suona il telefono tiene svegli CPU e Wi-Fi come
+quando suona lui. Se non suona niente da nessuna parte e l'app è in sottofondo
+da tempo, Android può congelarla: si ricollega quando la riapri.
+**Da rivedere se:** il consumo di batteria in modalità telecomando si nota
+(allora niente wake lock della CPU in quella modalità).
+
 ## 2026-10-08 — Importazione da Spotify: CSV come fonte, Deezer per il resto, cartelle per album
 
 **Contesto:** i brani importati arrivavano con un solo artista, album a caso,
