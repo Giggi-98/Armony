@@ -405,6 +405,8 @@ async function vArtist(id) {
   let info = null; try { info = (await api('getArtistInfo2', { id, count: 8 })).artistInfo2; } catch {}
   let top = []; try { top = arr((await api('getTopSongs', { artist: a.name, count: 10 })).topSongs?.song).map(x => norm(x)); } catch {}
   const bio = (info?.biography || '').replace(/<a[^>]*>.*?<\/a>/g, '').replace(/<[^>]+>/g, '').trim();
+  // luce dalla copertina sul server (stessa origine): l'immagine grande dell'artista spesso è di un altro dominio
+  Glow.show(coverUrl(a.coverArt || arr(a.album)[0]?.coverArt, 300), 'album');
   view.innerHTML = `<div class="hero"><div class="art" style="border-radius:50%">${info?.largeImageUrl ? `<img src="${esc(info.largeImageUrl)}" alt="" onerror="this.remove()">` : imgTag(a.coverArt, 400)}</div>
     <div><h1>${esc(a.name)}</h1><p class="sub">${a.albumCount || 0} album</p>
     <div class="row"><button class="btn primary" data-act="artistall" data-id="${esc(id)}">${ic('play')} Riproduci tutto</button>
@@ -419,6 +421,7 @@ async function vAlbum(id) {
   const songs = arr(a.song).map(x => norm(x));
   const tot = songs.reduce((n, t) => n + t.duration, 0);
   const discs = new Set(songs.map(s => s.disc)).size;
+  Glow.show(coverUrl(a.coverArt, 300), 'album');
   view.innerHTML = `<div class="hero"><div class="art">${imgTag(a.coverArt, 500)}</div>
     <div><h1>${esc(a.name)}</h1><p class="sub"><a href="#/artista/${encodeURIComponent(a.artistId || '')}">${esc(a.artist)}</a>${a.year ? ', ' + a.year : ''}${a.genre ? ', ' + esc(a.genre) : ''}. ${songs.length} brani, ${fmtLong(tot)}${discs > 1 ? ', ' + discs + ' dischi' : ''}.</p></div></div>
     ${listActions(`<button class="btn ${a.starred ? 'primary' : ''}" data-act="staralbum" data-id="${esc(id)}" data-on="${a.starred ? 1 : 0}">${ic('heart', a.starred)} ${a.starred ? 'Nei preferiti' : 'Preferito'}</button>
@@ -923,6 +926,7 @@ function updateNowPlaying() {
   $('#npA').textContent = t ? t.artist + (t.album ? ' · ' + t.album : '') : (Jam.role === 'guest' ? 'In attesa dell\'host della Jam' : 'Scegli un album o una playlist');
   $('#disc').innerHTML = t && t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 80, t.serverId))}" alt="" onerror="this.outerHTML='<div class=lbl></div>'">` : '<div class="lbl"></div>';
   document.title = t ? `${t.title} · ${t.artist}` : 'Armony';
+  Glow.track(t);
   if ('mediaSession' in navigator) {
     navigator.mediaSession.metadata = t ? new MediaMetadata({ title: t.title, artist: t.artist, album: t.album,
       artwork: t.coverArt && srv(t.serverId) ? [{ src: coverUrl(t.coverArt, 512, t.serverId), sizes: '512x512' }] : [] }) : null;
@@ -1000,10 +1004,101 @@ async function vFriends() {
   Jam.nearby().then(js => { const b = $('#fj'); if (b) b.innerHTML = js.length ? js.map(j => `<div class="list-item" data-act="jamknock" data-id="${esc(j.id)}" data-base="${esc(j.base || '')}"><span class="pic" style="display:grid;place-items:center">${ic('jam')}</span><span class="grow"><b>${esc(j.name)}</b><small>di ${esc(j.hostName || '?')}${j.server ? ', sul server ' + esc(j.server) : ''}</small></span><span class="btn sm">Chiedi di entrare</span></div>`).join('') : '<div class="empty">Nessuna Jam aperta sulla tua rete.</div>'; });
 }
 
+/* ================= la luce del disco: i colori della copertina illuminano la stanza =================
+   Due colori (dominante e secondario) da un canvas 32×32 della copertina. La luce sta in #glow, fisso dietro
+   ai contenuti e acceso solo su "In riproduzione", album e artista; il lettore ne tiene una traccia sulla barra.
+   I colori sono variabili CSS registrate con @property, così il cambio di brano sfuma invece di scattare. */
+function pickColors(d) {
+  const B = Array.from({ length: 13 }, () => ({ w: 0, r: 0, g: 0, b: 0 }));  // 12 tinte da 30° + i grigi
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 128) continue;
+    const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+    const sat = mx === mn ? 0 : (mx - mn) / (1 - Math.abs(2 * l - 1));
+    let k = 12, w = .05;
+    if (sat > .15 && l > .08 && l < .92) {
+      const h = mx === r ? ((g - b) / (mx - mn) + 6) % 6 : mx === g ? (b - r) / (mx - mn) + 2 : (r - g) / (mx - mn) + 4;
+      k = Math.floor(h * 2) % 12; w = sat * (1 - Math.abs(l - .5)) + .05;
+    }
+    const e = B[k]; e.w += w; e.r += d[i] * w; e.g += d[i + 1] * w; e.b += d[i + 2] * w;
+  }
+  const avg = e => [e.r / e.w, e.g / e.w, e.b / e.w].map(Math.round);
+  const hues = B.slice(0, 12).map((e, k) => ({ e, k })).filter(x => x.e.w > 0).sort((a, b) => b.e.w - a.e.w);
+  const total = B.reduce((n, e) => n + e.w, 0); if (!total) return null;
+  // copertina quasi senza colore (bianco e nero): una luce neutra, tenue
+  if (!hues.length || hues[0].e.w < total * .08) { const c = avg(B[12]); return { c1: c, c2: c, neutral: true }; }
+  const d1 = hues[0], d2 = hues.find(x => Math.min(Math.abs(x.k - d1.k), 12 - Math.abs(x.k - d1.k)) >= 2 && x.e.w > d1.e.w * .15) || d1;
+  return { c1: avg(d1.e), c2: avg(d2.e) };
+}
+const lumOf = hex => { const h = hex.trim().replace('#', ''); const f = v => (v /= 255) <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; const [r, g, b] = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); return .2126 * f(r) + .7152 * f(g) + .0722 * f(b); };
+function rgbToHsl([r, g, b]) {
+  r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d) return [0, 0, l];
+  const h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, d / (1 - Math.abs(2 * l - 1)), l];
+}
+function hslToRgb(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return [r, g, b].map(v => Math.round((v + m) * 255));
+}
+const Glow = {
+  cache: new Map(), tok: 0,
+  colors(url) {
+    if (!url) return Promise.resolve(null);
+    if (!this.cache.has(url)) this.cache.set(url, new Promise(res => {
+      const img = new Image(); img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        // una copertina di un altro dominio senza CORS "contamina" il canvas: niente luce, nessun errore
+        try { const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0, 32, 32); res(pickColors(x.getImageData(0, 0, 32, 32).data)); }
+        catch { res(null); }
+      };
+      img.onerror = () => res(null); img.src = url;
+    }));
+    return this.cache.get(url);
+  },
+  // adatta il colore al tema e abbassa la luce finché testo, testo secondario e link restano AA (4,5:1) sul fondo
+  // illuminato; un colore già sotto AA sul fondo normale (l'ambra dei link nel tema chiaro) perde al massimo il 12%
+  tone(c, a0, neutral) {
+    const cs = getComputedStyle(document.documentElement), hx = v => { const h = cs.getPropertyValue(v).trim().replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
+    const lum = ([r, g, b]) => { const f = v => (v /= 255) <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; return .2126 * f(r) + .7152 * f(g) + .0722 * f(b); };
+    const ratio = (x, y) => { const [a, b] = [lum(x), lum(y)].sort((m, n) => n - m); return (a + .05) / (b + .05); };
+    const bg = hx('--bg'), texts = ['--ink', '--muted', '--accent'].map(hx), dark = lum(bg) < .2;
+    let [h, sat, l] = rgbToHsl(c);
+    // una luce deve essere più chiara della stanza: sul blu notte anche una copertina blu scura deve vedersi
+    sat = neutral ? Math.min(sat, .1) : Math.min(Math.max(sat, .45), .8); l = dark ? Math.min(Math.max(l, .48), .62) : Math.min(Math.max(l, .66), .8);
+    const rgb = hslToRgb(h, sat, l), on = a => bg.map((v, i) => v * (1 - a) + rgb[i] * a);
+    const need = texts.map(t => { const r = ratio(t, bg); return r >= 4.5 ? 4.5 : r * .88; });
+    let a = neutral ? a0 * .5 : a0;
+    while (a > .08 && texts.some((t, i) => ratio(t, on(a)) < need[i])) a -= .02;
+    return `rgb(${rgb.join(' ')} / ${a.toFixed(2)})`;
+  },
+  // la luce della stanza: 'ora' (dietro al disco) o 'album' (dietro alla copertina dell'intestazione)
+  async show(url, where) {
+    const tok = ++this.tok, el = $('#glow'); if (!el) return;
+    const c = await this.colors(url);
+    if (tok !== this.tok) return;  // nel frattempo è cambiata pagina o brano
+    if (!this.usable(c)) return this.off();
+    el.style.setProperty('--g1', this.tone(c.c1, .5, c.neutral));
+    el.style.setProperty('--g2', this.tone(c.c2, .34, c.neutral));
+    document.documentElement.dataset.glow = where;
+  },
+  off() { this.tok++; delete document.documentElement.dataset.glow; },
+  // una copertina senza colore nel tema chiaro darebbe una macchia grigia, non una luce
+  usable(c) { return !!c && (!c.neutral || lumOf(getComputedStyle(document.documentElement).getPropertyValue('--bg')) < .2); },
+  // la traccia nel lettore: il colore del brano in riproduzione sulla barra di avanzamento
+  async track(t) {
+    const url = t && t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 300, t.serverId) : '';
+    const c = await this.colors(url), seek = $('#seek'); if (!seek || currentTrack() !== t) return;
+    if (this.usable(c)) seek.style.setProperty('--tint', this.tone(c.c1, .9, c.neutral)); else seek.style.removeProperty('--tint');
+  }
+};
+addEventListener('hashchange', () => { if (!/^#\/(ora|album|artista)/.test(location.hash)) Glow.off(); });
+
 /* ================= in riproduzione: testi e visualizzatore ================= */
 async function vNow() {
   const t = currentTrack();
-  if (!t) { view.innerHTML = '<div class="empty"><h3>Niente in riproduzione</h3><p>Scegli qualcosa da ascoltare.</p><a class="btn primary" href="#/home">Vai alla home</a></div>'; return; }
+  if (!t) { Glow.off(); view.innerHTML = '<div class="empty"><h3>Niente in riproduzione</h3><p>Scegli qualcosa da ascoltare.</p><a class="btn primary" href="#/home">Vai alla home</a></div>'; return; }
+  Glow.show(t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 300, t.serverId) : '', 'ora');
   const tab = sessionStorage.getItem('armony:nowtab') || 'lyr';
   view.innerHTML = `<div class="now"><div>
       <div class="bigdisc ${isPlaying() ? 'spin' : ''}" id="bigdisc"><canvas id="viz" width="640" height="640"></canvas>
@@ -1026,8 +1121,13 @@ async function vNow() {
     pane.innerHTML = '<p class="sub">Cerco il testo…</p>';
     lyr = await Lyrics.get(t);
     if (currentTrack() !== t || !$('#nowPane')) return;
-    if (!lyr) pane.innerHTML = `<div class="empty">Testo non trovato.${P.lyricsOnline ? '' : ' Attiva la ricerca online dei testi nelle impostazioni.'}</div>`;
-    else if (lyr.instrumental) pane.innerHTML = '<div class="empty">Brano strumentale.</div>';
+    if (!lyr || lyr.instrumental) {
+      // senza testo, al suo posto i prossimi brani: niente mezzo schermo vuoto
+      const up = Jam.role === 'guest' ? Jam.queue.slice(0, 12) : S.queue.slice(S.index + 1, S.index + 13);
+      pane.innerHTML = `<p class="sub">${lyr ? 'Brano strumentale.' : `Nessun testo per questo brano.${P.lyricsOnline ? '' : ' Attiva la ricerca online dei testi nelle impostazioni.'}`}</p>
+        ${up.length ? `<h2 style="margin-top:8px">Prossimi</h2>${songList(up)}` : ''}`;
+      if (up.length && Jam.role !== 'guest') { S.lastList = up; pane.querySelectorAll('.song').forEach(el => el.dataset.act = 'qplayoff'); }
+    }
     else {
       const off = store.get('lyrOff:' + key(t), 0);
       pane.innerHTML = `<div class="lyrics ${lyr.synced ? '' : 'plain'}" id="lyr">${lyr.lines.map((l, i) => `<p data-i="${i}">${esc(l.v) || '&nbsp;'}</p>`).join('')}</div>

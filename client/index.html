@@ -37,7 +37,7 @@ img{max-width:100%;display:block}
 audio{display:none}
 
 .app{display:grid;grid-template-columns:var(--side-w) 1fr;min-height:100vh;padding-bottom:calc(var(--player-h) + env(safe-area-inset-bottom,0px))}
-aside{position:sticky;top:env(safe-area-inset-top,0px);height:calc(100vh - var(--player-h));padding:22px 14px;display:flex;flex-direction:column;gap:16px;border-right:1px solid var(--line);overflow-y:auto}
+aside{z-index:1;position:sticky;top:env(safe-area-inset-top,0px);height:calc(100vh - var(--player-h));padding:22px 14px;display:flex;flex-direction:column;gap:16px;border-right:1px solid var(--line);overflow-y:auto}
 .brand{display:flex;align-items:center;gap:10px;padding:0 8px;font:800 1.6rem/1 var(--display);letter-spacing:-.03em;color:var(--ink);text-decoration:none}
 .brand i{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle,var(--bg) 0 3px,var(--accent) 4px 9px,var(--ink) 10px);flex:none}
 nav{display:flex;flex-direction:column;gap:2px}
@@ -52,7 +52,16 @@ nav .dot{position:absolute;right:10px;width:8px;height:8px;border-radius:50%;bac
 .ctx .pill{cursor:inherit}
 /* barra delle sezioni in basso: esiste solo su telefono (vedi media query) */
 .tabbar{display:none}
-main{padding:28px clamp(16px,4vw,48px) 48px;min-width:0}
+main{padding:28px clamp(16px,4vw,48px) 48px;min-width:0;position:relative;z-index:1}
+/* la luce del disco (Glow in armony.js): luce sopra il fondo, mai una tinta piena */
+@property --g1{syntax:'<color>';inherits:false;initial-value:transparent}
+@property --g2{syntax:'<color>';inherits:false;initial-value:transparent}
+@property --tint{syntax:'<color>';inherits:false;initial-value:transparent}
+#glow{position:fixed;top:0;bottom:0;left:var(--side-w);right:0;z-index:0;pointer-events:none;opacity:0;--gx:24%;--gy:30%;
+  background:radial-gradient(52% 58% at var(--gx) var(--gy),var(--g1),transparent 72%),radial-gradient(40% 46% at calc(var(--gx) + 34%) calc(var(--gy) - 16%),var(--g2),transparent 70%);
+  transition:opacity .6s ease,--g1 1.2s ease,--g2 1.2s ease}
+:root[data-glow] #glow{opacity:1}
+:root[data-glow="album"] #glow{--gx:14%;--gy:8%}
 h1{font:800 clamp(1.9rem,4vw,2.8rem)/1.05 var(--display);letter-spacing:-.025em;margin:0 0 6px}
 h2{font:600 1.25rem/1.2 var(--display);margin:32px 0 12px}
 h3{font:600 1.1rem/1.25 var(--display);margin:0 0 8px}
@@ -158,7 +167,7 @@ label.check small{display:block;color:var(--muted)}
 .banner .grow{flex:1;min-width:200px}
 
 /* in riproduzione */
-.now{display:grid;grid-template-columns:minmax(260px,420px) minmax(0,1fr);gap:clamp(20px,4vw,56px);align-items:start}
+.now:not(.song){display:grid;grid-template-columns:minmax(260px,420px) minmax(0,1fr);gap:clamp(20px,4vw,56px);align-items:start}
 .bigdisc{position:relative;width:100%;aspect-ratio:1}
 .bigdisc canvas{position:absolute;inset:0;width:100%;height:100%}
 .bigdisc .rec{position:absolute;inset:11%;border-radius:50%;background:repeating-radial-gradient(circle,#191b30 0 2px,#23264a 2px 3px);box-shadow:0 0 0 2px var(--line)}
@@ -179,7 +188,7 @@ label.check small{display:block;color:var(--muted)}
 .disc::after{content:"";position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px;border-radius:50%;background:var(--bg)}
 .disc.spin{animation:spin 3.2s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.disc.spin,.bigdisc.spin .rec{animation:none}}
+@media (prefers-reduced-motion:reduce){.disc.spin,.bigdisc.spin .rec{animation:none}#glow{transition:opacity .3s ease}#seek{transition:none}}
 .np .t{min-width:0}
 .np b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -189,6 +198,7 @@ label.check small{display:block;color:var(--muted)}
 .play svg{width:20px;height:20px}
 .seek{display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
 input[type=range]{flex:1;accent-color:var(--accent);min-width:0}
+#seek{filter:drop-shadow(0 0 5px var(--tint));transition:--tint 1.2s ease}
 .extra{display:flex;justify-content:flex-end;align-items:center;gap:4px;flex-wrap:wrap}
 .extra input[type=range]{max-width:100px}
 .pill{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:2px 9px;white-space:nowrap;background:none;cursor:pointer}
@@ -280,8 +290,10 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   /* lettore compatto (due righe) + barra delle sezioni; la safe-area si somma a parte */
   :root{--player-h:152px}
   .app{grid-template-columns:minmax(0,1fr);align-content:start}
+  #glow{left:0;--gx:50%;--gy:24%}
+  :root[data-glow="album"] #glow{--gx:30%;--gy:10%}
   /* in alto restano logo e server/qualità; la navigazione scende sotto il pollice */
-  aside{position:static;height:auto;flex-direction:row;align-items:center;padding:10px 12px;gap:10px;border-right:0;border-bottom:1px solid var(--line);overflow:visible}
+  aside{position:relative;z-index:1;height:auto;flex-direction:row;align-items:center;padding:10px 12px;gap:10px;border-right:0;border-bottom:1px solid var(--line);overflow:visible}
   .brand{font-size:1.2rem;padding:0}
   #nav{display:none}
   .ctx{margin:0 0 0 auto;width:auto;max-width:60%;padding:8px 12px;min-height:44px}
@@ -301,13 +313,14 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   .song .n,.song .d{display:none}
   .mobile-only{display:inline-grid}
   .desk-only{display:none}
-  .now,.jamgrid{grid-template-columns:1fr}
+  .now:not(.song),.jamgrid{grid-template-columns:1fr}
   .bigdisc{max-width:320px;margin:0 auto}
   dialog.sheet{margin:auto auto 0;width:100%;max-width:100%;border-radius:18px 18px 0 0;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
 }
 </style>
 </head>
 <body>
+<div id="glow" aria-hidden="true"></div>
 <div class="app">
   <aside>
     <a class="brand" href="#/home"><i></i>armony</a>
