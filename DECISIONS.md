@@ -27,6 +27,31 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Client multipiattaforma: un solo codice, tre involucri
+
+**Contesto:** i client devono esistere su web, PC e Android, contro server
+di persone diverse. Analisi completa in `docs/EVOLUZIONE.md`.
+**Scelta:** lo stesso `client/` ovunque. Web servito dal server come oggi;
+Android con Capacitor e plugin nativi (sottofondo, offline su file), APK nelle
+release GitHub; PC come PWA installabile, Electron solo se serve. Prima delle
+app, fondamenta comuni: accesso con credenziali Navidrome e permessi per
+ruolo, autenticazione Subsonic token + sale, indirizzo del server esplicito,
+livello di API, SQLite.
+**Alternative scartate:**
+- TWA sul Play Store: legata a un dominio, ma ogni utente ha il suo server.
+- App Android nativa da zero: riscrittura completa, e si perdono EQ,
+  dissolvenza e trasmissione Jam, che vivono in Web Audio.
+- Tauri per il PC: su Linux usa WebKitGTK, con WebRTC e Web Audio incompleti.
+- Play Store: account, revisione e una politica che i download da YouTube
+  non passerebbero.
+- Codice di accesso unico per tutto: chi carica musica potrebbe anche
+  aggiornare il server.
+**Conseguenze:** il client deve funzionare senza sapere chi lo serve, e con
+server di versione diversa. L'app Android dipende dalla WebView di sistema.
+**Da rivedere se:** la riproduzione in sottofondo con WebView si rivela
+inaffidabile anche con il servizio in primo piano (allora: riproduzione nativa
+con Media3, perdendo gli effetti Web Audio in sottofondo).
+
 ## 2026-10-08 — Caricamento dal client: un file per richiesta, dietro il token
 
 **Contesto:** fase 0 di `docs/FEDERAZIONE.md`: caricare musica dal

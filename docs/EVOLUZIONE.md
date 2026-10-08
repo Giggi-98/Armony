@@ -1,6 +1,6 @@
 # Evoluzione di Armony — funzioni, limiti, client multipiattaforma
 
-Stato: **analisi**, 2026-10-08, su Armony 0.2.0. Le proposte diventano voci di
+Stato: **approvato**, 2026-10-08, su Armony 0.2.0 (decisioni in §5). Le proposte diventano voci di
 `DECISIONS.md` quando vengono scelte. La federazione ha il suo documento
 (`docs/FEDERAZIONE.md`); qui compare solo dove si incastra con il resto.
 
@@ -152,10 +152,14 @@ così com'è.
 
 C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 
-## 5. Domande
+## 5. Decisioni prese (2026-10-08)
 
-1. Ordine: fondamenta (A) prima di tutto, e poi app Android o federazione?
-2. Caricamento e download: aperti a tutti gli utenti per default, o solo
-   agli amministratori finché non li abiliti?
-3. Android: va bene l'APK dalle release GitHub, senza Play Store per ora?
-4. PC: si parte dalla PWA installabile, con Electron solo se manca qualcosa?
+| Domanda | Risposta |
+|---|---|
+| Ordine | A fondamenta → B statistiche e preferenze sul server → C app Android → D federazione fase 1 → E, F |
+| Caricamento e download | Aperti a tutti gli utenti, disattivabili per utente dall'amministratore. Aggiornamenti e federazione solo agli amministratori |
+| Android | APK costruito a ogni tag e allegato alla release GitHub; niente Play Store per ora |
+| PC | PWA installabile da subito; Electron solo se serve qualcosa che la PWA non dà |
+
+Verificato: Navidrome 0.64.2 **non** offre l'estensione OpenSubsonic delle
+chiavi API (`getOpenSubsonicExtensions`), quindi §2.2 si fa con token + sale.
