@@ -263,6 +263,10 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.9.0 (2026-10-08)**: importazione da Spotify con metadati completi e
+cartelle per album (più `deploy/riallinea-spotify.py` per la libreria esistente);
+eliminazione dei brani con permesso; casuale e ripeti fra i dispositivi.
+
 **0.8.0 (2026-10-08)**: barra a onde morbide; riproduzione condivisa fra i
 dispositivi dell'utente (un solo dispositivo suona, gli altri lo comandano,
 "Dove suona" per spostarla, dispositivi sganciati).

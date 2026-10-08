@@ -27,6 +27,50 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Importazione da Spotify: CSV come fonte, Deezer per il resto, cartelle per album
+
+**Contesto:** i brani importati arrivavano con un solo artista, album a caso,
+titoli "NA", niente copertina né numero di traccia, in cartelle per artista.
+**Scelta:** i CSV di Exportify sono la fonte (titolo, tutti gli artisti,
+album, data, durata, ISRC, generi, etichetta); Deezer, API pubblica senza
+chiave, completa solo copertina, traccia, disco e artista dell'album, e solo
+se l'album coincide (`server/metadati.py`). Il server cerca con la durata come
+filtro (YouTube, poi SoundCloud), estrae in M4A senza ricodificare, scrive i
+tag con mutagen e mette il file in `<artista album>/<album>/<NN - titolo>` con
+`cover.jpg`. I download passano da una coda con due esecutori. Lo stesso modulo
+sistema i brani già in libreria (`deploy/riallinea-spotify.py`, prova a secco).
+**Alternative scartate:**
+- MusicBrainz per ISRC: dati ottimi ma 1 richiesta al secondo e copertine da
+  un secondo servizio; Deezer è più veloce e ha quasi sempre la copertina.
+- Spotify Web API: serve una chiave registrata per ogni server.
+- Primo risultato di Deezer per ISRC: spesso è il singolo, non l'album della
+  playlist.
+- Tag con i `meta_*` di yt-dlp/ffmpeg: le chiavi cambiano per formato e
+  copertina e ISRC non passano in modo uniforme.
+- Un thread per download: con migliaia di brani importati non regge.
+**Conseguenze:** i dati di ogni brano importato vanno a Deezer (ISRC, artista,
+album); senza rete verso Deezer restano i dati del CSV. I brani sistemati o
+spostati sono nuovi per Navidrome: le playlist si completano reimportando.
+**Da rivedere se:** Deezer chiude l'API pubblica (allora MusicBrainz + Cover
+Art Archive), oppure YouTube blocca stabilmente il server (cookie obbligatori).
+
+## 2026-10-08 — Eliminare brani: percorso dal DB di Navidrome, in sola lettura
+
+**Contesto:** eliminare brani dal server con un permesso per utente.
+**Scelta:** permesso `delete` (spento per gli utenti, sempre per gli admin);
+`POST /api/tracks/delete` legge `media_file.path` e `library.path` dal DB di
+Navidrome montato in sola lettura (`./data/navidrome:/navidrome:ro`,
+`?mode=ro`), accetta solo file dentro `MUSIC_DIR` dopo `realpath` e solo della
+libreria montata in `/music`, poi toglie le cartelle rimaste senza audio.
+**Alternative scartate:** percorso dal client (mai fidarsi); `getSong` Subsonic
+(percorso inventato salvo "report real path" per client); API nativa di
+Navidrome (serve un JWT, cioè la password); attivare "report real path" (a
+mano, client per client).
+**Conseguenze:** Armony dipende dallo schema interno di Navidrome per due
+colonne (`media_file.path`, `library.path`); la scansione la chiede il client.
+**Da rivedere se:** Navidrome cambia lo schema o espone il percorso vero via API
+con un token di servizio.
+
 ## 2026-10-08 — Dal vivo: un solo dispositivo suona, gli altri lo comandano (SSE)
 
 **Contesto:** fermare la musica sul PC deve fermarla sul telefono e viceversa;
