@@ -263,6 +263,10 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.7.0 (2026-10-08)**: abbellimento generale a token (tavolozza, caratteri,
+pulsanti, lettore, telefono) con le skill di design; l'app Android si aggiorna
+da sola (scarica, verifica lo sha256, conferma di Android).
+
 **Passo C fatto (2026-10-08)**: app Android con Capacitor (`app/`), plugin di
 riproduzione in sottofondo nostro, icona e avvio di Armony, APK firmato dalla
 GitHub Action a ogni tag, aggiornamenti dell'app dalle release. Da collaudare

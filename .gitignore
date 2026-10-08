@@ -4,6 +4,8 @@ video/
 data/
 updates/
 .env
+# skill installate in locale con "npx skills add" (vedi .claude/CLAUDE.md §6)
+skills-lock.json
 # configurazione locale degli agenti, tranne le linee guida condivise
 .claude/*
 !.claude/CLAUDE.md

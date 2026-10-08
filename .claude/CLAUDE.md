@@ -182,6 +182,26 @@ L'app ha già un suo linguaggio visivo (Bricolage Grotesque + Figtree, stili in
 `index.html`): conformati. Le skill di design servono come spunto, non per
 imporre un altro stile.
 
+### Token e skill di design (da 0.7.0)
+
+Stili nuovi con i token di `:root` in `index.html`: colori (`--bg`, `--surface`,
+`--surface2`, `--ink`, `--muted`, `--accent` che riempie, `--accent-text` come
+testo, `--on-accent` sopra l'ambra), spazi `--s1…--s7` (passi di 4 px), raggi
+`--r-s…--r-xl`, ombre `--shadow-art`/`--shadow-float`, altezza dei comandi
+`--hit`. Ogni `:hover` va dentro `@media (hover:hover) and (pointer:fine)`: sul
+tocco resterebbe attaccato. I campi restano a 16 px (sotto, iOS ingrandisce).
+
+Skill installate in `.claude/skills/` (locali, escluse da git), reinstallabili
+con `npx -y skills@1.7.0 add <repo> -a claude-code -s <skill> -y --copy` (serve
+Node 22: `. /opt/armony-android/env.sh`):
+
+| Fonte | Skill | Vale? |
+|---|---|---|
+| `emilkowalski/skill` | `mobile-native` | **Sì**: è la lista di controllo del telefono |
+| | `emil-design-eng`, `apple-design`, `review-animations`, `improve-animations`, `break-ui` | **Sì**, per rifinitura, movimento e dati peggiori |
+| `pbakaus/impeccable` | `impeccable` (`reference/craft-floor.md`, `layout.md`, `polish.md`) | **Sì** come lista di controllo; le direttive che impongono sotto-agenti (`critique.md`) si ignorano: valgono le istruzioni della sessione |
+| `microsoft/playwright-cli` | `playwright-cli` | **Sì**; il Playwright usato finora è quello in `/home/gigi/Gest/node_modules` |
+
 **Regola:** rendi, guarda, correggi in un lotto, riguarda una volta, fermati.
 Dopo il secondo giro di screenshot il rapporto tempo/difetti trovati crolla.
 

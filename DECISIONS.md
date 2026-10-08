@@ -27,6 +27,50 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Grafica: tavolozza, caratteri e componenti a token
+
+**Contesto:** richiesta di un abbellimento generale (caratteri, colori, lettore,
+pulsanti) e di spaziature adatte al telefono, con le skill `mobile-native`,
+`emil-design-eng` e `impeccable` come riferimento.
+**Scelta:** tenere l'identità (vinile, blu notte, ambra, Bricolage Grotesque e
+Figtree) e portarla su token: colori in due temi (notte più profonda, bianco
+"carta calda", `--on-accent` per il testo sull'ambra), spazi a passi di 4 px
+(`--s1…--s7`), raggi per gerarchia (`--r-s…--r-xl`), ombre `--shadow-art` e
+`--shadow-float`, altezza dei comandi `--hit` (40 px, 44 al tocco). Pulsanti di
+tre tipi (tonale, primario, icona). Il play è l'etichetta ambra del disco.
+Hover solo sotto `(hover:hover) and (pointer:fine)`. Sul telefono il lettore è
+su due righe (brano e ⏮▶⏭; casuale, barra, ripeti); testi, coda e qualità
+stanno in "In riproduzione" e nel pulsante in alto.
+**Alternative scartate:** cambiare caratteri o colori di base (si perde
+un'identità che non sembra un modello); lettore in vetro sfocato
+(`backdrop-filter` pesa sui telefoni economici e qui sarebbe decorazione);
+effetti al passaggio su ogni copertina (il difetto più tipico delle interfacce
+generate); tenere tutti i comandi nel lettore del telefono (la barra di
+avanzamento restava larga 16 px).
+**Conseguenze:** stili nuovi vanno scritti con i token, non con valori sparsi.
+Sul telefono testi e coda non hanno più un tasto nel lettore.
+**Da rivedere se:** "In riproduzione" perde le schede Testi/Prossimi, oppure
+serve un tema in più (allora i token vanno raccolti in un file a parte).
+
+## 2026-10-08 — Aggiornamento dell'app dall'app: PackageInstaller con sha256 della release
+
+**Contesto:** l'app proponeva solo un link all'APK da aprire nel browser.
+**Scelta:** il plugin `ArmonyUpdate` scarica l'APK della release, verifica lo
+sha256 pubblicato accanto all'APK (lo legge il plugin, perché il redirect di
+GitHub verso i file non ha CORS) e lo passa a PackageInstaller; Android chiede
+sempre conferma, e la prima volta il permesso "installa app sconosciute" per
+Armony. Controllo all'avvio, al ritorno in primo piano, al massimo ogni 6 ore.
+**Alternative scartate:** link nel browser (file in Download da cercare,
+nessuna verifica); `ACTION_VIEW` con FileProvider (deprecato per l'installazione,
+senza esito); installazione silenziosa (impossibile fuori dal Play Store senza
+un dispositivo gestito); aggiornare solo il client web nell'app
+(`setServerBasePath`): non porta le modifiche native e lega l'app a un secondo
+canale di distribuzione.
+**Conseguenze:** l'aggiornamento nell'app funziona dalla versione successiva a
+quella installata con questo codice; senza il `.sha256` nella release non si
+installa niente.
+**Da rivedere se:** l'app va sul Play Store (aggiornamenti gestiti da Google).
+
 ## 2026-10-08 — App Android: Capacitor, plugin di riproduzione nostro, APK firmato dalla Action
 
 **Contesto:** passo C di `docs/EVOLUZIONE.md`. Serve che la musica continui a
