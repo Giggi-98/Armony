@@ -230,6 +230,84 @@ async function syncSessions() {
   if (srv()?.session) store.set('downloader', null);
 }
 
+/* ================= movimento: risponde a un gesto, non decora (docs/EVOLUZIONE.md §3b) ================= */
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+// giradischi: al play il disco accelera fino a regime, alla pausa rallenta e si ferma
+const Turntable = {
+  set(el, on, now) {
+    if (!el) return;
+    if (calm()) { el._spin?.cancel(); el._spin = null; return; }
+    let a = el._spin;
+    if (!a) {
+      if (!on) return;
+      a = el._spin = el.animate([{ transform: 'rotate(0turn)' }, { transform: 'rotate(1turn)' }], { duration: el.classList.contains('rec') ? 4000 : 3200, iterations: Infinity });
+      a.playbackRate = now ? 1 : 0;
+    }
+    const to = on ? 1 : 0;
+    if (el._to === to) return;
+    el._to = to; cancelAnimationFrame(el._raf); a.play();
+    const from = a.playbackRate, dur = on ? 600 : 900, t0 = performance.now();
+    const step = () => {
+      const k = Math.max(0, Math.min(1, (performance.now() - t0) / dur)), e = on ? 1 - (1 - k) ** 3 : 1 - (1 - k) ** 2;
+      a.playbackRate = from + (to - from) * e;
+      if (k < 1) el._raf = requestAnimationFrame(step); else if (!on) a.pause();
+    };
+    el._raf = requestAnimationFrame(step);
+  }
+};
+// cambio di pagina con le View Transitions dove esistono: il contenuto si dissolve, e andando a
+// "In riproduzione" la copertina del lettore si espande nel disco grande (e torna indietro all'uscita)
+const Scene = {
+  hash: null, r: null, nav: 0,
+  go(run, from, to) {
+    if (!document.startViewTransition || from === null) return run();
+    const morph = calm() || !currentTrack() ? null : to === 'ora' && from !== 'ora' ? 'in' : from === 'ora' && to !== 'ora' ? 'out' : null;
+    const mini = $('#disc'), rec = () => $('#bigdisc .rec'), name = (el, n) => { if (el) el.style.viewTransitionName = n; };
+    if (morph === 'in') name(mini, 'disc'); else if (morph === 'out') name(rec(), 'disc');
+    return new Promise((res, rej) => {
+      const vt = document.startViewTransition(() => {
+        run().then(res, rej);
+        if (morph === 'in') { name(mini, ''); name(rec(), 'disc'); } else if (morph === 'out') name(mini, 'disc');
+      });
+      vt.finished.finally(() => { name(mini, ''); name(rec(), ''); });
+    });
+  }
+};
+// una vista superata da una navigazione più recente non deve più scrivere in #view:
+// ogni vista ricorda il proprio numero (const n = Scene.nav) e lo controlla dopo ogni attesa
+const stale = n => n !== Scene.nav;
+const SK = {
+  card: '<div class="alb"><div class="art sk"></div><i class="sk sk-line"></i><i class="sk sk-line short"></i></div>',
+  row: '<div class="list-item"><span class="pic sk"></span><span class="grow"><i class="sk sk-line"></i><i class="sk sk-line short"></i></span></div>',
+  pills: n => `<div class="sk-row">${'<i class="sk sk-pill"></i>'.repeat(n)}</div>`
+};
+// sagome della pagina che arriva, al posto della scritta "Caricamento…"
+function skeleton(r, id) {
+  const h = '<i class="sk sk-h1"></i><i class="sk sk-line short"></i>', rows = n => SK.row.repeat(n);
+  const body = r === 'home' ? h + SK.pills(4) + '<i class="sk sk-h2"></i><div class="albums strip">' + SK.card.repeat(8) + '</div><i class="sk sk-h2"></i>' + SK.pills(6)
+    : r === 'album' || r === 'artista' ? `<div class="hero"><div class="art sk"${r === 'artista' ? ' style="border-radius:50%"' : ''}></div><div class="sk-wrap">${h}</div></div>` + rows(8)
+    : r === 'genere' || r === 'decennio' || (r === 'libreria' && id === 'album') ? h + '<div class="albums" style="margin-top:18px">' + SK.card.repeat(12) + '</div>'
+    : r === 'ora' || r === 'cerca' || r === 'impostazioni' || r === 'scarica' || r === 'jam' || r === 'tasti' ? ''
+    : h + '<div style="margin-top:18px">' + rows(8) + '</div>';
+  return `<div class="sk-page" aria-busy="true" aria-label="Caricamento">${body}</div>`;
+}
+const beat = el => { if (el && !calm()) el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.35)' }, { transform: 'scale(.92)' }, { transform: 'scale(1)' }], { duration: 420, easing: 'cubic-bezier(.2,.8,.2,1)' }); };
+// "aggiunto alla coda": un punto ambra vola dal tasto premuto all'icona della coda nel lettore
+function flyToQueue(from) {
+  const q = $('#bQueue'); if (!from || !q || calm()) return;
+  const a = from.getBoundingClientRect(), b = q.getBoundingClientRect(); if (!b.width || !a.width) return;
+  const x0 = a.left + a.width / 2, y0 = a.top + a.height / 2;
+  const f = document.createElement('div'); f.className = 'fly'; f.style.left = x0 - 6 + 'px'; f.style.top = y0 - 6 + 'px'; f.innerHTML = '<i></i>';
+  document.body.append(f);
+  // x e y su due elementi con curve diverse: la traiettoria è un arco, non una retta
+  const o = { duration: 520, fill: 'forwards' };
+  f.animate([{ transform: 'translateX(0)' }, { transform: `translateX(${b.left + b.width / 2 - x0}px)` }], { ...o, easing: 'cubic-bezier(.3,.6,.4,1)' });
+  f.firstChild.animate([{ transform: 'translateY(0) scale(1)', opacity: 1 }, { transform: `translateY(${b.top + b.height / 2 - y0}px) scale(.6)`, opacity: .9 }], { ...o, easing: 'cubic-bezier(.6,0,.9,.6)' })
+    .finished.then(() => { f.remove(); q.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 300, easing: 'cubic-bezier(.2,.8,.2,1)' }); });
+}
+// play/pausa: le due metà del triangolo diventano le due barre (stessa sequenza di punti, la forma si trasforma)
+const PP = { play: ['M7 4L13.5 8L13.5 16L7 20Z', 'M13.5 8L20 12L20 12L13.5 16Z'], pause: ['M7 4L11 4L11 20L7 20Z', 'M13 4L17 4L17 20L13 20Z'] };
+
 /* ================= router ================= */
 const NAV = [
   ['home', 'Home', 'home'], ['cerca', 'Cerca', 'search'], ['libreria', 'Libreria', 'lib'], ['playlist', 'Playlist', 'list'],
@@ -251,15 +329,22 @@ async function route() {
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
     statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys
   }[r] || vHome;
-  delete view.dataset.pl;
-  view.innerHTML = '<p class="sub">Caricamento…</p>';
-  try { await fn(id); }
+  const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav; Scene.hash = location.hash; Scene.r = r;
+  const run = async () => {
+    if (stale(n)) return;
+    delete view.dataset.pl;
+    view.innerHTML = skeleton(r, id);
+    if (changed && r !== 'ora') window.scrollTo(0, 0);
+    return fn(id);
+  };
+  try { await (changed ? Scene.go(run, from, r) : run()); }
   catch (e) {
     console.error(e);
+    if (stale(n)) return;
     view.innerHTML = `<div class="empty"><h3>Qualcosa non ha funzionato</h3><p>${esc(e.message)}</p>
       <div class="row" style="justify-content:center"><button class="btn" onclick="route()">Riprova</button><a class="btn" href="#/impostazioni">Impostazioni</a>${Offline.keys.size ? '<a class="btn" href="#/offline">Ascolta offline</a>' : ''}</div></div>`;
   }
-  if (!['ora'].includes(r)) window.scrollTo(0, 0);
+  if (!changed && r !== 'ora' && !stale(n)) window.scrollTo(0, 0);
 }
 
 /* ================= componenti ================= */
@@ -314,6 +399,7 @@ async function vHome() {
   if (!srv()) return noServer();
   const s = srv();
   if (!navigator.onLine) { location.hash = '#/offline'; return; }
+  const n = Scene.nav;
   const [nw, rnd, freq, recent, genres] = await Promise.all([
     api('getAlbumList2', { type: 'newest', size: 18 }),
     api('getAlbumList2', { type: 'random', size: 12 }),
@@ -321,6 +407,7 @@ async function vHome() {
     api('getAlbumList2', { type: 'recent', size: 14 }).catch(() => null),
     api('getGenres').catch(() => null)
   ]);
+  if (stale(n)) return;
   const g = arr(genres?.genres?.genre).sort((a, b) => b.songCount - a.songCount).slice(0, 18);
   const hour = new Date().getHours();
   const hello = hour < 6 ? 'Buonanotte' : hour < 13 ? 'Buongiorno' : hour < 18 ? 'Buon pomeriggio' : 'Buonasera';
@@ -352,9 +439,11 @@ async function vHome() {
 async function vLibrary(tab = 'artisti') {
   if (!srv()) return noServer();
   tab = tab || 'artisti';
+  const n = Scene.nav;
   const tabs = `<h1>Libreria</h1><div class="tabs">${[['artisti', 'Artisti'], ['album', 'Album'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('')}</div>`;
   if (tab === 'artisti') {
     const idx = arr((await api('getArtists')).artists.index);
+    if (stale(n)) return;
     view.innerHTML = tabs + `<p class="sub">${idx.reduce((n, x) => n + arr(x.artist).length, 0)} artisti.</p>` +
       idx.map(x => `<div class="letter">${esc(x.name)}</div>` + arr(x.artist).map(a =>
         `<div class="list-item" data-act="artist" data-id="${esc(a.id)}"><span class="pic" style="border-radius:50%">${imgTag(a.coverArt, 100)}</span><span class="grow"><b>${esc(a.name)}</b></span><small>${a.albumCount || 0} album</small></div>`).join('')).join('');
@@ -374,16 +463,20 @@ async function vLibrary(tab = 'artisti') {
     await load(true);
   } else if (tab === 'generi') {
     const g = arr((await api('getGenres')).genres.genre).sort((a, b) => a.value.localeCompare(b.value));
+    if (stale(n)) return;
     view.innerHTML = tabs + (g.length ? `<div class="chips">${g.map(x => `<a class="chip" href="#/genere/${encodeURIComponent(x.value)}">${esc(x.value)} <small>${x.songCount} brani, ${x.albumCount} album</small></a>`).join('')}</div>` : '<div class="empty">Nessun genere nei metadati dei brani.</div>');
   } else {
     const r = await api('getRandomSongs', { size: 80 });
+    if (stale(n)) return;
     view.innerHTML = tabs + listActions(`<button class="btn" onclick="route()">${ic('shuffle')} Altri</button>`) + songList(arr(r.randomSongs.song).map(x => norm(x)));
   }
 }
 async function vArtist(id) {
+  const n = Scene.nav;
   const a = (await api('getArtist', { id })).artist;
   let info = null; try { info = (await api('getArtistInfo2', { id, count: 8 })).artistInfo2; } catch {}
   let top = []; try { top = arr((await api('getTopSongs', { artist: a.name, count: 10 })).topSongs?.song).map(x => norm(x)); } catch {}
+  if (stale(n)) return;
   const bio = (info?.biography || '').replace(/<a[^>]*>.*?<\/a>/g, '').replace(/<[^>]+>/g, '').trim();
   view.innerHTML = `<div class="hero"><div class="art" style="border-radius:50%">${info?.largeImageUrl ? `<img src="${esc(info.largeImageUrl)}" alt="" onerror="this.remove()">` : imgTag(a.coverArt, 400)}</div>
     <div><h1>${esc(a.name)}</h1><p class="sub">${a.albumCount || 0} album</p>
@@ -395,7 +488,9 @@ async function vArtist(id) {
     ${arr(info?.similarArtist).length ? `<h2>Artisti simili</h2><div class="chips">${arr(info.similarArtist).map(x => x.id ? `<a class="chip" href="#/artista/${encodeURIComponent(x.id)}">${esc(x.name)}</a>` : `<span class="chip">${esc(x.name)}</span>`).join('')}</div>` : ''}`;
 }
 async function vAlbum(id) {
+  const n = Scene.nav;
   const a = (await api('getAlbum', { id })).album;
+  if (stale(n)) return;
   const songs = arr(a.song).map(x => norm(x));
   const tot = songs.reduce((n, t) => n + t.duration, 0);
   const discs = new Set(songs.map(s => s.disc)).size;
@@ -407,10 +502,12 @@ async function vAlbum(id) {
     ${songList(songs, { showAlbum: false, art: false, numbers: true })}`;
 }
 async function vGenre(name) {
+  const n = Scene.nav;
   const [songs, albums] = await Promise.all([
     api('getSongsByGenre', { genre: name, count: 200 }),
     api('getAlbumList2', { type: 'byGenre', genre: name, size: 30 }).catch(() => null)
   ]);
+  if (stale(n)) return;
   const so = arr(songs.songsByGenre.song).map(x => norm(x));
   view.innerHTML = `<h1>${esc(name)}</h1><p class="sub">${so.length} brani.</p>
     ${arr(albums?.albumList2?.album).length ? `<h2>Album</h2>${albumGrid(arr(albums.albumList2.album), { strip: true })}<h2>Brani</h2>` : ''}
@@ -418,7 +515,9 @@ async function vGenre(name) {
 }
 async function vDecade(y) {
   y = +y;
+  const n = Scene.nav;
   const al = arr((await api('getAlbumList2', { type: 'byYear', fromYear: y, toYear: y + 9, size: 120 })).albumList2.album);
+  if (stale(n)) return;
   view.innerHTML = `<h1>Anni ${String(y).slice(2)}</h1><p class="sub">${al.length} album dal ${y} al ${y + 9}.</p>
     <div class="row" style="margin-bottom:18px"><button class="btn primary" data-act="decademix" data-y="${y}">${ic('shuffle')} Mix del decennio</button></div>${albumGrid(al)}`;
 }
@@ -432,6 +531,7 @@ async function vSearch() {
     const v = q.value.trim(); sessionStorage.setItem('armony:q', v);
     if (v.length < 2) { $('#res').innerHTML = ''; return; }
     try {
+      if (!$('#res').children.length) $('#res').innerHTML = `<div class="sk-page" style="margin-top:18px">${SK.row.repeat(6)}</div>`;
       const r = (await api('search3', { query: v, songCount: 60, albumCount: 18, artistCount: 12 })).searchResult3;
       const ar = arr(r.artist), al = arr(r.album), so = arr(r.song).map(x => norm(x));
       $('#res').innerHTML =
@@ -445,7 +545,9 @@ async function vSearch() {
 }
 async function vPlaylists() {
   if (!srv()) return noServer();
+  const n = Scene.nav;
   const pls = arr((await api('getPlaylists')).playlists.playlist);
+  if (stale(n)) return;
   view.innerHTML = `<h1>Playlist</h1><p class="sub">Le playlist pubbliche sono condivise con tutti gli utenti del server.</p>
     <div class="row" style="margin-bottom:18px">
       <button class="btn primary" data-act="newpl">${ic('plus')} Nuova playlist</button>
@@ -458,7 +560,9 @@ async function vPlaylists() {
       : '<div class="empty"><h3>Ancora nessuna playlist</h3><p>Creane una o importala da Spotify, da un\'altra app o da un amico.</p></div>'}`;
 }
 async function vPlaylist(id) {
+  const n = Scene.nav;
   const p = (await api('getPlaylist', { id })).playlist;
+  if (stale(n)) return;
   const songs = arr(p.entry).map(x => norm(x));
   view.innerHTML = `<div class="hero"><div class="art">${imgTag(p.coverArt, 500)}</div><div>
     <h1>${esc(p.name)}</h1><p class="sub">${songs.length} brani, ${fmtLong(p.duration || 0)}${p.owner ? '. Creata da ' + esc(p.owner) : ''}${p.public ? '. Condivisa con tutti' : ''}.</p>
@@ -474,7 +578,9 @@ async function vPlaylist(id) {
 }
 async function vStarred() {
   if (!srv()) return noServer();
+  const n = Scene.nav;
   const r = (await api('getStarred2')).starred2;
+  if (stale(n)) return;
   const songs = arr(r.song).map(x => norm(x));
   view.innerHTML = `<h1>Preferiti</h1><p class="sub">${songs.length} brani, ${arr(r.album).length} album, ${arr(r.artist).length} artisti.</p>
     ${arr(r.artist).length ? `<h2>Artisti</h2><div class="chips">${arr(r.artist).map(a => `<a class="chip" href="#/artista/${encodeURIComponent(a.id)}">${esc(a.name)}</a>`).join('')}</div>` : ''}
@@ -911,10 +1017,14 @@ function updateNowPlaying() {
 }
 function paintButtons() {
   const playing = isPlaying();
-  $('#bPlay').innerHTML = ic(playing ? 'pause' : 'play');
-  $('#bPlay').setAttribute('aria-label', playing ? 'Pausa' : 'Riproduci');
+  const bp = $('#bPlay');
+  if (!bp.querySelector('.pp')) bp.innerHTML = '<svg class="pp" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path/><path/></svg>';
+  bp.querySelectorAll('.pp path').forEach((p, i) => p.setAttribute('d', PP[playing ? 'pause' : 'play'][i]));
+  bp.classList.toggle('on', playing);
+  bp.setAttribute('aria-label', playing ? 'Pausa' : 'Riproduci');
   $('#disc').classList.toggle('spin', playing);
   $('#bigdisc')?.classList.toggle('spin', playing);
+  Turntable.set($('#disc'), playing); Turntable.set($('#bigdisc .rec'), playing);
   $('#bShuf').innerHTML = ic('shuffle'); $('#bShuf').classList.toggle('on', S.shuffle);
   $('#bRep').innerHTML = ic('repeat') + (S.repeat === 'one' ? '<span class="mini">1</span>' : '');
   $('#bRep').classList.toggle('on', S.repeat !== 'off');
@@ -964,6 +1074,7 @@ async function friendsNow() {
 }
 async function vFriends() {
   if (!srv()) return noServer();
+  const n = Scene.nav;
   view.innerHTML = `<h1>Amici</h1><p class="sub">Chi sta ascoltando cosa su ${esc(srv().name)}, in tempo reale.</p><div id="fl"></div>
     <h2>Jam vicine</h2><div id="fj"><p class="sub">Cerco…</p></div>`;
   const paint = async () => {
@@ -976,7 +1087,7 @@ async function vFriends() {
       <button class="icon-btn" data-act="more" data-i="${i}" aria-label="Altre azioni">${ic('more')}</button></div>`).join('')
       : '<div class="empty">Nessun amico sta ascoltando in questo momento.</div>';
   };
-  await paint(); viewInterval(paint, 15000);
+  await paint(); if (stale(n)) return; viewInterval(paint, 15000);
   Jam.nearby().then(js => { const b = $('#fj'); if (b) b.innerHTML = js.length ? js.map(j => `<div class="list-item" data-act="jamknock" data-id="${esc(j.id)}" data-base="${esc(j.base || '')}"><span class="pic" style="display:grid;place-items:center">${ic('jam')}</span><span class="grow"><b>${esc(j.name)}</b><small>di ${esc(j.hostName || '?')}${j.server ? ', sul server ' + esc(j.server) : ''}</small></span><span class="btn sm">Chiedi di entrare</span></div>`).join('') : '<div class="empty">Nessuna Jam aperta sulla tua rete.</div>'; });
 }
 
@@ -1000,6 +1111,7 @@ async function vNow() {
     </div>
     <div><div class="tabs">${[['lyr', 'Testi'], ['next', 'Prossimi'], ['info', 'Dettagli']].map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div><div id="nowPane"></div></div></div>`;
   view.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { sessionStorage.setItem('armony:nowtab', b.dataset.tab); vNow(); });
+  Turntable.set($('#bigdisc .rec'), isPlaying(), true);  // il disco grande nasce già alla velocità del piccolo
   const pane = $('#nowPane');
   let lyr = null;
   if (tab === 'lyr') {
@@ -1064,10 +1176,12 @@ async function vNow() {
 
 /* ================= offline (vista) ================= */
 async function vOffline() {
+  const n = Scene.nav;
   const recs = (await DB.all('offline').catch(() => [])).sort((a, b) => b.added - a.added);
   const tot = recs.reduce((n, r) => n + r.size, 0);
   let est = ''; try { const e = await navigator.storage.estimate(); est = `, spazio disponibile ${bytes(e.quota - e.usage)}`; } catch {}
   const tracks = recs.map(r => r.track);
+  if (stale(n)) return;
   view.innerHTML = `<h1>Offline</h1><p class="sub">${recs.length} brani salvati su questo dispositivo, ${bytes(tot)}${est}. ${navigator.onLine ? '' : '<b>Sei offline:</b> puoi ascoltare solo questi.'}</p>
     <div class="row" style="margin-bottom:16px">
       <button class="btn primary" data-act="playall">${ic('play')} Riproduci</button><button class="btn" data-act="shuffleall">${ic('shuffle')} Mescola</button>
@@ -1081,7 +1195,9 @@ async function vOffline() {
 /* ================= statistiche ================= */
 async function vStats() {
   const period = sessionStorage.getItem('armony:sp') || '30';
+  const n = Scene.nav;
   const all = await Stats.all();
+  if (stale(n)) return;
   const from = period === 'all' ? 0 : period === 'year' ? new Date(new Date().getFullYear(), 0, 1).getTime() : Date.now() - (+period) * 864e5;
   const h = all.filter(x => x.ts >= from);
   const secs = h.reduce((n, x) => n + x.duration, 0);
@@ -1696,14 +1812,14 @@ view.addEventListener('click', async e => {
       case 'qplayoff': playIndex(S.index + 1 + i); break;
       case 'playall': setQueue(list, 0, S.shuffle); break;
       case 'shuffleall': setQueue(list, 0, true); break;
-      case 'enqueueall': if (Jam.role === 'guest') { list.slice(0, 10).forEach(t => Jam.suggest(t)); break; } S.queue.push(...list); persistQueue(); toast(`${list.length} brani aggiunti alla coda.`); break;
+      case 'enqueueall': if (Jam.role === 'guest') { list.slice(0, 10).forEach(t => Jam.suggest(t)); break; } S.queue.push(...list); persistQueue(); flyToQueue(el); toast(`${list.length} brani aggiunti alla coda.`); break;
       case 'offlineall': Offline.save(list); break;
       case 'addalltopl': addToPlaylistDialog(list); break;
-      case 'enqueue': if (Jam.role === 'guest') { Jam.suggest(list[i]); break; } S.queue.push(list[i]); persistQueue(); toast('Aggiunto alla coda.'); break;
+      case 'enqueue': if (Jam.role === 'guest') { Jam.suggest(list[i]); break; } S.queue.push(list[i]); persistQueue(); flyToQueue(el); toast('Aggiunto alla coda.'); break;
       case 'more': songMenu(list[i], { pl: view.dataset.pl ? i : null }); break;
       case 'star': {
         const t = list[i]; await api(t.starred ? 'unstar' : 'star', { id: t.id }, srv(t.serverId));
-        t.starred = !t.starred; el.classList.toggle('on', t.starred); el.innerHTML = ic('heart', t.starred); break;
+        t.starred = !t.starred; el.classList.toggle('on', t.starred); el.innerHTML = ic('heart', t.starred); if (t.starred) beat(el.firstChild); break;
       }
       case 'staralbum': await api(el.dataset.on === '1' ? 'unstar' : 'star', { albumId: id }); route(); break;
       case 'shareitem': shareItem(id, el.dataset.name); break;

@@ -20,6 +20,8 @@
   --display:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
   --body:"Figtree","Segoe UI",system-ui,-apple-system,sans-serif;
   --player-h:84px;--side-w:224px;
+  /* movimento: risponde a un gesto, non decora (docs/EVOLUZIONE.md §3b) */
+  --ease:cubic-bezier(.2,.8,.2,1);--t-tap:120ms;--t-move:240ms;--t-scene:420ms;
   box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -62,6 +64,8 @@ h3{font:600 1.1rem/1.25 var(--display);margin:0 0 8px}
 .btn.danger{color:var(--danger)}
 .btn.sm{padding:5px 11px;font-size:.88rem}
 .btn svg{width:17px;height:17px}
+.btn,.icon-btn,.play{transition:transform var(--t-tap) ease-out}
+.btn:active,.icon-btn:active,.play:active{transform:scale(.95)}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .row.between{justify-content:space-between}
 .stack{display:grid;gap:10px}
@@ -127,7 +131,7 @@ label.check small{display:block;color:var(--muted)}
 .letter{font:800 1.4rem var(--display);color:var(--accent);margin:22px 0 4px}
 .empty{padding:36px 20px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:16px}
 .empty h3{color:var(--ink)}
-.drop{padding:28px 20px;text-align:center;border:1.5px dashed var(--line);border-radius:16px;transition:border-color .2s,background .2s}
+.drop{padding:28px 20px;text-align:center;border:1.5px dashed var(--line);border-radius:16px;transition:border-color var(--t-move),background var(--t-move)}
 .drop small{display:block;color:var(--muted);margin-top:4px}
 .drop.over{border-color:var(--accent);background:var(--accent-soft)}
 .bar{height:6px;background:var(--surface2);border-radius:99px;overflow:hidden;margin-top:8px}
@@ -146,9 +150,8 @@ label.check small{display:block;color:var(--muted)}
 .bigdisc .rec{position:absolute;inset:11%;border-radius:50%;background:repeating-radial-gradient(circle,#191b30 0 2px,#23264a 2px 3px);box-shadow:0 0 0 2px var(--line)}
 .bigdisc .rec img,.bigdisc .rec .lbl{position:absolute;inset:27%;border-radius:50%;width:46%;height:46%;object-fit:cover;background:var(--accent)}
 .bigdisc .rec::after{content:"";position:absolute;left:50%;top:50%;width:10px;height:10px;margin:-5px;border-radius:50%;background:var(--bg)}
-.bigdisc.spin .rec{animation:spin 4s linear infinite}
 .lyrics{max-height:62vh;overflow-y:auto;padding:8vh 4px 30vh;mask-image:linear-gradient(transparent,#000 12%,#000 80%,transparent);scroll-behavior:smooth}
-.lyrics p{margin:0 0 14px;font:600 clamp(1.15rem,2.2vw,1.6rem)/1.35 var(--display);color:var(--muted);cursor:pointer;transition:color .2s}
+.lyrics p{margin:0 0 14px;font:600 clamp(1.15rem,2.2vw,1.6rem)/1.35 var(--display);color:var(--muted);cursor:pointer;transition:color var(--t-move)}
 .lyrics p.on{color:var(--ink)}
 .lyrics.plain p{font:500 1.05rem/1.6 var(--body);color:var(--ink);cursor:default;margin:0 0 4px}
 @media (prefers-reduced-motion:reduce){.lyrics{scroll-behavior:auto}}
@@ -159,9 +162,14 @@ label.check small{display:block;color:var(--muted)}
 .disc{width:58px;height:58px;border-radius:50%;flex:none;position:relative;background:repeating-radial-gradient(circle,#191b30 0 2px,#23264a 2px 3px);box-shadow:0 0 0 2px var(--line)}
 .disc img,.disc .lbl{position:absolute;inset:14px;width:30px;height:30px;border-radius:50%;object-fit:cover;background:var(--accent)}
 .disc::after{content:"";position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px;border-radius:50%;background:var(--bg)}
-.disc.spin{animation:spin 3.2s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.disc.spin,.bigdisc.spin .rec{animation:none}}
+/* play/pausa: le due metà del triangolo diventano le due barre (gli attributi d in armony.js valgono dove la proprietà CSS d non c'è) */
+@supports (d:path("M0 0")){
+  .play svg.pp path{transition:d var(--t-move) var(--ease)}
+  .play svg.pp path:first-child{d:path("M7 4L13.5 8L13.5 16L7 20Z")}
+  .play svg.pp path:last-child{d:path("M13.5 8L20 12L20 12L13.5 16Z")}
+  .play.on svg.pp path:first-child{d:path("M7 4L11 4L11 20L7 20Z")}
+  .play.on svg.pp path:last-child{d:path("M13 4L17 4L17 20L13 20Z")}
+}
 .np .t{min-width:0}
 .np b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -228,7 +236,46 @@ dialog.sheet button.mi{display:flex;width:100%;gap:12px;align-items:center;paddi
 dialog.sheet button.mi:hover{background:var(--surface2)}
 dialog.sheet button.mi svg{width:19px;height:19px;color:var(--muted)}
 dialog video{width:100%;border-radius:10px;background:#000}
-.toast{position:fixed;left:50%;bottom:calc(var(--player-h) + 16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;z-index:70;font-weight:500;max-width:90vw;text-align:center}
+.toast{position:fixed;left:50%;bottom:calc(var(--player-h) + 16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;z-index:70;font-weight:500;max-width:90vw;text-align:center;animation:toast-in var(--t-move) var(--ease)}
+@keyframes toast-in{from{opacity:0;transform:translate(-50%,8px)}}
+.fly{position:fixed;z-index:80;width:12px;height:12px;pointer-events:none}
+.fly i{display:block;width:100%;height:100%;border-radius:50%;background:var(--accent)}
+
+/* cambio di pagina: si dissolve solo il contenuto, barra laterale e lettore restano fermi */
+#view{view-transition-name:view}
+/* lettore e barra restano strati propri e fermi: senza, il contenuto in dissolvenza passerebbe sopra di loro */
+#player{view-transition-name:player}
+aside{view-transition-name:side}
+::view-transition-old(root),::view-transition-new(root),::view-transition-group(view),
+::view-transition-group(player),::view-transition-old(player),::view-transition-new(player),
+::view-transition-group(side),::view-transition-old(side),::view-transition-new(side){animation:none}
+::view-transition-old(player),::view-transition-old(side){opacity:0}
+::view-transition-group(disc){z-index:2}
+::view-transition-old(view){animation:vt-out 160ms ease-out both}
+::view-transition-new(view){animation:vt-in var(--t-scene) var(--ease) both}
+::view-transition-group(disc){animation-duration:var(--t-scene);animation-timing-function:var(--ease)}
+@keyframes vt-out{to{opacity:0}}
+@keyframes vt-in{from{opacity:0}}
+
+/* sagome della pagina in arrivo: compaiono solo se il caricamento dura più di un attimo */
+.sk-page{animation:vt-in var(--t-move) var(--ease) .15s both}
+.sk{display:block;background:var(--surface2);border-radius:8px;animation:sk-pulse 1.1s ease-in-out infinite alternate}
+.sk-h1{height:2.5rem;width:min(420px,70%);margin:4px 0 12px;border-radius:10px}
+.sk-h2{height:1.3rem;width:190px;margin:28px 0 14px}
+.sk-line{height:.8rem;width:72%;margin:7px 0}
+.sk-line.short{width:42%}
+.sk-row{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.sk-pill{height:38px;width:112px;border-radius:999px}
+.sk-wrap{flex:1;min-width:200px}
+@keyframes sk-pulse{from{opacity:.5}to{opacity:1}}
+
+@media (prefers-reduced-motion:reduce){
+  .btn,.icon-btn,.play,.play svg.pp path{transition:none}
+  .btn:active,.icon-btn:active,.play:active{transform:none}
+  .toast{animation-name:vt-in}
+  .sk{animation:none}
+  ::view-transition-group(*){animation:none}
+}
 .mobile-only{display:none}
 kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em;background:var(--surface2)}
 
