@@ -101,6 +101,9 @@ Salva album, playlist o singoli brani sul telefono, nella qualità che preferisc
 - Copertina e metadati inclusi. **SponsorBlock** taglia intro, parti parlate e sponsor dai video musicali.
 - La libreria si aggiorna da sola e i video si guardano dentro l'app.
 
+### Eliminare brani
+Dal menu di un brano ("Elimina dal server") o dalla pagina dell'album ("Elimina album"). Il file viene cancellato per tutti, dopo una conferma. Gli amministratori possono sempre; agli altri utenti l'amministratore lo abilita in Impostazioni → Utenti → Eliminazione (spento di default).
+
 ### Caricamento dal dispositivo
 - In Scarica → **Dal dispositivo** carichi sul server la musica che hai sul telefono o sul computer: file singoli, cartelle intere o trascinandoli nella pagina.
 - Formati: MP3, FLAC, M4A/AAC, Opus, OGG, WAV, AIFF, WMA, WavPack, APE. Le copertine `cover.jpg` e `folder.jpg` vengono caricate insieme all'album.
@@ -109,7 +112,7 @@ Salva album, playlist o singoli brani sul telefono, nella qualità che preferisc
 
 ### Playlist, importazione ed esportazione
 - Playlist condivise con tutti gli utenti del server, con descrizione.
-- **Importa da Spotify**: esporta le tue playlist con Exportify (exportify.app) e importa il CSV. Armony trova i brani che hai già, poi **cerca, scarica e aggiunge da solo i mancanti** appena sono pronti. Funziona anche con M3U e JSON.
+- **Importa da Spotify**: esporta le tue playlist con Exportify (exportify.app) e importa i CSV, anche tutti insieme: ogni file diventa una playlist (se esiste già, vi si aggiungono solo i brani mancanti, quindi si può rifare). Armony riconosce i brani che hai già da titolo, artisti e durata, poi **cerca, scarica e aggiunge da solo i mancanti** appena sono pronti, una volta sola anche se stanno in più playlist. I brani scaricati arrivano già ordinati: titolo, tutti gli artisti, album, artista dell'album, data d'uscita, numero di traccia, generi, etichetta e copertina (dal CSV, completati con Deezer), in `Spotify/<artista>/<album>/<NN - titolo>`; la ricerca online usa la durata per scartare versioni live, cover e video con introduzioni. Funziona anche con M3U e JSON.
 - Esporta in M3U, JSON o CSV.
 - **Link di condivisione** di 30 giorni per album, playlist o brani, ascoltabili anche da chi non ha un account.
 
@@ -141,6 +144,8 @@ Navidrome funziona anche con app già pronte, collegate allo stesso server e all
 - **Aggiornare Armony**: quando esce una versione nuova, l'app lo segnala agli amministratori. In Impostazioni → Aggiornamenti premi «Aggiorna»: il server scarica la versione e si riavvia in un minuto. Senza il servizio installato, a mano: `git fetch --tags && git checkout <ultima versione> && docker compose up -d --build`. L'aggiornamento si rifiuta se hai modificato a mano dei file del repository (`.env` e i dati non contano).
 - Aggiornare Navidrome e gli altri componenti: `docker compose pull && docker compose up -d`
 - Generi sbagliati sui brani scaricati prima della 0.5 ("People & Blogs", "Gaming"…, sono le categorie dei video YouTube): `docker compose run --rm --no-deps -v ./deploy:/deploy:ro --entrypoint python armony /deploy/pulisci-generi.py /music` mostra cosa cambierebbe; aggiungi `--applica` per toglierli. Tocca solo i file scaricati da YouTube.
+- **Sistemare i brani già in libreria con i CSV di Spotify** (titoli "NA", album sbagliati, niente copertina): metti i CSV di Exportify in `spotify_playlists/` (resta fuori da git) e lancia `docker compose run --rm --no-deps -v ./deploy:/deploy:ro -v ./spotify_playlists:/csv:ro --entrypoint python armony /deploy/riallinea-spotify.py /csv /music`. È una prova a secco: elenca file per file cosa cambierebbe. Con `--applica` riscrive i tag e sposta i file nelle cartelle degli album, e lascia un registro per annullare (`--annulla /music/.armony-riallinea-….jsonl`). Dopo, reimporta i CSV: Navidrome considera nuovi i brani sistemati e le playlist vanno completate.
+- **YouTube chiede di confermare che non sei un robot**: succede a volte con gli indirizzi dei server. Armony prova allora SoundCloud. Se capita spesso, esporta i cookie di YouTube dal browser (estensione "Get cookies.txt LOCALLY") in `data/armony/youtube-cookies.txt`: i download li useranno. Usa un account secondario: il rischio ricade su quell'account.
 - yt-dlp si aggiorna a ogni riavvio. Se un sito smette di funzionare, basta `docker compose restart armony`.
 - Backup: le cartelle `data/` (utenti, playlist, statistiche del server) e `musica/`.
 

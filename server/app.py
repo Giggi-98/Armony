@@ -10,20 +10,25 @@ Armony - server di supporto.
   /api/login, /api/logout, /api/me   accesso con le credenziali Navidrome (token + sale
                         Subsonic); la sessione va nell'intestazione X-Token
   /api/users            permessi per utente (solo amministratori)
+  /api/tracks/delete    elimina file dalla libreria (permesso "delete"); il percorso vero viene dal DB di
+                        Navidrome, letto in sola lettura, mai dal client
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
   /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download")
+  /api/import           brani da Spotify (Exportify): metadati completati, ricerca per durata, tag e cartelle per album
   /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
                         aggiornamento la esegue l'host (deploy/armony-update.sh), non il container
 """
 import hashlib
 import ipaddress
+import sqlite3
 import queue
 import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import struct
 import threading
@@ -37,6 +42,7 @@ from flask import Flask, Response, abort, g, jsonify, request, send_from_directo
 from yt_dlp.postprocessor.metadataparser import MetadataParserPP
 
 import db
+import metadati
 
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
 VIDEO_DIR = os.environ.get("VIDEO_DIR", "/videos")
@@ -62,10 +68,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
-RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/upload", "upload"),
-         ("/api/download", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
+RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/upload", "upload"), ("/api/tracks/delete", "delete"),
+         ("/api/download", "download"), ("/api/import", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
 SESSION_DAYS = 180
@@ -91,15 +97,16 @@ def identity(tok=None):
         return None
     # ARMONY_TOKEN resta come accesso di emergenza dell'amministratore
     if TOKEN and secrets.compare_digest(tok, TOKEN):
-        return dict(user=None, admin=True, upload=True, download=True)
-    s = db.one("SELECT s.user, s.admin, s.seen, coalesce(p.upload, 1) upload, coalesce(p.download, 1) download "
+        return dict(user=None, admin=True, upload=True, download=True, delete=True)
+    s = db.one("SELECT s.user, s.admin, s.seen, coalesce(p.upload, 1) upload, coalesce(p.download, 1) download, coalesce(p.del, 0) del "
                "FROM sessions s LEFT JOIN perms p ON p.user = s.user WHERE s.token = ?", tok)
     if not s or time.time() - s["seen"] > SESSION_DAYS * 86400:
         return None
     if time.time() - s["seen"] > 3600:
         db.run("UPDATE sessions SET seen = ? WHERE token = ?", time.time(), tok)
     admin = bool(s["admin"])
-    return dict(user=s["user"], admin=admin, upload=admin or bool(s["upload"]), download=admin or bool(s["download"]))
+    return dict(user=s["user"], admin=admin, upload=admin or bool(s["upload"]), download=admin or bool(s["download"]),
+                delete=admin or bool(s["del"]))
 
 
 @app.before_request
@@ -114,7 +121,8 @@ def guard():
         return jsonify(error="Accesso richiesto: entra con il tuo utente."), 401
     if need != "user" and not g.who["admin" if need == "admin" else need]:
         return jsonify(error={"admin": "Serve un amministratore.", "upload": "Il caricamento non è abilitato per il tuo utente.",
-                              "download": "I download non sono abilitati per il tuo utente."}[need]), 403
+                              "download": "I download non sono abilitati per il tuo utente.",
+                              "delete": "L'eliminazione non è abilitata per il tuo utente."}[need]), 403
     return None
 
 
@@ -154,7 +162,7 @@ def login():
 
 
 def me_payload():
-    return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"],
+    return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"], delete=g.who["delete"],
                 name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS)
 
 
@@ -172,19 +180,20 @@ def logout():
 @app.get("/api/users")
 def users():
     rows = db.all_("SELECT u.user, max(s.admin) admin, max(s.seen) seen, count(s.token) sessions, "
-                   "coalesce(p.upload, 1) upload, coalesce(p.download, 1) download "
+                   "coalesce(p.upload, 1) upload, coalesce(p.download, 1) download, coalesce(p.del, 0) del "
                    "FROM (SELECT user FROM sessions UNION SELECT user FROM perms) u "
                    "LEFT JOIN sessions s ON s.user = u.user LEFT JOIN perms p ON p.user = u.user "
                    "GROUP BY u.user ORDER BY u.user")
-    return jsonify([dict(r, admin=bool(r["admin"]), upload=bool(r["upload"]), download=bool(r["download"])) for r in rows])
+    return jsonify([{**{k: r[k] for k in ("user", "seen", "sessions")}, "admin": bool(r["admin"]), "upload": bool(r["upload"]),
+                     "download": bool(r["download"]), "delete": bool(r["del"])} for r in rows])
 
 
 @app.put("/api/users/<name>")
 def set_user(name):
     d = request.get_json(silent=True) or {}
-    db.run("INSERT INTO perms (user, upload, download) VALUES (?, ?, ?) "
-           "ON CONFLICT(user) DO UPDATE SET upload = excluded.upload, download = excluded.download",
-           name[:100], int(bool(d.get("upload", True))), int(bool(d.get("download", True))))
+    db.run("INSERT INTO perms (user, upload, download, del) VALUES (?, ?, ?, ?) "
+           "ON CONFLICT(user) DO UPDATE SET upload = excluded.upload, download = excluded.download, del = excluded.del",
+           name[:100], int(bool(d.get("upload", True))), int(bool(d.get("download", True))), int(bool(d.get("delete", False))))
     return jsonify(ok=True)
 
 
@@ -455,7 +464,7 @@ def prefs_put():
 lconns = {}    # utente -> {id connessione: {"device", "name", "q"}}
 lstates = {}   # utente -> {dispositivo: ultimo stato}
 llock = threading.Lock()
-LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo")
+LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat")
 
 
 def live_put(user, msg, only=None, skip=None):
@@ -529,7 +538,7 @@ def live_cmd():
     u, d = user_or_400(), request.get_json(silent=True) or {}
     to, cmd = str(d.get("to") or ""), str(d.get("cmd") or "")
     # transfer: "suona questa coda da qui"; handoff: "passa la tua coda a quel dispositivo"
-    if cmd not in ("play", "pause", "toggle", "next", "prev", "seek", "transfer", "handoff"):
+    if cmd not in ("play", "pause", "toggle", "next", "prev", "seek", "shuffle", "repeat", "transfer", "handoff"):
         return jsonify(error="Comando non valido"), 400
     with llock:
         present = any(c["device"] == to for c in lconns.get(u, {}).values())
@@ -545,10 +554,12 @@ def live_cmd():
 # ------------------------------------------------------------------ download
 jobs = {}
 jlock = threading.Lock()
-SLOTS = threading.Semaphore(2)
+# una coda e due esecutori fissi: con un'importazione da migliaia di brani un thread per lavoro non regge
+jq = queue.Queue()
+COOKIES = os.path.join(os.path.dirname(db.PATH), "youtube-cookies.txt")
 
 
-JOB_KEYS = ("url", "mode", "format", "quality", "playlist", "folder", "sponsorblock", "meta")
+JOB_KEYS = ("url", "mode", "format", "quality", "playlist", "folder", "sponsorblock", "meta", "track")
 DONE = ("completato", "completato con errori", "errore")
 
 
@@ -572,7 +583,16 @@ def resume_jobs():
         jobs[j["id"]] = j
         if j["status"] not in DONE:
             j.update(status="in coda", progress=0)
-            threading.Thread(target=run_job, args=(j["id"], {k: j[k] for k in JOB_KEYS}), daemon=True).start()
+            jq.put((j["id"], {k: j.get(k) for k in JOB_KEYS}))
+
+
+def worker():
+    while True:
+        jid, j = jq.get()
+        try:
+            (run_brano if j.get("track") else run_job)(jid, j)
+        except Exception as e:  # noqa: BLE001 — un lavoro rotto non deve fermare la coda
+            jupdate(jid, status="errore", error=str(e)[:400], finished=time.time())
 
 
 def lit(s):
@@ -580,67 +600,140 @@ def lit(s):
 
 
 def run_job(jid, j):
-    with SLOTS:
-        jupdate(jid, status="in corso")
+    jupdate(jid, status="in corso")
 
-        def progress(d):
-            info = d.get("info_dict") or {}
-            title = info.get("title") or jobs[jid].get("title")
-            if d["status"] == "downloading":
-                tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-                jupdate(jid, title=title, progress=round(d.get("downloaded_bytes", 0) * 100 / tot, 1) if tot else None,
-                        item=info.get("playlist_index"), items=info.get("n_entries"))
-            elif d["status"] == "finished":
-                jupdate(jid, title=title, progress=100, status="conversione")
+    def progress(d):
+        info = d.get("info_dict") or {}
+        title = info.get("title") or jobs[jid].get("title")
+        if d["status"] == "downloading":
+            tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            jupdate(jid, title=title, progress=round(d.get("downloaded_bytes", 0) * 100 / tot, 1) if tot else None,
+                    item=info.get("playlist_index"), items=info.get("n_entries"))
+        elif d["status"] == "finished":
+            jupdate(jid, title=title, progress=100, status="conversione")
 
-        meta = j.get("meta") or {}
-        audio = j["mode"] == "audio"
-        folder = clean_segment(j.get("folder"), "Scaricati") if audio else ""
-        base = os.path.join(MUSIC_DIR, folder) if audio else VIDEO_DIR
-        name_tpl = "%(artist)s - %(title)s.%(ext)s" if meta.get("artist") else "%(title)s.%(ext)s"
-        dir_tpl = "%(artist)s" if meta.get("artist") else "%(uploader,channel|Sconosciuto)s"
+    meta = j.get("meta") or {}
+    audio = j["mode"] == "audio"
+    folder = clean_segment(j.get("folder"), "Scaricati") if audio else ""
+    base = os.path.join(MUSIC_DIR, folder) if audio else VIDEO_DIR
+    name_tpl = "%(artist)s - %(title)s.%(ext)s" if meta.get("artist") else "%(title)s.%(ext)s"
+    dir_tpl = "%(artist)s" if meta.get("artist") else "%(uploader,channel|Sconosciuto)s"
 
-        # FFmpegMetadata, senza un genere vero, scrive come genere le categorie o i tag del video
-        # ("People & Blogs", "Gaming"…). meta_genre vince su tutto: genere vero se c'è, altrimenti vuoto.
-        # Regex e non modello: un modello vuole almeno un carattere e con genere vuoto non scatterebbe
-        pre = [{"key": "MetadataParser", "when": "pre_process",
-                "actions": [(MetadataParserPP.Actions.INTERPRET, "%(genre,genres|)l", "(?P<meta_genre>.*)")]}]
-        if meta:
-            actions = [(MetadataParserPP.Actions.INTERPRET, lit(v), f"%({k})s")
-                       for k, v in meta.items() if k in ("artist", "title", "album") and v]
-            if actions:
-                pre.append({"key": "MetadataParser", "actions": actions, "when": "pre_process"})
-        sponsor = []
-        if j.get("sponsorblock"):
-            sponsor = [{"key": "SponsorBlock", "categories": ["music_offtopic", "intro", "outro", "selfpromo", "sponsor"], "when": "after_filter"},
-                       {"key": "ModifyChapters", "remove_sponsor_segments": ["music_offtopic", "intro", "outro", "selfpromo", "sponsor"]}]
+    # FFmpegMetadata, senza un genere vero, scrive come genere le categorie o i tag del video
+    # ("People & Blogs", "Gaming"…). meta_genre vince su tutto: genere vero se c'è, altrimenti vuoto.
+    # Regex e non modello: un modello vuole almeno un carattere e con genere vuoto non scatterebbe
+    pre = [{"key": "MetadataParser", "when": "pre_process",
+            "actions": [(MetadataParserPP.Actions.INTERPRET, "%(genre,genres|)l", "(?P<meta_genre>.*)")]}]
+    if meta:
+        actions = [(MetadataParserPP.Actions.INTERPRET, lit(v), f"%({k})s")
+                   for k, v in meta.items() if k in ("artist", "title", "album") and v]
+        if actions:
+            pre.append({"key": "MetadataParser", "actions": actions, "when": "pre_process"})
+    sponsor = []
+    if j.get("sponsorblock"):
+        sponsor = [{"key": "SponsorBlock", "categories": ["music_offtopic", "intro", "outro", "selfpromo", "sponsor"], "when": "after_filter"},
+                   {"key": "ModifyChapters", "remove_sponsor_segments": ["music_offtopic", "intro", "outro", "selfpromo", "sponsor"]}]
 
-        opts = {
-            "outtmpl": os.path.join(base, dir_tpl, name_tpl),
-            "noplaylist": not j["playlist"], "ignoreerrors": j["playlist"],
-            "windowsfilenames": True, "quiet": True, "no_warnings": True, "retries": 5,
-            "progress_hooks": [progress], "writethumbnail": True,
-        }
-        if audio:
-            opts["format"] = "bestaudio/best"
-            opts["postprocessors"] = pre + sponsor + [
-                {"key": "FFmpegExtractAudio", "preferredcodec": j["format"], "preferredquality": AUDIO_QUALITIES[j["quality"]]},
-                {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
-                {"key": "FFmpegMetadata", "add_metadata": True},
-                {"key": "EmbedThumbnail"}]
-        else:
-            h = "" if j["quality"] == "best" else f"[height<={j['quality']}]"
-            opts["format"] = f"bestvideo{h}+bestaudio/best{h}"
-            opts["merge_output_format"] = "mp4"
-            opts["postprocessors"] = pre + sponsor + [
-                {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
-                {"key": "FFmpegMetadata", "add_metadata": True}, {"key": "EmbedThumbnail"}]
+    opts = {
+        "cookiefile": COOKIES if os.path.exists(COOKIES) else None,
+        "outtmpl": os.path.join(base, dir_tpl, name_tpl),
+        "noplaylist": not j["playlist"], "ignoreerrors": j["playlist"],
+        "windowsfilenames": True, "quiet": True, "no_warnings": True, "retries": 5,
+        "progress_hooks": [progress], "writethumbnail": True,
+    }
+    if audio:
+        opts["format"] = "bestaudio/best"
+        opts["postprocessors"] = pre + sponsor + [
+            {"key": "FFmpegExtractAudio", "preferredcodec": j["format"], "preferredquality": AUDIO_QUALITIES[j["quality"]]},
+            {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
+            {"key": "FFmpegMetadata", "add_metadata": True},
+            {"key": "EmbedThumbnail"}]
+    else:
+        h = "" if j["quality"] == "best" else f"[height<={j['quality']}]"
+        opts["format"] = f"bestvideo{h}+bestaudio/best{h}"
+        opts["merge_output_format"] = "mp4"
+        opts["postprocessors"] = pre + sponsor + [
+            {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
+            {"key": "FFmpegMetadata", "add_metadata": True}, {"key": "EmbedThumbnail"}]
+    try:
+        with yt_dlp.YoutubeDL(opts) as y:
+            code = y.download([j["url"]])
+        jupdate(jid, status="completato" if code == 0 else "completato con errori", progress=100, finished=time.time())
+    except Exception as e:  # noqa: BLE001
+        jupdate(jid, status="errore", error=str(e)[:400], finished=time.time())
+
+
+# brani importati: da evitare se il titolo originale non li nomina
+BRANO_NO = re.compile(r"\b(live|cover|karaoke|instrumental|8d|slowed|sped up|nightcore|reverb|remix|acoustic)\b", re.I)
+
+
+def run_brano(jid, j):
+    """Un brano da Spotify: metadati dal CSV completati da Deezer, ricerca con la durata come filtro
+    (prima YouTube, poi SoundCloud), tag scritti con mutagen, file nella cartella dell'album."""
+    jupdate(jid, status="metadati")
+    m = j["track"]
+    try:
+        m = metadati.arricchisci(m)
+    except Exception:  # noqa: BLE001 — senza Deezer bastano i dati del CSV
+        pass
+    artists, title, dur = m.get("artists") or [], m.get("title") or "", m.get("duration")
+    tmp = os.path.join("/tmp/armony-dl", jid)
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp)
+    want_no = {w for w in BRANO_NO.findall(title)}
+
+    def match(info, *, incomplete=False):
+        d, t = info.get("duration"), info.get("title") or ""
+        if dur and d and abs(d - dur) > max(6, dur * 0.05):
+            return "durata diversa"
+        if {w.lower() for w in BRANO_NO.findall(t)} - {w.lower() for w in want_no}:
+            return "versione diversa"
+        return None
+
+    def progress(d):
+        if d["status"] == "downloading":
+            tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            jupdate(jid, progress=round(d.get("downloaded_bytes", 0) * 100 / tot, 1) if tot else None)
+        elif d["status"] == "finished":
+            jupdate(jid, progress=100, status="conversione")
+
+    q = f"{(artists or [''])[0]} - {title}"
+    fmt = j.get("format") or "m4a"
+    got, last_err = None, ""
+    for src in (f"ytsearch5:{q}", f"scsearch5:{q}"):
+        opts = {"outtmpl": os.path.join(tmp, "%(id)s.%(ext)s"), "quiet": True, "no_warnings": True, "retries": 3,
+                "ignoreerrors": True, "max_downloads": 1, "match_filter": match, "progress_hooks": [progress],
+                "cookiefile": COOKIES if os.path.exists(COOKIES) else None,
+                # M4A e Opus arrivano già così da YouTube: si estrae senza ricodificare
+                "format": f"bestaudio[ext={'webm' if fmt == 'opus' else fmt}]/bestaudio/best",
+                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": fmt, "preferredquality": AUDIO_QUALITIES.get(j.get("quality") or "best", "0")}]}
+        if not m.get("cover"):  # senza copertina vera si tiene almeno quella del video
+            opts["writethumbnail"] = True
+            opts["postprocessors"] += [{"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"}, {"key": "EmbedThumbnail"}]
+        jupdate(jid, status="in corso", source="YouTube" if src.startswith("yt") else "SoundCloud")
         try:
             with yt_dlp.YoutubeDL(opts) as y:
-                code = y.download([j["url"]])
-            jupdate(jid, status="completato" if code == 0 else "completato con errori", progress=100, finished=time.time())
+                y.download([src])
+        except yt_dlp.utils.MaxDownloadsReached:
+            pass
         except Exception as e:  # noqa: BLE001
-            jupdate(jid, status="errore", error=str(e)[:400], finished=time.time())
+            last_err = str(e)[:300]
+        files = [f for f in os.listdir(tmp) if f.rsplit(".", 1)[-1].lower() in UPLOAD_AUDIO]
+        if files:
+            got = os.path.join(tmp, files[0])
+            break
+    if not got:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return jupdate(jid, status="errore", finished=time.time(),
+                       error="Nessuna versione trovata con la durata giusta" + (f" ({last_err})" if last_err else ""))
+    try:
+        metadati.tagga(got, m, pulisci=bool(m.get("cover")))
+        base = os.path.join(MUSIC_DIR, clean_segment(j.get("folder"), "Scaricati"))
+        dest = metadati.sistema(got, base, m)
+        jupdate(jid, status="completato", progress=100, finished=time.time(), path=os.path.relpath(dest, MUSIC_DIR),
+                album=m.get("album"), track_no=m.get("track"))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 @app.get("/api/health")
@@ -698,6 +791,74 @@ def upload():
         dest, n = f"{base} ({n}).{e}", n + 1
     os.replace(tmp, dest)
     return jsonify(status="caricato", path=os.path.relpath(dest, MUSIC_DIR), size=size), 201
+
+
+# ------------------------------------------------------------------ eliminazione dalla libreria
+# ─── PERCHÉ NON BASTA il percorso di getSong (Subsonic) ───
+# Navidrome ai client Subsonic dà un percorso inventato ("Artista/Album/03 - Titolo.mp3"), salvo che il
+# singolo client abbia attivato "report real path". Il percorso vero sta solo nel suo DB (media_file.path,
+# relativo alla libreria): lo leggiamo in sola lettura. Un percorso mandato dal client non è mai accettato.
+NAVIDROME_DB = os.environ.get("NAVIDROME_DB", "/navidrome/navidrome.db")
+NAVIDROME_MUSIC = os.environ.get("NAVIDROME_MUSIC", "/music").rstrip("/")  # la libreria come la vede Navidrome
+
+
+def prune(d, root):
+    # risalendo verso la radice: via le cartelle rimaste senza audio (al più con le copertine), mai la radice
+    while d != root and d.startswith(root + os.sep):
+        try:
+            names = os.listdir(d)
+        except OSError:
+            return
+        if any(n.lower() not in UPLOAD_COVER for n in names):
+            return
+        try:
+            for n in names:
+                os.remove(os.path.join(d, n))
+            os.rmdir(d)
+        except OSError:
+            return
+        d = os.path.dirname(d)
+
+
+@app.post("/api/tracks/delete")
+def tracks_delete():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not ids or len(ids) > 500 or not all(isinstance(i, str) and ID_RE.match(i) for i in ids):
+        return jsonify(error="Elenco di brani non valido (al massimo 500)"), 400
+    try:
+        nd = sqlite3.connect(f"file:{NAVIDROME_DB}?mode=ro", uri=True, timeout=10)
+        rows = nd.execute("SELECT m.id, l.path, m.path FROM media_file m JOIN library l ON l.id = m.library_id "
+                          f"WHERE m.id IN ({','.join('?' * len(ids))})", ids).fetchall()
+        nd.close()
+    except sqlite3.Error:
+        return jsonify(error="Non riesco a leggere il database di Navidrome: controlla il montaggio in docker-compose.yml"), 503
+    found = {r[0]: (r[1], r[2]) for r in rows}
+    root = os.path.realpath(MUSIC_DIR)
+    done, errors, dirs = [], {}, set()
+    for i in ids:
+        if i not in found:
+            errors[i] = "Brano non trovato"
+            continue
+        lib, rel = found[i]
+        if lib.rstrip("/") != NAVIDROME_MUSIC:
+            errors[i] = "Il brano sta in un'altra libreria"
+            continue
+        f = os.path.realpath(os.path.join(root, rel))  # risolve anche i collegamenti: niente uscite dalla cartella
+        if not f.startswith(root + os.sep):
+            errors[i] = "Percorso fuori dalla cartella della musica"
+            continue
+        try:
+            os.remove(f)
+        except FileNotFoundError:
+            pass  # già sparito: Navidrome lo toglie alla prossima scansione
+        except OSError as e:
+            errors[i] = str(e)[:200]
+            continue
+        done.append(i)
+        dirs.add(os.path.dirname(f))
+    for d in sorted(dirs, key=len, reverse=True):
+        prune(d, root)
+    return jsonify(deleted=len(done), ids=done, errors=errors)
 
 
 # ------------------------------------------------------------------ aggiornamenti
@@ -771,8 +932,52 @@ def download():
         jobs[jid] = dict(j, id=jid, status="in coda", progress=0, title=(f"{j['meta'].get('artist', '')} - {j['meta'].get('title', '')}" if j["meta"] else None),
                          created=time.time(), updated=time.time(), by=g.who["user"])
         jsave(jid)
-    threading.Thread(target=run_job, args=(jid, j), daemon=True).start()
+    jq.put((jid, j))
     return jsonify(jobs[jid]), 201
+
+
+TRACK_STR = ("title", "album", "albumartist", "date", "isrc", "label", "cover", "spotify")
+
+
+def clean_track(t):
+    if not isinstance(t, dict) or not str(t.get("title") or "").strip():
+        return None
+    out = {k: str(t.get(k) or "").strip()[:300] for k in TRACK_STR}
+    out["artists"] = [str(a).strip()[:200] for a in (t.get("artists") or [])[:20] if str(a).strip()]
+    out["genres"] = [str(x).strip()[:60] for x in (t.get("genres") or [])[:10] if str(x).strip()]
+    for k in ("duration", "track", "disc"):
+        out[k] = int(t[k]) if isinstance(t.get(k), (int, float)) and 0 < t[k] < 100000 else None
+    if out["cover"] and not out["cover"].startswith("https://"):
+        out["cover"] = ""  # una copertina la scarica il server: solo https, niente indirizzi interni
+    return out
+
+
+@app.post("/api/import")
+def import_tracks():
+    """I brani mancanti di un'importazione, tutti insieme. Un brano già in coda o già scaricato
+    (stesso ISRC, o stessi titolo e artista) non viene ripreso."""
+    d = request.get_json(silent=True) or {}
+    fmt = d.get("format") if d.get("format") in AUDIO_FORMATS else "m4a"
+    tracks = [t for t in map(clean_track, (d.get("tracks") or [])[:5000]) if t]
+    key = lambda t: t["isrc"] or metadati.norm(" ".join(t["artists"][:1]) + " " + t["title"])
+    with jlock:
+        seen = {key(x["track"]) for x in jobs.values() if x.get("track") and x["status"] != "errore"}
+    added = []
+    for t in tracks:
+        k = key(t)
+        if k in seen:
+            continue
+        seen.add(k)
+        jid = uuid.uuid4().hex[:10]
+        j = dict(url="", mode="audio", format=fmt, quality="best", playlist=False, folder=d.get("folder") or "Scaricati",
+                 sponsorblock=False, meta={}, track=t)
+        with jlock:
+            jobs[jid] = dict(j, id=jid, status="in coda", progress=0, title=f"{', '.join(t['artists'])} - {t['title']}",
+                             created=time.time(), updated=time.time(), by=g.who["user"])
+            jsave(jid)
+        jq.put((jid, j))
+        added.append(jid)
+    return jsonify(added=len(added), skipped=len(tracks) - len(added)), 201
 
 
 @app.get("/api/jobs")
@@ -860,6 +1065,8 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(MUSIC_DIR, "Scaricati"), exist_ok=True)
     os.makedirs(VIDEO_DIR, exist_ok=True)
     db.migrate()
+    for _ in range(2):
+        threading.Thread(target=worker, daemon=True).start()
     resume_jobs()
     threading.Thread(target=gc_rooms, daemon=True).start()
     if MULTICAST:
