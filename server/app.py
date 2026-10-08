@@ -504,7 +504,11 @@ def run_job(jid, j):
         name_tpl = "%(artist)s - %(title)s.%(ext)s" if meta.get("artist") else "%(title)s.%(ext)s"
         dir_tpl = "%(artist)s" if meta.get("artist") else "%(uploader,channel|Sconosciuto)s"
 
-        pre = []
+        # FFmpegMetadata, senza un genere vero, scrive come genere le categorie o i tag del video
+        # ("People & Blogs", "Gaming"…). meta_genre vince su tutto: genere vero se c'è, altrimenti vuoto.
+        # Regex e non modello: un modello vuole almeno un carattere e con genere vuoto non scatterebbe
+        pre = [{"key": "MetadataParser", "when": "pre_process",
+                "actions": [(MetadataParserPP.Actions.INTERPRET, "%(genre,genres|)l", "(?P<meta_genre>.*)")]}]
         if meta:
             actions = [(MetadataParserPP.Actions.INTERPRET, lit(v), f"%({k})s")
                        for k, v in meta.items() if k in ("artist", "title", "album") and v]

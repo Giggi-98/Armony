@@ -54,6 +54,7 @@ h2{font:600 1.25rem/1.2 var(--display);margin:32px 0 12px}
 h3{font:600 1.1rem/1.25 var(--display);margin:0 0 8px}
 .sub{color:var(--muted);margin:0 0 20px}
 .small{font-size:.88rem}
+.small>svg{width:14px;height:14px;vertical-align:-2px;margin-right:3px}
 
 .btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--surface);padding:8px 14px;border-radius:999px;cursor:pointer;font-weight:500;white-space:nowrap;text-decoration:none;color:var(--ink)}
 .btn:hover{border-color:var(--muted)}
@@ -78,6 +79,9 @@ label.check small{display:block;color:var(--muted)}
 .seg input{position:absolute;opacity:0;pointer-events:none}
 .seg label:has(input:checked){background:var(--accent-soft)}
 .seg label:has(input:focus-visible){outline:2px solid var(--accent)}
+.seg label>span{display:inline-flex;align-items:center;gap:6px}
+.seg svg{width:16px;height:16px;flex:none}
+.stack>.seg{justify-self:start;max-width:100%}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto}
 .tabs a,.tabs button{padding:9px 14px;border:0;background:none;color:var(--muted);text-decoration:none;font-weight:500;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap}
 .tabs .on{color:var(--ink);border-bottom-color:var(--accent)}
