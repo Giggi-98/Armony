@@ -72,6 +72,7 @@ function ask(title, value = '', label = '') {
 
 /* ================= icone ================= */
 const I = {
+  pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   speaker: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="14" r="4"/><path d="M12 6h.01"/>',
   phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
   laptop: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/>',
@@ -205,7 +206,9 @@ const norm = (x, sid = S.active) => ({
   rg: x.replayGain ? { trackGain: x.replayGain.trackGain, albumGain: x.replayGain.albumGain, trackPeak: x.replayGain.trackPeak, albumPeak: x.replayGain.albumPeak } : null,
   serverId: sid
 });
-const coverUrl = (coverArt, size = 300, sid) => { const s = srv(sid); return coverArt && s ? apiUrl(s, 'getCoverArt', { id: coverArt, size }) : ''; };
+// coverBust: dopo aver cambiato una copertina, l'indirizzo cambia e il browser non mostra quella vecchia dalla cache
+let coverBust = 0;
+const coverUrl = (coverArt, size = 300, sid) => { const s = srv(sid); return coverArt && s ? apiUrl(s, 'getCoverArt', { id: coverArt, size, ...(coverBust ? { v: coverBust } : {}) }) : ''; };
 const streamUrl = (t, q = activeQuality()) => apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params });
 const imgTag = (coverArt, size, sid) => { const u = coverUrl(coverArt, size, sid); return u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : ''; };
 
@@ -525,6 +528,7 @@ async function vAlbum(id) {
   const a = (await api('getAlbum', { id })).album;
   if (stale(n)) return;
   const songs = arr(a.song).map(x => norm(x));
+  view.dataset.album = JSON.stringify({ name: a.name, artist: a.artist, year: a.year || '', genre: a.genre || '', coverArt: a.coverArt });
   const tot = songs.reduce((n, t) => n + t.duration, 0);
   const discs = new Set(songs.map(s => s.disc)).size;
   Glow.show(coverUrl(a.coverArt, 300), 'album');
@@ -532,7 +536,8 @@ async function vAlbum(id) {
     <div><h1>${esc(a.name)}</h1><p class="sub"><a href="#/artista/${encodeURIComponent(a.artistId || '')}">${esc(a.artist)}</a>${a.year ? ', ' + a.year : ''}${a.genre ? ', ' + esc(a.genre) : ''}. ${songs.length} brani, ${fmtLong(tot)}${discs > 1 ? ', ' + discs + ' dischi' : ''}.</p></div></div>
     ${listActions(`<button class="btn ${a.starred ? 'primary' : ''}" data-act="staralbum" data-id="${esc(id)}" data-on="${a.starred ? 1 : 0}">${ic('heart', a.starred)} ${a.starred ? 'Nei preferiti' : 'Preferito'}</button>
       <button class="btn" data-act="shareitem" data-id="${esc(id)}" data-name="${esc(a.name)}">${ic('share')} Condividi</button>
-      <button class="btn" data-act="addalltopl">${ic('addlist')} In playlist</button>${canDelete() ? `
+      <button class="btn" data-act="addalltopl">${ic('addlist')} In playlist</button>${canEdit() ? `
+      <button class="btn" data-act="editalbum">${ic('pen')} Modifica album</button>` : ''}${canDelete() ? `
       <button class="btn danger" data-act="delalbum" data-name="${esc(a.name)}">${ic('trash')} Elimina album</button>` : ''}`)}
     <div id="gapsNote"></div>
     ${songList(songs, { showAlbum: false, art: false, numbers: true })}`;
@@ -1942,6 +1947,118 @@ async function deleteTracks(tracks, what) {
   toast(errs.length ? `${r.deleted} eliminati, ${errs.length} non riusciti: ${errs[0]}.` : r.deleted === 1 ? 'Brano eliminato dal server.' : `${r.deleted} brani eliminati dal server.`, 5000);
   return r.deleted > 0;
 }
+/* ================= modifica dei brani e copertine (stesso permesso dell'eliminazione, /api/tracks/*) =================
+   I file restano dove sono: per Navidrome l'id di un brano dipende dal percorso, così playlist e preferiti restano. */
+const canEdit = sid => canDelete(sid) && !!srv(sid)?.me?.caps?.includes('edit');
+async function edApi(s, path, opts = {}) {
+  const r = await fetch(absUrl(s.url) + path, { ...opts, headers: { 'X-Token': s.session, ...(opts.body && !(opts.body instanceof Blob) ? { 'Content-Type': 'application/json' } : {}), ...(opts.headers || {}) } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Errore ${r.status}`);
+  return j;
+}
+const splitList = v => v.split(';').map(x => x.trim()).filter(Boolean);
+// dopo il salvataggio: brani a schermo, coda e lettore mostrano subito i dati nuovi; Navidrome li rilegge poco dopo
+function applyEdit(sid, ids, f) {
+  const keys = new Set(ids.map(id => sid + ':' + id));
+  const patch = t => { if (!t || !keys.has(key(t))) return; if (f.title) t.title = f.title; if (f.artists?.length) t.artist = f.artists.join(', '); if (f.album) t.album = f.album; };
+  S.queue.forEach(patch); persistQueue();
+  $$('.song').forEach(el => { const x = S.lastList[+el.dataset.i]; if (!x || !keys.has(key(x))) return; patch(x);
+    const b = el.querySelector('.t b'), sm = el.querySelector('.t small'); if (b && f.title) b.lastChild.textContent = x.title; if (sm && f.artists?.length) sm.textContent = x.artist + (sm.textContent.includes(' · ') && x.album ? ' · ' + x.album : ''); });
+  updateNowPlaying();
+}
+async function editTrack(t) {
+  const s = srv(t.serverId); if (!canEdit(t.serverId)) return;
+  let tg; try { tg = await edApi(s, `/api/tracks/${encodeURIComponent(t.id)}/tags`); } catch (e) { return toast(e.message); }
+  const d = $('#dlg'); d.className = 'wide';
+  const f = (id, label, v, attrs = '') => `<label class="f">${label}<input type="text" id="${id}" value="${esc(v ?? '')}" ${attrs}></label>`;
+  d.innerHTML = `<h3>Modifica informazioni</h3>
+    <div class="editcover"><span class="art">${imgTag(t.coverArt, 200, t.serverId)}</span><div class="stack"><small style="color:var(--muted)">${tg.cover ? 'Copertina dentro il file.' : 'Copertina dell\'album.'}</small><button class="btn" id="eCover">${ic('image')} Cambia copertina</button></div></div>
+    <div class="grid2" style="margin-top:var(--s4)">
+      ${f('eTitle', 'Titolo', tg.title)}${f('eArt', 'Artisti (separati da ;)', tg.artists.join('; '))}
+      ${f('eAlb', 'Album', tg.album)}${f('eAA', 'Artista dell\'album', tg.albumartist)}
+      ${f('eDate', 'Anno o data', tg.date, 'inputmode="numeric"')}${f('eGen', 'Generi (separati da ;)', tg.genres.join('; '))}
+      ${f('eTr', 'Traccia', tg.track, 'inputmode="numeric"')}${f('eDisc', 'Disco', tg.disc, 'inputmode="numeric"')}
+    </div>
+    <div class="row" style="margin-top:var(--s5)"><button class="btn primary" id="eSave">Salva</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div>`;
+  d.showModal(); $('#eTitle').focus();
+  $('#eCover').onclick = () => coverPicker(s, [t.id], false, `${tg.artists[0] || t.artist} ${tg.album || t.album || ''}`.trim());
+  $('#eSave').onclick = async () => {
+    const now = { title: $('#eTitle').value.trim(), artists: splitList($('#eArt').value), album: $('#eAlb').value.trim(), albumartist: $('#eAA').value.trim(),
+      date: $('#eDate').value.trim(), genres: splitList($('#eGen').value), track: $('#eTr').value.trim(), disc: $('#eDisc').value.trim() };
+    // solo i campi cambiati: il resto del file non si tocca
+    const fields = Object.fromEntries(Object.entries(now).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(Array.isArray(tg[k]) ? tg[k] : String(tg[k] ?? ''))));
+    if (!Object.keys(fields).length) return d.close();
+    if ('title' in fields && !fields.title) return toast('Il titolo non può essere vuoto.');
+    try { await edApi(s, '/api/tracks/tags', { method: 'PUT', body: JSON.stringify({ ids: [t.id], fields }) }); }
+    catch (e) { return toast(e.message); }
+    d.close(); applyEdit(t.serverId, [t.id], fields); api('startScan', {}, s).catch(() => {});
+    toast('Salvato. La libreria si aggiorna tra poco.');
+  };
+}
+async function editAlbum() {
+  const a = JSON.parse(view.dataset.album || '{}'), songs = S.lastList.filter(x => x?.id), s = srv(songs[0]?.serverId);
+  if (!songs.length || !canEdit(songs[0].serverId)) return;
+  const d = $('#dlg'); d.className = 'wide';
+  const f = (id, label, v, attrs = '') => `<label class="f">${label}<input type="text" id="${id}" value="${esc(v ?? '')}" ${attrs}></label>`;
+  d.innerHTML = `<h3>Modifica album</h3><p class="sub" style="margin-bottom:var(--s3)">Vale per tutti i ${songs.length} brani dell'album.</p>
+    <div class="editcover"><span class="art">${imgTag(a.coverArt, 200)}</span><div class="stack"><button class="btn" id="aCover">${ic('image')} Cambia copertina dell'album</button></div></div>
+    <div class="grid2" style="margin-top:var(--s4)">${f('aAlb', 'Album', a.name)}${f('aAA', 'Artista dell\'album', a.artist)}${f('aYear', 'Anno', a.year, 'inputmode="numeric"')}${f('aGen', 'Genere (separati da ;)', a.genre)}</div>
+    <div class="row" style="margin-top:var(--s5)"><button class="btn primary" id="aSave">Salva</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div>`;
+  d.showModal(); $('#aAlb').focus();
+  const ids = songs.map(x => x.id);
+  $('#aCover').onclick = () => coverPicker(s, ids, true, `${a.artist || ''} ${a.name || ''}`.trim());
+  $('#aSave').onclick = async () => {
+    const now = { album: $('#aAlb').value.trim(), albumartist: $('#aAA').value.trim(), date: $('#aYear').value.trim(), genres: splitList($('#aGen').value) };
+    const old = { album: a.name || '', albumartist: a.artist || '', date: String(a.year || ''), genres: splitList(a.genre || '') };
+    const fields = Object.fromEntries(Object.entries(now).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(old[k])));
+    if (!Object.keys(fields).length) return d.close();
+    if ('album' in fields && !fields.album) return toast('Il nome dell\'album non può essere vuoto.');
+    try { await edApi(s, '/api/tracks/tags', { method: 'PUT', body: JSON.stringify({ ids, fields }) }); } catch (e) { return toast(e.message); }
+    d.close(); applyEdit(songs[0].serverId, ids, fields); api('startScan', {}, s).catch(() => {});
+    // nome o artista nuovi = per Navidrome un album nuovo, con un altro indirizzo: si torna agli album
+    if (fields.album || fields.albumartist) { toast('Salvato. L\'album compare col nome nuovo tra poco.'); location.hash = '#/libreria/album'; }
+    else toast('Salvato. La libreria si aggiorna tra poco.');
+  };
+}
+// scelta della copertina: ricerca su Deezer (il server scarica solo da lì) o un'immagine dal dispositivo
+function coverPicker(s, ids, album, q) {
+  const d = $('#dlg2'); d.className = 'sheet cover-sheet';
+  let pick = null;  // { url } oppure { blob }
+  d.innerHTML = `<div class="head"><span style="min-width:0"><b style="display:block">${album ? 'Copertina dell\'album' : 'Copertina del brano'}</b><small style="color:var(--muted)">${album ? 'Vale per tutti i brani dell\'album.' : 'Solo per questo brano.'}</small></span></div>
+    <div class="tabs" role="tablist"><button class="on" data-tab="web" role="tab">Cerca online</button><button data-tab="dev" role="tab">Dal dispositivo</button></div>
+    <div data-pane="web"><form class="row" id="cvForm" style="flex-wrap:nowrap"><input type="search" id="cvQ" value="${esc(q)}" aria-label="Cerca copertine" enterkeyhint="search"><button class="btn">${ic('search')}</button></form><div class="covergrid" id="cvRes"></div></div>
+    <div data-pane="dev" hidden><label class="btn">${ic('image')} Scegli un'immagine<input type="file" id="cvFile" accept="image/jpeg,image/png" hidden></label><div class="covergrid one" id="cvPrev"></div></div>
+    <div class="row" style="padding:var(--s3) 10px 4px"><button class="btn primary" id="cvOk" disabled>Usa questa copertina</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div>`;
+  const tabs = d.querySelectorAll('[data-tab]');
+  tabs.forEach(b => b.onclick = () => { tabs.forEach(x => x.classList.toggle('on', x === b)); d.querySelectorAll('[data-pane]').forEach(p => p.hidden = p.dataset.pane !== b.dataset.tab); });
+  const choose = (el, p) => { d.querySelectorAll('.covergrid button').forEach(x => x.classList.toggle('on', x === el)); pick = p; $('#cvOk').disabled = !p; };
+  const search = async () => {
+    const box = $('#cvRes'); box.innerHTML = '<p class="sub">Cerco…</p>';
+    let res = []; try { res = await edApi(s, '/api/cover/search?q=' + encodeURIComponent($('#cvQ').value.trim())); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+    box.innerHTML = res.length ? res.map((r, i) => `<button type="button" data-i="${i}" aria-label="${esc(r.title + ' · ' + r.artist)}"><img src="${esc(r.preview)}" alt="" loading="lazy"><small>${esc(r.title)}</small></button>`).join('') : '<p class="sub">Nessuna copertina trovata: prova con meno parole.</p>';
+    box.querySelectorAll('button').forEach(b => b.onclick = () => choose(b, { url: res[+b.dataset.i].cover }));
+  };
+  $('#cvForm').onsubmit = e => { e.preventDefault(); search(); };
+  $('#cvFile').onchange = e => {
+    const file = e.target.files[0]; if (!file) return;
+    if (!/^image\/(jpeg|png)$/.test(file.type)) return toast('Serve un\'immagine JPEG o PNG.');
+    if (file.size > 10 * 1024 * 1024) return toast('Immagine troppo grande (massimo 10 MB).');
+    $('#cvPrev').innerHTML = `<button type="button"><img src="${URL.createObjectURL(file)}" alt="Anteprima"></button>`;
+    choose($('#cvPrev button'), { blob: file });
+  };
+  $('#cvOk').onclick = async () => {
+    if (!pick) return; $('#cvOk').disabled = true;
+    try {
+      await edApi(s, `/api/tracks/cover?album=${album ? 1 : 0}&ids=${ids.map(encodeURIComponent).join(',')}`, pick.blob
+        ? { method: 'PUT', body: pick.blob, headers: { 'Content-Type': pick.blob.type } } : { method: 'PUT', body: JSON.stringify({ url: pick.url }) });
+    } catch (e) { $('#cvOk').disabled = false; return toast(e.message); }
+    d.close(); $('#dlg').close(); coverBust = Date.now(); api('startScan', {}, s).catch(() => {});
+    toast('Copertina cambiata. La libreria si aggiorna tra poco.');
+    updateNowPlaying(); setTimeout(() => { coverBust = Date.now(); route(); updateNowPlaying(); }, 4000);
+  };
+  d.onclose = () => { d.className = ''; d.onclose = null; };
+  closeOutside(d); d.showModal(); if (q) search();
+}
 function songMenu(t, ctx = {}) {
   const d = $('#dlg'); d.className = 'sheet';
   const items = [
@@ -1958,6 +2075,7 @@ function songMenu(t, ctx = {}) {
     ['down', 'Scarica il file originale', () => { const a = document.createElement('a'); a.href = apiUrl(srv(t.serverId), 'download', { id: t.id }); a.download = ''; a.click(); }],
     ['lyrics', 'Testo', () => { if (key(currentTrack() || {}) !== key(t)) return toast('Il testo si apre per il brano in riproduzione.'); sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; }],
     ctx.pl != null ? ['trash', 'Togli dalla playlist', async () => { await api('updatePlaylist', { playlistId: view.dataset.pl, songIndexToRemove: ctx.pl }); route(); }] : null,
+    canEdit(t.serverId) ? ['pen', 'Modifica informazioni', () => editTrack(t)] : null,
     canDelete(t.serverId) ? ['trash', 'Elimina dal server', () => deleteTracks([t], t.title), 'danger'] : null
   ].filter(Boolean);
   d.innerHTML = `<div class="head"><span class="pic">${imgTag(t.coverArt, 100, t.serverId)}</span><span style="min-width:0"><b style="display:block">${esc(t.title)}</b><small style="color:var(--muted)">${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small></span></div>
@@ -2143,7 +2261,7 @@ async function refreshUsers() {
     <span class="grow"><b>${esc(u.user)}</b><small>${u.admin ? 'amministratore' : 'utente'}${u.seen ? ', ultimo accesso ' + new Date(u.seen * 1000).toLocaleDateString() : ''}</small></span>
     <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="upload" ${u.upload || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Caricamento</span></label>
     <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="download" ${u.download || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Download</span></label>
-    <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="delete" ${u.delete || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Eliminazione</span></label>
+    <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="delete" ${u.delete || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Modifica ed eliminazione</span></label>
     ${u.sessions ? `<button class="btn sm" data-act="usrrevoke" data-user="${esc(u.user)}">Disconnetti</button>` : ''}</div>`).join('')
     : '<div class="empty">Nessun utente ha ancora fatto accesso da Armony.</div>';
   box.querySelectorAll('[data-usr]').forEach(el => el.onchange = async () => {
@@ -2421,6 +2539,7 @@ view.addEventListener('click', async e => {
       }
       case 'updcheck': await refreshUpdate(true); break;
       case 'updrun': if (confirm('Aggiornare il server? Armony si riavvia e per un minuto non risponde.')) { await dlApi('/api/update', { method: 'POST' }); toast('Aggiornamento richiesto.'); refreshUpdate(); } break;
+      case 'editalbum': editAlbum(); break;
       case 'delalbum': if (await deleteTracks(S.lastList.slice(), el.dataset.name)) location.hash = '#/libreria/album'; break;
       case 'regcred': {
         const u = $('#regU').value.trim(), p = $('#regP').value; if (!u || !p) { toast('Inserisci utente e password dell\'amministratore di Navidrome.'); break; }

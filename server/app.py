@@ -15,6 +15,8 @@ Armony - server di supporto.
                         /api/register/settings e /invites solo amministratori
   /api/tracks/delete    elimina file dalla libreria (permesso "delete"); il percorso vero viene dal DB di
                         Navidrome, letto in sola lettura, mai dal client
+  /api/tracks/tags, /api/tracks/cover, /api/cover/search   modifica dei tag e della copertina dei brani
+                        (stesso permesso "delete": «Modifica ed eliminazione»); i file non si spostano
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
   /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download")
@@ -36,6 +38,7 @@ import socket
 import struct
 import threading
 import time
+import urllib.parse
 import uuid
 
 import mutagen
@@ -71,9 +74,9 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete", "scaletta", "register"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete", "scaletta", "register", "edit"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
-RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks/delete", "delete"),
+RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -125,7 +128,7 @@ def guard():
     if need != "user" and not g.who["admin" if need == "admin" else need]:
         return jsonify(error={"admin": "Serve un amministratore.", "upload": "Il caricamento non è abilitato per il tuo utente.",
                               "download": "I download non sono abilitati per il tuo utente.",
-                              "delete": "L'eliminazione non è abilitata per il tuo utente."}[need]), 403
+                              "delete": "Modifica ed eliminazione non sono abilitate per il tuo utente."}[need]), 403
     return None
 
 
@@ -1048,21 +1051,22 @@ def prune(d, root):
         d = os.path.dirname(d)
 
 
-@app.post("/api/tracks/delete")
-def tracks_delete():
-    ids = (request.get_json(silent=True) or {}).get("ids")
-    if not isinstance(ids, list) or not ids or len(ids) > 500 or not all(isinstance(i, str) and ID_RE.match(i) for i in ids):
-        return jsonify(error="Elenco di brani non valido (al massimo 500)"), 400
+def valid_ids(ids):
+    return isinstance(ids, list) and ids and len(ids) <= 500 and all(isinstance(i, str) and ID_RE.match(i) for i in ids)
+
+
+def track_paths(ids):
+    """id Navidrome → percorso del file dentro MUSIC_DIR, letto dal DB di Navidrome in sola lettura.
+    Restituisce ({id: percorso}, {id: errore}); solleva sqlite3.Error se il DB non si legge."""
+    nd = sqlite3.connect(f"file:{NAVIDROME_DB}?mode=ro", uri=True, timeout=10)
     try:
-        nd = sqlite3.connect(f"file:{NAVIDROME_DB}?mode=ro", uri=True, timeout=10)
         rows = nd.execute("SELECT m.id, l.path, m.path FROM media_file m JOIN library l ON l.id = m.library_id "
                           f"WHERE m.id IN ({','.join('?' * len(ids))})", ids).fetchall()
+    finally:
         nd.close()
-    except sqlite3.Error:
-        return jsonify(error="Non riesco a leggere il database di Navidrome: controlla il montaggio in docker-compose.yml"), 503
     found = {r[0]: (r[1], r[2]) for r in rows}
     root = os.path.realpath(MUSIC_DIR)
-    done, errors, dirs = [], {}, set()
+    paths, errors = {}, {}
     for i in ids:
         if i not in found:
             errors[i] = "Brano non trovato"
@@ -1075,6 +1079,25 @@ def tracks_delete():
         if not f.startswith(root + os.sep):
             errors[i] = "Percorso fuori dalla cartella della musica"
             continue
+        paths[i] = f
+    return paths, errors
+
+
+ND_DB_ERR = "Non riesco a leggere il database di Navidrome: controlla il montaggio in docker-compose.yml"
+
+
+@app.post("/api/tracks/delete")
+def tracks_delete():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not valid_ids(ids):
+        return jsonify(error="Elenco di brani non valido (al massimo 500)"), 400
+    try:
+        paths, errors = track_paths(ids)
+    except sqlite3.Error:
+        return jsonify(error=ND_DB_ERR), 503
+    root = os.path.realpath(MUSIC_DIR)
+    done, dirs = [], set()
+    for i, f in paths.items():
         try:
             os.remove(f)
         except FileNotFoundError:
@@ -1087,6 +1110,128 @@ def tracks_delete():
     for d in sorted(dirs, key=len, reverse=True):
         prune(d, root)
     return jsonify(deleted=len(done), ids=done, errors=errors)
+
+
+# ------------------------------------------------------------------ modifica dei brani e copertine
+# Stesso permesso dell'eliminazione ("delete" = «Modifica ed eliminazione»). I file non si spostano mai:
+# per Navidrome l'id di un brano dipende dal percorso, e così playlist, preferiti e ascolti restano.
+COVER_HOSTS = ("cdn-images.dzcdn.net", "e-cdns-images.dzcdn.net", "cdns-images.dzcdn.net")
+IMG_MAGIC = ((b"\xff\xd8\xff", "jpg"), (b"\x89PNG\r\n\x1a\n", "png"))
+
+
+@app.get("/api/tracks/<tid>/tags")
+def track_tags(tid):
+    if not ID_RE.match(tid):
+        abort(400)
+    try:
+        paths, errors = track_paths([tid])
+    except sqlite3.Error:
+        return jsonify(error=ND_DB_ERR), 503
+    if tid not in paths:
+        return jsonify(error=errors.get(tid, "Brano non trovato")), 404
+    try:
+        return jsonify(metadati.leggi_tag(paths[tid]))
+    except (ValueError, mutagen.MutagenError, OSError) as e:
+        return jsonify(error=str(e)[:200]), 422
+
+
+@app.put("/api/tracks/tags")
+def tracks_tags_put():
+    d = request.get_json(silent=True) or {}
+    ids, fields = d.get("ids"), d.get("fields")
+    if not valid_ids(ids) or not isinstance(fields, dict):
+        return jsonify(error="Richiesta non valida"), 400
+    fields = {k: v for k, v in fields.items() if k in metadati.CAMPI}
+    if not fields:
+        return jsonify(error="Nessun campo da modificare"), 400
+    if len(ids) > 1 and fields.keys() & {"title", "track"}:
+        return jsonify(error="Titolo e numero di traccia si cambiano un brano alla volta"), 400
+    for k in ("artists", "genres"):
+        if k in fields and not isinstance(fields[k], list):
+            return jsonify(error=f"{k}: serve un elenco"), 400
+    for k in ("track", "disc"):
+        if fields.get(k) not in (None, "") and not str(fields[k]).isdigit():
+            return jsonify(error="Numero di traccia o disco non valido"), 400
+    if any(len(str(v)) > 500 for v in fields.values()):
+        return jsonify(error="Valore troppo lungo"), 400
+    try:
+        paths, errors = track_paths(ids)
+    except sqlite3.Error:
+        return jsonify(error=ND_DB_ERR), 503
+    done = []
+    for i, f in paths.items():
+        try:
+            metadati.modifica(f, fields)
+            done.append(i)
+        except (ValueError, mutagen.MutagenError, OSError) as e:
+            errors[i] = str(e)[:200]
+    return jsonify(saved=len(done), ids=done, errors=errors)
+
+
+def cover_image():
+    """L'immagine della copertina: corpo grezzo (jpeg/png, max 10 MB) oppure {url} di Deezer.
+    Mai un indirizzo qualsiasi: il server lo scaricherebbe dalla sua rete (SSRF)."""
+    if request.mimetype == "application/json":
+        url = str((request.get_json(silent=True) or {}).get("url") or "")
+        p = urllib.parse.urlparse(url)
+        if p.scheme != "https" or p.hostname not in COVER_HOSTS:
+            return None, "Sono ammesse solo copertine di Deezer"
+        try:
+            r = http.get(url, timeout=15, allow_redirects=False)
+            data = r.content if r.ok else b""
+        except requests.RequestException:
+            return None, "Copertina non raggiungibile"
+    else:
+        data = request.get_data(cache=False)[: 10 * 1024 * 1024 + 1]
+    if len(data) > 10 * 1024 * 1024:
+        return None, "Immagine troppo grande (massimo 10 MB)"
+    if not any(data.startswith(m) for m, _ in IMG_MAGIC):
+        return None, "Non è un'immagine JPEG o PNG"
+    return data, None
+
+
+@app.put("/api/tracks/cover")
+def tracks_cover():
+    ids = [i for i in (request.args.get("ids") or "").split(",") if i]
+    if not valid_ids(ids):
+        return jsonify(error="Elenco di brani non valido (al massimo 500)"), 400
+    img, err = cover_image()
+    if err:
+        return jsonify(error=err), 400
+    try:
+        paths, errors = track_paths(ids)
+    except sqlite3.Error:
+        return jsonify(error=ND_DB_ERR), 503
+    done = []
+    if request.args.get("album") == "1":
+        # copertina dell'album: cover.jpg nelle cartelle dei brani (Navidrome la preferisce a quella incorporata)
+        for folder in {os.path.dirname(f) for f in paths.values()}:
+            for n in metadati.COVER_NAMES:
+                if n != "cover.jpg" and os.path.exists(os.path.join(folder, n)):
+                    os.remove(os.path.join(folder, n))
+            ext = "png" if img.startswith(IMG_MAGIC[1][0]) else "jpg"
+            with open(os.path.join(folder, "cover." + ext), "wb") as fh:
+                fh.write(img)
+            if ext == "png" and os.path.exists(os.path.join(folder, "cover.jpg")):
+                os.remove(os.path.join(folder, "cover.jpg"))
+    for i, f in paths.items():
+        try:
+            metadati.incorpora(f, img)
+            done.append(i)
+        except Exception as e:  # noqa: BLE001
+            errors[i] = str(e)[:200]
+    return jsonify(saved=len(done), ids=done, errors=errors)
+
+
+@app.get("/api/cover/search")
+def cover_search():
+    q = (request.args.get("q") or "").strip()[:200]
+    if not q:
+        return jsonify([])
+    res = (metadati.deezer("search/album?limit=24&q=" + urllib.parse.quote(q)) or {}).get("data") or []
+    return jsonify([{"title": a.get("title"), "artist": (a.get("artist") or {}).get("name"),
+                     "preview": a.get("cover_medium"), "cover": a.get("cover_xl") or a.get("cover_big")}
+                    for a in res[:24] if a.get("cover_medium")])
 
 
 # ------------------------------------------------------------------ aggiornamenti

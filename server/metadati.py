@@ -184,25 +184,77 @@ def tagga(path, m, pulisci=False):
     f.save()
 
 
+# chiavi "facili" di mutagen per la modifica a mano: campo dell'interfaccia → chiave nel file
+CAMPI = {"title": "title", "artists": "artist", "album": "album", "albumartist": "albumartist",
+         "date": "date", "track": "tracknumber", "disc": "discnumber", "genres": "genre"}
+
+
+def leggi_tag(path):
+    """I tag che l'interfaccia permette di modificare, più se il file ha una copertina incorporata."""
+    f = mutagen.File(path, easy=True)
+    if f is None:
+        raise ValueError("non è un file audio riconosciuto")
+    t = f.tags or {}
+    one = lambda k: (t.get(k) or [""])[0] if k in t else ""
+    num = lambda k: (one(k).split("/")[0].strip() or None)
+    raw = mutagen.File(path)
+    keys = [str(k) for k in (raw.tags.keys() if getattr(raw, "tags", None) else [])]
+    cover = any(k.startswith("APIC") or k == "covr" or k.lower() == "metadata_block_picture" for k in keys) \
+        or bool(getattr(raw, "pictures", None))
+    return {"title": one("title"), "artists": list(t.get("artist") or []), "album": one("album"),
+            "albumartist": one("albumartist"), "date": one("date"), "track": num("tracknumber"),
+            "disc": num("discnumber"), "genres": list(t.get("genre") or []), "cover": cover}
+
+
+def modifica(path, fields):
+    """Scrive solo i campi passati; un campo vuoto viene tolto dal file. Il file non si sposta:
+    per Navidrome l'id del brano dipende dal percorso, e così playlist e preferiti restano."""
+    f = mutagen.File(path, easy=True)
+    if f is None:
+        raise ValueError("non è un file audio riconosciuto")
+    if f.tags is None:
+        f.add_tags()
+    for campo, k in CAMPI.items():
+        if campo not in fields:
+            continue
+        v = fields[campo]
+        if isinstance(v, list):
+            v = [str(x).strip() for x in v if str(x).strip()]
+        else:
+            v = str(v).strip() if v is not None else ""
+        if not v:
+            if k in f.tags:
+                del f[k]
+        else:
+            f[k] = v
+    f.save()
+
+
 def incorpora(path, img):
     """Mette la copertina dentro il file, così resta anche se il file viene copiato altrove."""
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import APIC, ID3
     from mutagen.mp4 import MP4, MP4Cover
+    from mutagen.id3 import ID3NoHeaderError
     import base64
     ext = path.rsplit(".", 1)[-1].lower()
+    png = img.startswith(b"\x89PNG")
+    mime = "image/png" if png else "image/jpeg"
     if ext in ("m4a", "mp4", "aac"):
         f = MP4(path)
-        f["covr"] = [MP4Cover(img, imageformat=MP4Cover.FORMAT_JPEG)]
+        f["covr"] = [MP4Cover(img, imageformat=MP4Cover.FORMAT_PNG if png else MP4Cover.FORMAT_JPEG)]
         f.save()
     elif ext == "mp3":
-        f = ID3(path)
+        try:
+            f = ID3(path)
+        except ID3NoHeaderError:
+            f = ID3()
         f.delall("APIC")
-        f.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=img))
-        f.save()
+        f.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=img))
+        f.save(path)
     elif ext in ("flac", "opus", "ogg", "oga"):
         pic = Picture()
-        pic.type, pic.mime, pic.data = 3, "image/jpeg", img
+        pic.type, pic.mime, pic.data = 3, mime, img
         if ext == "flac":
             f = FLAC(path)
             f.clear_pictures()
@@ -211,6 +263,8 @@ def incorpora(path, img):
             f = mutagen.File(path)
             f["metadata_block_picture"] = [base64.b64encode(pic.write()).decode()]
         f.save()
+    else:
+        raise ValueError("questo formato non tiene la copertina dentro il file")
 
 
 def _seg(s, fallback):

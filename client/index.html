@@ -342,6 +342,18 @@ input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px color
 dialog{border:1px solid var(--line);border-radius:var(--r-xl);background:var(--surface);color:var(--ink);padding:var(--s5);width:min(460px,92vw);max-height:84vh;max-height:84dvh;overflow:auto;overscroll-behavior:contain;box-shadow:var(--shadow-float)}
 dialog::backdrop{background:rgb(8 9 22 / .6);backdrop-filter:blur(2px)}
 dialog.wide{width:min(900px,96vw)}
+/* modifica di un brano o di un album: copertina a sinistra, campi sotto */
+.editcover{display:flex;gap:var(--s4);align-items:center}
+.editcover .art{width:96px;flex:none;box-shadow:var(--shadow-art)}
+/* scelta della copertina: griglia di anteprime, la scelta ha il bordo ambra */
+.cover-sheet [data-pane]{padding:0 10px}
+.cover-sheet .tabs{margin:0 10px var(--s3)}
+.covergrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:var(--s3);margin-top:var(--s3);max-height:46vh;overflow-y:auto;overscroll-behavior:contain;padding:3px}
+.covergrid.one{grid-template-columns:minmax(0,180px)}
+.covergrid button{border:0;padding:0;background:none;cursor:pointer;text-align:left;color:inherit;border-radius:var(--r-m);min-width:0}
+.covergrid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--r-m);outline:3px solid transparent;outline-offset:2px;transition:outline-color var(--t-tap) ease}
+.covergrid button.on img{outline-color:var(--accent)}
+.covergrid small{display:block;font-size:.78rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
 dialog.sheet{padding:10px 8px}
 dialog.sheet .head{display:flex;gap:12px;align-items:center;padding:6px 10px 12px;border-bottom:1px solid var(--line);margin-bottom:6px}
 dialog.sheet .head .pic{width:48px;height:48px;border-radius:8px;overflow:hidden;background:var(--surface2);flex:none}
