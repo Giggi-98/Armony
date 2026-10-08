@@ -105,6 +105,7 @@ const I = {
   moon: '<path d="M20 14A8 8 0 1 1 10 4a6.5 6.5 0 0 0 10 10z"/>',
   speed: '<path d="M12 13l4-4M4 18a9 9 0 1 1 16 0"/>',
   album: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   send: '<path d="M4 12l16-8-6 16-2-7z"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
@@ -238,6 +239,9 @@ const NAV = [
 ];
 const view = $('#view');
 const ROUTE_PARENT = { album: 'libreria', artista: 'libreria', genere: 'libreria', decennio: 'libreria' };
+// su telefono: quattro sezioni nella barra in basso, le altre nel foglio "Altro"
+const TABS = ['home', 'cerca', 'libreria', 'jam'];
+const MORE = [...NAV.map(n => n[0]).filter(h => !TABS.includes(h)), 'tasti'];
 let viewTimers = [];
 const viewInterval = (fn, ms) => viewTimers.push(setInterval(fn, ms));
 async function route() {
@@ -245,7 +249,8 @@ async function route() {
   emit('route');
   const [r = 'home', ...rest] = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
   const id = rest.join('/');
-  $$('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === r || ROUTE_PARENT[r] === a.dataset.r));
+  $$('#nav a, #tabs a').forEach(a => { const on = a.dataset.r === r || ROUTE_PARENT[r] === a.dataset.r; a.classList.toggle('on', on); on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'); });
+  $('#tabMore')?.classList.toggle('on', MORE.includes(ROUTE_PARENT[r] || r));
   const fn = {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
@@ -1646,11 +1651,38 @@ function serverDialog(s, preset = {}) {
 }
 function persistServers() { store.set('servers', S.servers); store.set('active', S.active); fillSelectors(); }
 function fillSelectors() {
-  $('#srvSel').innerHTML = S.servers.length ? S.servers.map(s => `<option value="${s.id}" ${s.id === S.active ? 'selected' : ''}>${esc(s.name)}</option>`).join('') : '<option>Nessun server</option>';
-  $('#qSel').innerHTML = Object.entries(QUALITIES).map(([k, q]) => `<option value="${k}" ${k === P.quality ? 'selected' : ''}>${q.short}</option>`).join('');
+  const name = srv()?.name || 'Nessun server', q = QUALITIES[P.quality].short;
+  $('#ctxBtn').innerHTML = `<span class="grow">${esc(name)}</span><span class="pill">${esc(q)}</span>`;
+  $('#ctxBtn').setAttribute('aria-label', `Server e qualità: ${name}, ${q}`);
   $('#qBadge').textContent = Offline.has(currentTrack()) ? 'Offline' : QUALITIES[activeQuality()].short + (activeQuality() !== P.quality ? ' (mobile)' : '');
 }
 function setQuality(q) { P.quality = q; savePrefs(); fillSelectors(); toast(`Qualità: ${QUALITIES[q].label}. Vale dal prossimo brano.`); }
+// server in uso e qualità: dalla riga in fondo alla barra laterale (in alto su telefono)
+// i fogli di navigazione si chiudono anche toccando fuori (su telefono non c'è Esc)
+function closeOutside(d) {
+  d.onclick = e => { const r = d.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close(); };
+  d.onclose = () => { d.className = ''; d.onclose = null; d.onclick = null; };
+}
+function ctxDialog() {
+  const d = $('#dlg'); d.className = 'sheet';
+  d.innerHTML = `<div class="head"><b>Server e qualità</b></div>
+    <p class="sh">Server</p>${S.servers.map(s => `<button class="mi ${s.id === S.active ? 'on' : ''}" data-sid="${s.id}">${ic(s.id === S.active ? 'check' : 'lib')}${esc(s.name)}</button>`).join('')}
+    <button class="mi" data-ctx="srv">${ic('plus')}${S.servers.length ? 'Gestisci i server' : 'Aggiungi un server'}</button>
+    <p class="sh">Qualità di ascolto</p>${Object.entries(QUALITIES).map(([k, q]) => `<button class="mi ${k === P.quality ? 'on' : ''}" data-q="${k}">${ic(k === P.quality ? 'check' : 'album')}${q.label}</button>`).join('')}`;
+  d.querySelectorAll('[data-sid]').forEach(el => el.onclick = () => { d.close(); if (S.active === el.dataset.sid) return; S.active = el.dataset.sid; persistServers(); route(); });
+  d.querySelectorAll('[data-q]').forEach(el => el.onclick = () => { setQuality(el.dataset.q); d.close(); });
+  d.querySelector('[data-ctx]').onclick = () => { d.close(); if (S.servers.length) location.hash = '#/impostazioni'; else serverDialog(); };
+  closeOutside(d); d.showModal();
+}
+function moreSheet() {
+  const d = $('#dlg'); d.className = 'sheet';
+  const cur = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
+  const items = NAV.filter(([h]) => !TABS.includes(h));
+  if (matchMedia('(any-hover:hover)').matches) items.push(['tasti', 'Scorciatoie da tastiera', 'more']);
+  d.innerHTML = `<div class="head"><b>Altre sezioni</b></div>${items.map(([h, l, i]) => `<a class="mi ${h === cur ? 'on' : ''}" href="#/${h}" ${h === cur ? 'aria-current="page"' : ''}>${ic(i)}${l}</a>`).join('')}`;
+  d.querySelectorAll('a').forEach(a => a.onclick = () => d.close());
+  closeOutside(d); d.showModal();
+}
 function qualityDialog() {
   const d = $('#dlg'); d.className = 'sheet';
   d.innerHTML = `<div class="head"><b>Qualità di ascolto</b></div>${Object.entries(QUALITIES).map(([k, q]) => `<button class="mi" data-q="${k}">${k === P.quality ? ic('heart', true) : ic('album')}${q.label}</button>`).join('')}`;
@@ -1846,8 +1878,7 @@ function wirePlayer() {
   $('#vol').oninput = e => { P.volume = e.target.value / 100; savePrefs(); Engine.applyVolume(); };
   $('#seek').oninput = () => { seeking = true; $('#tCur').textContent = fmt($('#seek').value / 1000 * playDur()); };
   $('#seek').onchange = () => { ctlSeek($('#seek').value / 1000 * playDur()); seeking = false; };
-  $('#srvSel').onchange = e => { S.active = e.target.value; persistServers(); route(); };
-  $('#qSel').onchange = e => setQuality(e.target.value);
+  $('#ctxBtn').onclick = ctxDialog;
   if ('mediaSession' in navigator) {
     const ms = navigator.mediaSession;
     ms.setActionHandler('play', ctlToggle); ms.setActionHandler('pause', ctlToggle);
@@ -1876,6 +1907,9 @@ function wirePlayer() {
 }
 async function boot() {
   $('#nav').innerHTML = NAV.map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
+  $('#tabs').innerHTML = NAV.filter(([h]) => TABS.includes(h)).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span>${l}</span></a>`).join('')
+    + `<button type="button" id="tabMore" aria-haspopup="dialog">${ic('more')}<span>Altro</span></button>`;
+  $('#tabMore').onclick = moreSheet;
   Engine.init(); wirePlayer();
   await Offline.init();
   fillSelectors(); updateNowPlaying(); paintTime();
