@@ -1,0 +1,7 @@
+[Unit]
+Description=Armony: aggiornamento all'ultimo tag
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@DIR@/deploy/armony-update.sh

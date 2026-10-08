@@ -1,0 +1,63 @@
+# Armony
+#   Prima volta:  cp .env.example .env  e cambia le password in .env (non va su git)
+#   Avvio:        docker compose up -d
+#   Con TURN:     docker compose --profile turn up -d   (per Jam via 5G dietro NAT difficili)
+#
+#   App:          http://IP-DEL-SERVER:8080
+#   Navidrome:    http://IP-DEL-SERVER:4533  (amministrazione utenti)
+#
+# "network_mode: host" serve al multicast LAN e funziona su Linux (Raspberry, NAS, VPS).
+# Su Docker Desktop per Mac/Windows: togli network_mode, aggiungi  ports: ["8080:8080"],
+# metti NAVIDROME_URL: "http://navidrome:4533" e ARMONY_MULTICAST: "0".
+
+services:
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: armony-navidrome
+    ports:
+      - "4533:4533"
+    environment:
+      ND_SCANSCHEDULE: "10m"
+      ND_ENABLESHARING: "true"
+      ND_ENABLETRANSCODINGCONFIG: "true"
+      ND_DEFAULTLANGUAGE: "it"
+      ND_SESSIONTIMEOUT: "720h"
+    volumes:
+      - ./data/navidrome:/data
+      - ./musica:/music:ro
+    restart: unless-stopped
+
+  armony:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: armony-app
+    network_mode: host
+    environment:
+      ARMONY_TOKEN: "${ARMONY_TOKEN:?manca ARMONY_TOKEN in .env}"
+      ARMONY_NAME: "${ARMONY_NAME:-Casa}"
+      ARMONY_REPO: "${ARMONY_REPO:-}"
+      ARMONY_PORT: "8080"
+      ARMONY_MULTICAST: "1"
+      NAVIDROME_URL: "http://127.0.0.1:4533"
+      MUSIC_DIR: "/music"
+      VIDEO_DIR: "/videos"
+    volumes:
+      - ./musica:/music
+      - ./video:/videos
+      - ./client:/app/client:ro
+      - ./updates:/updates
+    depends_on:
+      - navidrome
+    restart: unless-stopped
+
+  turn:
+    image: coturn/coturn:latest
+    container_name: armony-turn
+    profiles: ["turn"]
+    network_mode: host
+    command: >
+      -n --listening-port=3478 --fingerprint --lt-cred-mech
+      --user=armony:${TURN_PASS:-cambiami-anche-questa} --realm=armony
+      --min-port=49160 --max-port=49200 --no-cli --no-tlsv1 --no-tlsv1_1
+    restart: unless-stopped

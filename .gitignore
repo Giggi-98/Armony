@@ -1,0 +1,10 @@
+# dati di chi ospita: mai su git
+musica/
+video/
+data/
+updates/
+.env
+# configurazione locale degli agenti, tranne le linee guida condivise
+.claude/*
+!.claude/CLAUDE.md
+__pycache__/

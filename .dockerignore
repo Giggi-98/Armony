@@ -1,0 +1,4 @@
+# il contesto di build è la root del repo: entra solo ciò che serve all'immagine
+*
+!server/
+!VERSION

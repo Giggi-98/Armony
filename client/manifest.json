@@ -1,0 +1,16 @@
+{
+  "name": "Armony",
+  "short_name": "Armony",
+  "description": "La musica della vostra compagnia, dai vostri server.",
+  "start_url": "./#/home",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1b1e36",
+  "theme_color": "#1b1e36",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }],
+  "shortcuts": [
+    { "name": "Jam", "url": "./#/jam" },
+    { "name": "Offline", "url": "./#/offline" },
+    { "name": "Scarica", "url": "./#/scarica" }
+  ]
+}

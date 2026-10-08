@@ -1,0 +1,8 @@
+[Unit]
+Description=Armony: attende una richiesta di aggiornamento dall'app
+
+[Path]
+PathExists=@DIR@/updates/request
+
+[Install]
+WantedBy=multi-user.target
