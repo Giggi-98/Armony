@@ -68,10 +68,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete", "scaletta"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/upload", "upload"), ("/api/tracks/delete", "delete"),
-         ("/api/download", "download"), ("/api/import", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
+         ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
 SESSION_DAYS = 180
@@ -756,6 +756,21 @@ def run_brano(jid, j):
                 album=m.get("album"), track_no=m.get("track"))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+@app.get("/api/album/scaletta")
+def album_scaletta():
+    """Tutte le tracce di un album secondo Deezer: la pagina album mostra quelle che mancano in libreria."""
+    artist, album = (request.args.get("artist") or "").strip()[:200], (request.args.get("album") or "").strip()[:300]
+    if not album:
+        return jsonify(error="Manca il titolo dell'album"), 400
+    try:
+        s = metadati.scaletta(artist, album, (request.args.get("year") or "")[:4] or None)
+    except Exception:  # noqa: BLE001 — Deezer irraggiungibile: per la pagina è come "non trovato"
+        s = None
+    if not s or not s["tracks"]:
+        return jsonify(error="Scaletta dell'album non trovata"), 404
+    return jsonify(s)
 
 
 @app.get("/api/health")

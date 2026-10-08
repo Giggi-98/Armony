@@ -173,6 +173,11 @@ label.check small{display:block;color:var(--muted)}
 .song .t small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .song .d{color:var(--muted);font-variant-numeric:tabular-nums;font-size:.9rem}
 .song .acts{display:flex}
+/* tracce dell'album che mancano in libreria: presenti ma spente, con il loro tasto per scaricarle */
+.song.ghost{cursor:default}
+.song.ghost .n,.song.ghost .t,.song.ghost .d{opacity:.5}
+.song.ghost .acts{display:flex;align-items:center}
+.gaps-note{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s2) var(--s3);margin:0 0 var(--s3);color:var(--muted);font-size:.92rem}
 .badge-off{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sage);margin-right:6px;vertical-align:middle}
 .list-item{display:flex;align-items:center;gap:var(--s3);min-height:64px;padding:8px;border-bottom:1px solid var(--line);cursor:pointer;transition:background var(--t-tap) ease}
 .list-item .grow{flex:1;min-width:0}

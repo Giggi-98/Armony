@@ -528,7 +528,54 @@ async function vAlbum(id) {
       <button class="btn" data-act="shareitem" data-id="${esc(id)}" data-name="${esc(a.name)}">${ic('share')} Condividi</button>
       <button class="btn" data-act="addalltopl">${ic('addlist')} In playlist</button>${canDelete() ? `
       <button class="btn danger" data-act="delalbum" data-name="${esc(a.name)}">${ic('trash')} Elimina album</button>` : ''}`)}
+    <div id="gapsNote"></div>
     ${songList(songs, { showAlbum: false, art: false, numbers: true })}`;
+  albumGaps(a, songs, n);
+}
+// tracce dell'album che mancano in libreria (scaletta di Deezer, /api/album/scaletta): grigie, al loro posto, scaricabili
+async function albumGaps(a, songs, n) {
+  if (!srv()?.me?.caps?.includes('scaletta') || !access().download || !S.dl.url || !songs.length) return;
+  let sc;
+  try { sc = await dlApi(`/api/album/scaletta?artist=${encodeURIComponent(a.artist || '')}&album=${encodeURIComponent(a.name || '')}${a.year ? '&year=' + a.year : ''}`); } catch { return; }
+  if (stale(n) || !$('#gapsNote')) return;
+  const raw = arr(a.song), disc = i => raw[i]?.discNumber || 1, used = new Set(), found = new Set();
+  // abbinamento: titolo e durata (±5 s), poi numero di traccia e disco per ciò che resta
+  sc.tracks.forEach((t, k) => {
+    const i = songs.findIndex((s, j) => !used.has(j) && cleanTxt(s.title) === cleanTxt(t.title) && (!t.duration || !s.duration || Math.abs(s.duration - t.duration) <= 5));
+    if (i >= 0) { used.add(i); found.add(k); }
+  });
+  sc.tracks.forEach((t, k) => {
+    if (found.has(k)) return;
+    const i = songs.findIndex((s, j) => !used.has(j) && s.track && s.track === t.track && disc(j) === t.disc);
+    if (i >= 0) { used.add(i); found.add(k); }
+  });
+  const miss = sc.tracks.filter((_, k) => !found.has(k)); if (!miss.length) return;
+  const box = $('#view .songs'); if (!box) return;
+  const pos = t => t.disc * 1000 + t.track;
+  miss.forEach((t, k) => {
+    const row = document.createElement('div');
+    row.className = 'song noart ghost'; row.dataset.gi = k;
+    row.innerHTML = `<span class="n">${t.track}</span><span class="thumb"></span>
+      <span class="t"><b>${esc(t.title)}</b><small>${esc(t.artists.join(', '))} · non in libreria</small></span>
+      <span class="d">${fmt(t.duration)}</span><span class="acts"><button class="btn sm" data-gap="${k}">${ic('down')} Scarica</button></span>`;
+    const next = [...box.querySelectorAll('.song')].find(el => pos(el.dataset.gi != null ? miss[+el.dataset.gi] : { disc: disc(+el.dataset.i), track: songs[+el.dataset.i].track || 0 }) > pos(t));
+    box.insertBefore(row, next || null);
+  });
+  $('#gapsNote').innerHTML = `<div class="gaps-note"><span>Questo album ha ${sc.tracks.length} tracce, in libreria ne hai ${sc.tracks.length - miss.length}.</span>
+    <button class="btn sm primary" id="gapsAll">${ic('down')} Scarica le ${miss.length} mancanti</button></div>`;
+  // i file arrivano con gli stessi album e artista dell'album della libreria: Navidrome li mette nello stesso album
+  const send = async ks => {
+    const tracks = ks.map(k => { const t = miss[k]; return { title: t.title, artists: t.artists, album: a.name, albumartist: a.artist || sc.albumartist,
+      date: sc.date || (a.year ? String(a.year) : ''), duration: t.duration, track: t.track, disc: t.disc, isrc: t.isrc, cover: sc.cover }; });
+    try {
+      const r = await dlApi('/api/import', { method: 'POST', body: JSON.stringify({ tracks, folder: store.get('impDir', 'Spotify') }) });
+      ks.forEach(k => { const b = box.querySelector(`[data-gap="${k}"]`); if (b) b.outerHTML = '<span class="tag">in coda</span>'; });
+      if (!box.querySelector('[data-gap]')) $('#gapsAll')?.remove();
+      toast(r.added ? `${r.added} ${r.added === 1 ? 'traccia in coda' : 'tracce in coda'}: arrivano nell'album appena scaricate.` : 'Già in coda.');
+    } catch (e) { toast(e.message); }
+  };
+  box.querySelectorAll('[data-gap]').forEach(b => b.onclick = e => { e.stopPropagation(); send([+b.dataset.gap]); });
+  $('#gapsAll').onclick = () => send([...box.querySelectorAll('[data-gap]')].map(b => +b.dataset.gap));
 }
 async function vGenre(name) {
   const n = Scene.nav;

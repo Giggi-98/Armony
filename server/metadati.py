@@ -104,6 +104,51 @@ def arricchisci(m):
     return out
 
 
+def _senza_edizione(s):
+    """"Aventine (Deluxe Version)" e "Aventine" sono lo stesso album per chi lo cerca in libreria."""
+    return norm(re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", str(s or "")))
+
+
+def scaletta(artista, album, anno=None):
+    """La scaletta completa di un album secondo Deezer, per mostrare in libreria le tracce che mancano.
+    Prima il titolo identico, poi lo stesso titolo senza edizione ("Deluxe", "Bonus Track"…); fra i
+    candidati vince l'anno uguale, poi il numero di tracce più alto. None se non lo trova."""
+    want, art = norm(album), norm(artista)
+    if not want:
+        return None
+    trovati = {}
+    for q in ('artist:"%s" album:"%s"' % (artista, album), "%s %s" % (artista, album)):
+        for a in ((deezer("search/album?q=" + urllib.parse.quote(q)) or {}).get("data") or [])[:25]:
+            nome = norm((a.get("artist") or {}).get("name"))
+            if art and nome and art not in nome and nome not in art:
+                continue
+            trovati.setdefault(a["id"], a)
+        if trovati:
+            break
+    esatti = [a for a in trovati.values() if norm(a.get("title")) == want]
+    cand = esatti or [a for a in trovati.values() if _senza_edizione(a.get("title")) == _senza_edizione(album)]
+    best, chiave = None, None
+    for a in cand[:4]:
+        d = deezer("album/%s" % a["id"])
+        if not d:
+            continue
+        k = (1 if anno and (d.get("release_date") or "")[:4] == str(anno) else 0, d.get("nb_tracks") or 0)
+        if chiave is None or k > chiave:
+            best, chiave = d, k
+    if not best:
+        return None
+    tracce = (deezer("album/%s/tracks?limit=300" % best["id"]) or {}).get("data") or []
+    albumartist = (best.get("artist") or {}).get("name") or artista
+    return {
+        "album": best.get("title") or album, "albumartist": albumartist, "date": best.get("release_date") or "",
+        "cover": best.get("cover_xl") or best.get("cover_big") or "",
+        "tracks": [{"title": t.get("title") or "", "artists": [(t.get("artist") or {}).get("name") or albumartist],
+                    "duration": t.get("duration"), "track": t.get("track_position") or i + 1,
+                    "disc": t.get("disk_number") or 1, "isrc": (t.get("isrc") or "").upper()}
+                   for i, t in enumerate(tracce)],
+    }
+
+
 def tagga(path, m, pulisci=False):
     """Scrive i tag con mutagen in forma "facile" (uguale per MP3, M4A, FLAC, Opus, OGG).
     pulisci=True toglie prima tutti i tag (anche descrizione, link e copertina del video): si usa
