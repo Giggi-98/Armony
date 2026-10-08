@@ -1418,7 +1418,7 @@ function vSettings() {
     <div class="row"><button class="btn" data-act="testdl">Prova connessione</button></div>
   </div>
 
-  <h2>Aggiornamenti</h2><div class="panel" id="updBox"><p class="sub">Serve il servizio di download configurato qui sopra.</p></div>
+  <h2>Aggiornamenti</h2><div class="panel" id="updBox"><p class="sub">${S.dl.url ? 'Inserisci il codice di accesso qui sopra per controllare gli aggiornamenti.' : 'Configura il servizio di download qui sopra: indirizzo e codice di accesso.'}</p></div>
 
   <h2>Aspetto</h2>
   <div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
@@ -1436,7 +1436,7 @@ function vSettings() {
   });
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  ['dlUrl', 'dlTok'].forEach(id => $('#' + id).onchange = () => { S.dl = { url: $('#dlUrl').value.trim().replace(/\/+$/, ''), token: $('#dlTok').value }; store.set('downloader', S.dl); toast('Servizio di download salvato.'); });
+  ['dlUrl', 'dlTok'].forEach(id => $('#' + id).onchange = () => { S.dl = { url: $('#dlUrl').value.trim().replace(/\/+$/, ''), token: $('#dlTok').value }; store.set('downloader', S.dl); toast('Servizio di download salvato.'); if (S.dl.url && S.dl.token) refreshUpdate(); });
   if (S.dl.url && S.dl.token) refreshUpdate();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
 }
