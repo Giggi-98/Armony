@@ -272,7 +272,9 @@ const Scene = {
         run().then(res, rej);
         if (morph === 'in') { name(mini, ''); name(rec(), 'disc'); } else if (morph === 'out') name(mini, 'disc');
       });
-      vt.finished.finally(() => { name(mini, ''); name(rec(), ''); });
+      // una navigazione che ne interrompe un'altra rifiuta ready/finished: è normale, non è un errore
+      vt.ready.catch(() => {});
+      vt.finished.catch(() => {}).finally(() => { name(mini, ''); name(rec(), ''); });
     });
   }
 };
@@ -397,7 +399,7 @@ function songList(tracks, opts = {}) {
       </span>
     </div>`).join('')}</div>`;
 }
-const listActions = (extra = '') => `<div class="row" style="margin-bottom:16px">
+const listActions = (extra = '') => `<div class="row acts-row" style="margin-bottom:16px">
   <button class="btn primary" data-act="playall">${ic('play')} Riproduci</button>
   <button class="btn" data-act="shuffleall">${ic('shuffle')} Mescola</button>
   <button class="btn" data-act="enqueueall">${ic('plus')} In coda</button>
@@ -1045,6 +1047,7 @@ function paintButtons() {
   if (!bp.querySelector('.pp')) bp.innerHTML = '<svg class="pp" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path/><path/></svg>';
   bp.querySelectorAll('.pp path').forEach((p, i) => p.setAttribute('d', PP[playing ? 'pause' : 'play'][i]));
   bp.classList.toggle('on', playing);
+  document.documentElement.dataset.playing = playing;  // le barre del brano in riproduzione ballano solo mentre suona
   bp.setAttribute('aria-label', playing ? 'Pausa' : 'Riproduci');
   $('#disc').classList.toggle('spin', playing);
   $('#bigdisc')?.classList.toggle('spin', playing);
@@ -1057,9 +1060,11 @@ function paintButtons() {
   NativeMedia.sync();
 }
 let seeking = false;
+const rangeFill = el => { if (el) el.style.setProperty('--p', ((el.value - (el.min || 0)) / ((el.max || 100) - (el.min || 0)) * 100) + '%'); };
 function paintTime() {
   const d = playDur(), p = playPos();
   if (!seeking) { $('#seek').value = d ? p / d * 1000 : 0; $('#tCur').textContent = fmt(p); }
+  rangeFill($('#seek'));
   $('#tDur').textContent = fmt(d);
   if ('mediaSession' in navigator && d && navigator.mediaSession.setPositionState) {
     try { navigator.mediaSession.setPositionState({ duration: d, position: Math.min(p, d), playbackRate: P.speed }); } catch {}
@@ -1218,7 +1223,7 @@ async function vNow() {
         <div class="rec">${t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 600, t.serverId))}" alt="">` : '<div class="lbl"></div>'}</div></div>
       <h1 style="margin-top:18px">${esc(t.title)}</h1>
       <p class="sub">${t.artistId ? `<a href="#/artista/${encodeURIComponent(t.artistId)}">${esc(t.artist)}</a>` : esc(t.artist)}${t.album ? ` · ${t.albumId ? `<a href="#/album/${encodeURIComponent(t.albumId)}">${esc(t.album)}</a>` : esc(t.album)}` : ''}</p>
-      <div class="row">
+      <div class="row now-acts">
         <button class="btn sm" data-act="nowmore">${ic('more')} Azioni</button>
         <button class="btn sm" data-act="sleep">${ic('moon')} Timer</button>
         <button class="btn sm" data-act="speed">${ic('speed')} ${P.speed}×</button>
@@ -2220,8 +2225,15 @@ function wirePlayer() {
   };
   $('#bRep').onclick = () => { S.repeat = { off: 'all', all: 'one', one: 'off' }[S.repeat]; store.set('repeat', S.repeat); paintButtons(); };
   $('#vol').value = P.volume * 100;
-  $('#vol').oninput = e => { P.volume = e.target.value / 100; savePrefs(); Engine.applyVolume(); };
-  $('#seek').oninput = () => { seeking = true; $('#tCur').textContent = fmt($('#seek').value / 1000 * playDur()); };
+  $('#vol').oninput = e => { P.volume = e.target.value / 100; savePrefs(); Engine.applyVolume(); rangeFill(e.target); };
+  $('#seek').oninput = () => { seeking = true; $('#tCur').textContent = fmt($('#seek').value / 1000 * playDur()); rangeFill($('#seek')); };
+  rangeFill($('#vol'));
+  // ogni cursore riempie in ambra la parte a sinistra del pomello
+  document.addEventListener('input', e => { if (e.target.matches?.('input[type=range]')) rangeFill(e.target); });
+  // barra di stato del telefono: il colore della stanza nel tema in uso (anche quando lo si cambia a mano)
+  const themeColor = () => { const m = $('#themeColor'); if (m) m.content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(); };
+  new MutationObserver(themeColor).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', themeColor); themeColor();
   $('#seek').onchange = () => { ctlSeek($('#seek').value / 1000 * playDur()); seeking = false; };
   $('#ctxBtn').onclick = ctxDialog;
   if ('mediaSession' in navigator) {
