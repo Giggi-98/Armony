@@ -27,6 +27,23 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Album completi: scaletta da Deezer, tracce mancanti in grigio
+
+**Contesto:** aprendo un album si vogliono vedere e scaricare anche le tracce
+che non sono in libreria.
+**Scelta:** `GET /api/album/scaletta` cerca l'album su Deezer: prima il titolo
+identico, poi lo stesso titolo senza edizione; preferisce l'anno uguale, poi
+più tracce. La pagina abbina i brani per titolo e durata (±5 s), poi per numero
+di traccia, e mostra le mancanti al loro posto, in grigio, scaricabili con
+`/api/import` usando album e artista dell'album della libreria.
+**Alternative scartate:** scaletta da MusicBrainz (1 richiesta/s, release
+multiple da scegliere); album di Deezer come fonte del nome (finirebbe in un
+album diverso da quello della libreria); scaricare l'intero album con un solo
+tasto (si riscaricherebbero i brani già presenti).
+**Conseguenze:** artista e album di ogni pagina aperta vanno a Deezer; edizioni
+diverse con titoli molto diversi non vengono riconosciute.
+**Da rivedere se:** Deezer chiude l'API pubblica.
+
 ## 2026-10-08 — Download importati: la durata è una preferenza, non un filtro
 
 **Contesto:** con il filtro rigido sulla durata (±5%) molti download fallivano

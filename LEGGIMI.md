@@ -101,6 +101,9 @@ Salva album, playlist o singoli brani sul telefono, nella qualità che preferisc
 - Copertina e metadati inclusi. **SponsorBlock** taglia intro, parti parlate e sponsor dai video musicali.
 - La libreria si aggiorna da sola e i video si guardano dentro l'app.
 
+### Album completi
+Aprendo un album, le tracce che non hai compaiono al loro posto in grigio (la scaletta completa arriva da Deezer); "Scarica" ne prende una, "Scarica le N mancanti" tutte, e arrivano nello stesso album con copertina e numero di traccia.
+
 ### Eliminare brani
 Dal menu di un brano ("Elimina dal server") o dalla pagina dell'album ("Elimina album"). Il file viene cancellato per tutti, dopo una conferma. Gli amministratori possono sempre; agli altri utenti l'amministratore lo abilita in Impostazioni → Utenti → Eliminazione (spento di default).
 
