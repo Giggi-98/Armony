@@ -1037,7 +1037,7 @@ function updateNowPlaying() {
     navigator.mediaSession.metadata = t ? new MediaMetadata({ title: t.title, artist: t.artist, album: t.album,
       artwork: t.coverArt && srv(t.serverId) ? [{ src: coverUrl(t.coverArt, 512, t.serverId), sizes: '512x512' }] : [] }) : null;
   }
-  paintButtons();
+  paintButtons(); NativeMedia.sync();
 }
 function paintButtons() {
   const playing = isPlaying();
@@ -1054,6 +1054,7 @@ function paintButtons() {
   $('#bRep').classList.toggle('on', S.repeat !== 'off');
   $('#bRep').title = { off: 'Ripeti: no', all: 'Ripeti: tutta la coda', one: 'Ripeti: questo brano' }[S.repeat];
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+  NativeMedia.sync();
 }
 let seeking = false;
 function paintTime() {
@@ -1063,6 +1064,7 @@ function paintTime() {
   if ('mediaSession' in navigator && d && navigator.mediaSession.setPositionState) {
     try { navigator.mediaSession.setPositionState({ duration: d, position: Math.min(p, d), playbackRate: P.speed }); } catch {}
   }
+  NativeMedia.sync();
 }
 Bus.addEventListener('time', paintTime);
 
@@ -1807,6 +1809,7 @@ function vSettings() {
   </div>`)}
 
   ${access().admin && srv()?.session ? grp('utenti', 'Utenti', 'permessi caricamento download disconnetti amministratore', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div>') : ''}
+  ${window.ARMONY_APP ? grp('app', 'App Android', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div>') : ''}
   ${access().admin ? grp('aggiornamenti', 'Aggiornamenti', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>') : ''}
 
   ${grp('aspetto', 'Aspetto', 'tema chiaro scuro automatico colori', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`)}
@@ -1830,6 +1833,7 @@ function vSettings() {
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
   if (access().admin) { refreshUpdate(); refreshUsers(); }
+  if (window.ARMONY_APP) AppUpdate.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
 }
 // ricerca fra le impostazioni: mostra solo le voci che contengono il testo, e apre i gruppi che ne hanno
@@ -2135,6 +2139,70 @@ view.addEventListener('click', async e => {
   } catch (err) { console.error(err); toast(err.message); }
 });
 
+/* ================= app Android: notifica, cuffie, tasto indietro, aggiornamenti dell'APK =================
+   Il plugin ArmonyMedia sta in app/android (ArmonyMediaPlugin.java): la musica la suona sempre questa pagina,
+   il plugin tiene viva l'app e porta i comandi del sistema qui. Tutto è spento fuori dall'app. */
+const NativeMedia = {
+  p: null, sent: null,
+  init() {
+    this.p = NATIVE ? window.Capacitor?.Plugins?.ArmonyMedia : null; if (!this.p) return;
+    this.p.addListener('action', e => {
+      if (e.action === 'play' && !isPlaying() || e.action === 'pause' && isPlaying()) ctlToggle();
+      else if (e.action === 'next') ctlNext(false);
+      else if (e.action === 'previous') ctlPrev();
+      else if (e.action === 'seek') ctlSeek(e.position);
+    });
+  },
+  // manda lo stato solo se cambia qualcosa che la notifica non può dedurre da sola (brano, play/pausa, salti)
+  sync() {
+    if (!this.p) return;
+    const t = currentTrack();
+    if (!t) { if (this.sent) { this.p.stop(); this.sent = null; } return; }
+    const now = { title: t.title, artist: t.artist, album: t.album || '', playing: isPlaying(), position: playPos(), duration: playDur(), rate: P.speed,
+      artwork: t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 512, t.serverId) : '' };
+    if (!this.sent && !now.playing) return;  // servizio e permesso delle notifiche solo dal primo play
+    const s = this.sent, expected = s ? s.position + (s.playing ? (Date.now() - s.at) / 1000 * s.rate : 0) : 0;
+    if (s && s.title === now.title && s.artist === now.artist && s.playing === now.playing && s.duration === now.duration && s.rate === now.rate && Math.abs(expected - now.position) < 2) return;
+    this.sent = { ...now, at: Date.now() };
+    this.p.update(now).catch(() => {});
+  }
+};
+const AppUpdate = {
+  // l'APK arriva dalle release GitHub, allegato dalla Action a ogni tag (.github/workflows/android.yml)
+  async check() {
+    const a = window.ARMONY_APP; if (!a?.repo) return null;
+    try {
+      const r = await fetch(`https://api.github.com/repos/${a.repo}/releases/latest`);
+      if (r.status === 404) return { current: a.version, latest: null, available: false };  // nessun APK pubblicato
+      if (!r.ok) return null;
+      const j = await r.json(), apk = arr(j.assets).find(x => /\.apk$/.test(x.name));
+      const v = s => (String(s).match(/(\d+)\.(\d+)\.(\d+)/) || []).slice(1).map(Number);
+      const [n, c] = [v(j.tag_name), v(a.version)];
+      const newer = n.length === 3 && c.length === 3 && (n[0] - c[0] || n[1] - c[1] || n[2] - c[2]) > 0;
+      return { current: a.version, latest: j.tag_name, url: apk?.browser_download_url, available: newer && !!apk };
+    } catch { return null; }
+  },
+  async notify() {
+    const u = await this.check();
+    if (u?.available && store.get('appSeen') !== u.latest) { store.set('appSeen', u.latest); toast(`Nuova versione dell'app: ${u.latest}. Scaricala da Impostazioni → App Android.`, 6000); }
+  },
+  async paint() {
+    const box = $('#appBox'); if (!box) return;
+    const u = await this.check();
+    box.innerHTML = `<p style="margin:0 0 8px">Versione dell'app <b>${esc(window.ARMONY_APP.version)}</b>${u?.latest ? ` · ultima ${esc(u.latest)}` : ''}</p>
+      ${!u ? '<p class="sub">Non riesco a controllare gli aggiornamenti adesso.</p>' : !u.latest ? '<p class="sub">Su GitHub non c\'è ancora nessuna versione dell\'app.</p>' : ''}
+      <div class="row">${u?.available ? `<a class="btn primary" href="${esc(u.url)}">Scarica ${esc(u.latest)}</a><span class="small" style="color:var(--muted)">Si apre nel browser: poi apri il file per installarlo.</span>` : u?.latest ? '<span class="tag ok">Aggiornata</span>' : ''}</div>`;
+  }
+};
+function nativeBack() {
+  const App = window.Capacitor?.Plugins?.App; if (!App) return;
+  // indietro chiude prima un foglio aperto; dalla home non chiude l'app (la musica deve continuare): la riduce
+  App.addListener('backButton', ({ canGoBack }) => {
+    const d = $('dialog[open]'); if (d) return d.close();
+    if (canGoBack && !/^#\/(home)?$/.test(location.hash || '#/')) history.back(); else App.minimizeApp();
+  });
+}
+
 /* ================= controlli del lettore e avvio ================= */
 function wirePlayer() {
   $('#bPrev').innerHTML = ic('prev'); $('#bNext').innerHTML = ic('next'); $('#bQueue').innerHTML = ic('queue'); $('#bQm').innerHTML = ic('sliders'); $('#bLyr').innerHTML = ic('lyrics');
@@ -2196,7 +2264,8 @@ async function boot() {
   addEventListener('online', () => { toast('Di nuovo online.'); fillSelectors(); });
   addEventListener('offline', () => toast('Sei offline: puoi ascoltare i brani salvati.'));
   navigator.connection?.addEventListener?.('change', fillSelectors);
-  if ('serviceWorker' in navigator && /^https?:/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && /^https?:/.test(location.protocol) && !NATIVE) navigator.serviceWorker.register('sw.js').catch(() => {});
+  NativeMedia.init(); if (NATIVE) { nativeBack(); setTimeout(() => AppUpdate.notify(), 8000); }
   Jam.init();
   route();
   setTimeout(resolvePending, 8000);

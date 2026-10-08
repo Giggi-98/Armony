@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- icona della notifica: solo bianco, il sistema la colora -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:pathData="M2.40,12.00 a9.60,9.60 0 1,0 19.20,0 a9.60,9.60 0 1,0 -19.20,0"/>
+    <path android:fillColor="#FFFFFF" android:fillType="evenOdd" android:pathData="M7.00,12.00 a5.00,5.00 0 1,0 10.00,0 a5.00,5.00 0 1,0 -10.00,0 M10.80,12.00 a1.20,1.20 0 1,0 2.40,0 a1.20,1.20 0 1,0 -2.40,0"/>
+</vector>

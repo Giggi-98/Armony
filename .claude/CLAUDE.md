@@ -20,6 +20,9 @@ client/              HTML + JS puro, nessun bundler, nessuna compilazione
   jam.js             Jam: segnalazione cifrata, WebRTC, orologio condiviso, codice di sicurezza
   sw.js              solo la shell dell'app; /rest /api /share non passano dal service worker
 deploy/              aggiornamento eseguito dall'host (systemd .path → armony-update.sh)
+app/                 app Android: Capacitor impacchetta client/ (build-web.mjs → www/); plugin di
+                     riproduzione in app/android/app/src/main/java/…/ArmonyMedia*.java. Qui npm sì, in client/ no
+.github/workflows/   android.yml: APK firmato a ogni tag, allegato alla release
 docs/FEDERAZIONE.md  progetto (non ancora implementato) dei collegamenti fra server
 docs/EVOLUZIONE.md   analisi delle funzioni, client web/PC/Android e ordine dei lavori
 VERSION · .env       versione dell'app (= tag vX.Y.Z) · segreti, fuori da git
@@ -67,6 +70,12 @@ musica/ video/ data/ dati dell'utente (root, montati nei container): non toccarl
   `.app`. Senza, 12 icone allargano tutta la pagina oltre lo schermo.
 - **Multicast** solo con `network_mode: host` su Linux; il resto dell'app deve
   funzionare anche con `ARMONY_MULTICAST=0`.
+- **App Android**: il client deve funzionare anche servito da sé stesso
+  (`NATIVE`): mai `location.origin` per l'indirizzo del server. Ciò che è solo
+  dell'app (`NativeMedia`, `AppUpdate`, tasto indietro) è spento fuori dall'app.
+  La chiave di firma è in `data/android/` (fuori da git): senza di lei gli
+  aggiornamenti dell'APK non si installano. Non c'è un emulatore su questa
+  macchina: il codice nativo si collauda sul telefono.
 - **Lingua**: interfaccia, commenti e messaggi sono in italiano. Mantienilo.
 
 ## 1. Think Before Coding

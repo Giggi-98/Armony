@@ -123,7 +123,16 @@ Se nel sistema è attivo «Riduci movimento», Armony lo rispetta: niente dischi
 
 "In riproduzione", album e artisti prendono la luce dei colori della copertina; se un brano non ha testo, al suo posto compaiono i prossimi brani.
 
-## App native
+## App Android
+Armony per Android è la stessa app che apri nel browser, con in più ciò che il browser non dà: la musica continua a schermo spento, i comandi stanno nella notifica e nella schermata di blocco, i tasti delle cuffie funzionano, e il tasto indietro non la chiude mentre suona.
+
+**Installarla.** Sul telefono apri la pagina delle release del progetto su GitHub (`https://github.com/Giggi-98/Armony/releases`), scarica `armony-vX.Y.Z.apk` e aprilo. Android chiede di consentire l'installazione da quella fonte (il browser): consentilo una volta. Al primo avvio inserisci indirizzo, utente e password del server, come nel browser. Al primo play l'app chiede di mostrare le notifiche: senza, la musica continua ma i comandi non si vedono.
+
+**Aggiornarla.** Quando esce una versione nuova l'app lo segnala; in Impostazioni → App Android c'è il tasto per scaricarla. Si installa sopra la vecchia, senza perdere niente.
+
+**Per chi pubblica le versioni.** Ogni tag `vX.Y.Z` fa costruire l'APK firmato a GitHub (`.github/workflows/android.yml`) e lo allega alla release. La chiave di firma sta in `data/android/` sul server: **fanne una copia di sicurezza**, perché senza la stessa chiave gli aggiornamenti non si installano sopra l'app esistente e ognuno dovrebbe disinstallarla e reinstallarla. Una volta sola, in GitHub → Settings → Secrets and variables → Actions, aggiungi `ARMONY_KEYSTORE_B64` (il contenuto di `data/android/ARMONY_KEYSTORE_B64.txt`), `ARMONY_KEYSTORE_PASSWORD`, `ARMONY_KEY_ALIAS` e `ARMONY_KEY_PASSWORD` (da `data/android/firma.properties`). Per costruire l'APK sul proprio computer: `app/toolchain.sh`, poi `. /opt/armony-android/env.sh && cd app && npm ci && npm run apk`.
+
+## Altre app
 Navidrome funziona anche con app già pronte, collegate allo stesso server e alle stesse playlist: Symfonium o Tempo su Android, Amperfy o play:Sub su iPhone. La Jam però è solo di Armony.
 
 ## Manutenzione

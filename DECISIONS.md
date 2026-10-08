@@ -27,6 +27,34 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — App Android: Capacitor, plugin di riproduzione nostro, APK firmato dalla Action
+
+**Contesto:** passo C di `docs/EVOLUZIONE.md`. Serve che la musica continui a
+schermo spento con notifica e cuffie, senza riscrivere il client.
+**Scelta:** `app/` impacchetta `client/` così com'è con Capacitor 8.5.2
+(`build-web.mjs` lo copia in `www/` e aggiunge `window.ARMONY_APP`). La musica
+resta nella WebView (EQ, dissolvenza, Jam); un plugin locale (`ArmonyMediaPlugin`
++ `ArmonyMediaService`, in `app/android`) tiene un servizio in primo piano di tipo
+mediaPlayback con MediaSession, notifica, wake lock e Wi-Fi lock. Il servizio
+parte al primo play e resta in primo piano anche in pausa. L'APK lo costruisce
+e firma la GitHub Action a ogni tag; l'app controlla le release GitHub.
+`app/` usa npm: la regola "niente npm" vale per `client/`, che resta senza build.
+**Alternative scartate:**
+- `@jofr/capacitor-media-session`: fermo al 2024 e dichiarato per Capacitor 6.
+- Riproduzione nativa (Media3/ExoPlayer): si perdono EQ, dissolvenza e
+  trasmissione Jam, che vivono in Web Audio.
+- Servizio che esce dal primo piano in pausa: da Android 12 ripartire dalla
+  notifica con l'app in secondo piano non può più riavviarlo.
+- Chiave di firma nel repository o chiave di debug: chiunque potrebbe firmare
+  un "aggiornamento"; con la chiave di debug ogni build avrebbe una firma diversa.
+**Conseguenze:** in pausa la notifica resta finché l'app è aperta. Senza la
+chiave in `data/android/` gli aggiornamenti non si installano sopra l'app
+esistente. Collaudata qui solo con plugin simulati: questa macchina non ha
+virtualizzazione per un emulatore.
+**Da rivedere se:** la WebView si ferma comunque in secondo piano su qualche
+telefono (allora riproduzione nativa almeno per l'audio), oppure si pubblica
+sul Play Store (firma gestita da Google).
+
 ## 2026-10-08 — Movimento: View Transitions per le pagine, WAAPI per il disco
 
 **Contesto:** §3b di `docs/EVOLUZIONE.md`.

@@ -263,6 +263,13 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**Passo C fatto (2026-10-08)**: app Android con Capacitor (`app/`), plugin di
+riproduzione in sottofondo nostro, icona e avvio di Armony, APK firmato dalla
+GitHub Action a ogni tag, aggiornamenti dell'app dalle release. Da collaudare
+sul telefono: questa macchina non può far girare un emulatore. Rimandati:
+offline su file invece che IndexedDB, "Condividi con Armony", caricamento in
+sottofondo.
+
 **Passo G fatto (2026-10-08)**, con cinque agenti in parallelo: selettore
 della Jam e generi di YouTube (più `deploy/pulisci-generi.py`), luce del disco,
 barra in basso su telefono, sistema di movimento (con la correzione della

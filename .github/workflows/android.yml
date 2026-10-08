@@ -1,0 +1,63 @@
+# App Android: a ogni tag vX.Y.Z costruisce l'APK firmato e lo allega alla release GitHub del tag.
+# L'app controlla quelle release per proporre l'aggiornamento (AppUpdate in client/armony.js).
+# Secrets richiesti (Settings → Secrets and variables → Actions), vedi LEGGIMI.md "App Android":
+#   ARMONY_KEYSTORE_B64  la chiave di firma (armony.jks) in base64
+#   ARMONY_KEYSTORE_PASSWORD, ARMONY_KEY_ALIAS, ARMONY_KEY_PASSWORD
+name: App Android
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Il tag corrisponde a VERSION
+        run: |
+          v="$(cat VERSION)"
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "::error::Il tag $GITHUB_REF_NAME non corrisponde a VERSION ($v)"; exit 1; }
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22.23.3
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Chiave di firma
+        env:
+          KEYSTORE_B64: ${{ secrets.ARMONY_KEYSTORE_B64 }}
+        run: |
+          [ -n "$KEYSTORE_B64" ] || { echo "::error::Manca il secret ARMONY_KEYSTORE_B64: senza firma l'APK non si installa (LEGGIMI.md, App Android)"; exit 1; }
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/armony.jks"
+
+      - name: Costruisci l'APK
+        working-directory: app
+        env:
+          ARMONY_KEYSTORE: ${{ runner.temp }}/armony.jks
+          ARMONY_KEYSTORE_PASSWORD: ${{ secrets.ARMONY_KEYSTORE_PASSWORD }}
+          ARMONY_KEY_ALIAS: ${{ secrets.ARMONY_KEY_ALIAS }}
+          ARMONY_KEY_PASSWORD: ${{ secrets.ARMONY_KEY_PASSWORD }}
+        run: |
+          npm ci
+          npm run apk
+          mkdir -p "$RUNNER_TEMP/out"
+          cp android/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/out/armony-$GITHUB_REF_NAME.apk"
+          (cd "$RUNNER_TEMP/out" && sha256sum "armony-$GITHUB_REF_NAME.apk" > "armony-$GITHUB_REF_NAME.apk.sha256")
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
+        with:
+          files: |
+            ${{ runner.temp }}/out/armony-${{ github.ref_name }}.apk
+            ${{ runner.temp }}/out/armony-${{ github.ref_name }}.apk.sha256
+          generate_release_notes: true

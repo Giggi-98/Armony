@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- il disco di Armony (client/icon.svg), per icona adattiva e schermata d'avvio -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#2C3058" android:strokeWidth="1.01" android:pathData="M21.00,54.00 a33.00,33.00 0 1,0 66.00,0 a33.00,33.00 0 1,0 -66.00,0"/>
+    <path android:strokeColor="#2C3058" android:strokeWidth="1.01" android:pathData="M25.04,54.00 a28.96,28.96 0 1,0 57.92,0 a28.96,28.96 0 1,0 -57.92,0"/>
+    <path android:strokeColor="#2C3058" android:strokeWidth="1.01" android:pathData="M29.08,54.00 a24.92,24.92 0 1,0 49.84,0 a24.92,24.92 0 1,0 -49.84,0"/>
+    <path android:strokeColor="#2C3058" android:strokeWidth="1.01" android:pathData="M33.12,54.00 a20.88,20.88 0 1,0 41.76,0 a20.88,20.88 0 1,0 -41.76,0"/>
+    <path android:fillColor="#F2A541" android:pathData="M39.86,54.00 a14.14,14.14 0 1,0 28.29,0 a14.14,14.14 0 1,0 -28.29,0"/>
+    <path android:fillColor="#1B1E36" android:pathData="M51.64,54.00 a2.36,2.36 0 1,0 4.71,0 a2.36,2.36 0 1,0 -4.71,0"/>
+</vector>

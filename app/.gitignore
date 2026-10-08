@@ -1,0 +1,6 @@
+node_modules/
+www/
+# chiave di firma e password: mai su git
+*.jks
+*.keystore
+firma.properties
