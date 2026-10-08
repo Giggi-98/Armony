@@ -272,6 +272,7 @@ interruttore in Impostazioni → Profilo.
 | Domanda | Risposta |
 |---|---|
 | Ordine | A fondamenta → B statistiche e preferenze sul server → C app Android → D federazione fase 1 → E, F |
+| Grafica (aggiunta il 2026-10-08) | Passo G fra B e C: l'app Android impacchetta il client già rifinito |
 | Caricamento e download | Aperti a tutti gli utenti, disattivabili per utente dall'amministratore. Aggiornamenti e federazione solo agli amministratori |
 | Android | APK costruito a ogni tag e allegato alla release GitHub; niente Play Store per ora |
 | PC | PWA installabile da subito; Electron solo se serve qualcosa che la PWA non dà |
