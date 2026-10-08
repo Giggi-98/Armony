@@ -27,6 +27,33 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Accesso per utente: sessioni Armony sopra le credenziali Navidrome
+
+**Contesto:** passo A di `docs/EVOLUZIONE.md`. Un codice condiviso dava a chi
+carica musica anche il potere di aggiornare il server, e la password Navidrome
+stava in chiaro negli URL e nel `localStorage`.
+**Scelta:** il client calcola token + sale Subsonic (`md5(password+sale)`) e
+conserva solo quelli. `POST /api/login` li verifica con `getUser` di Navidrome
+e crea una sessione Armony (SQLite, 180 giorni dall'ultimo uso), che va in
+`X-Token`. Il ruolo viene da `adminRole`; download e caricamento sono permessi
+per utente, attivi per default. `ARMONY_TOKEN` resta come accesso di emergenza.
+Dieci accessi falliti in dieci minuti bloccano l'indirizzo.
+**Alternative scartate:**
+- Chiavi API OpenSubsonic: Navidrome 0.64.2 non le offre.
+- Verificare token + sale su Navidrome a ogni richiesta, senza sessioni: una
+  chiamata in più per ogni richiesta, e nessun modo di disconnettere un
+  dispositivo.
+- Utenti propri di Armony: due anagrafiche da tenere allineate.
+- JWT firmati invece di sessioni nel DB: non si revocano senza una lista nera,
+  che è di nuovo una tabella.
+**Conseguenze:** token + sale valgono quanto la password per l'API Subsonic
+finché la password non cambia: rubarli dal dispositivo dà accesso
+all'ascolto. Il pannello Utenti mostra solo chi ha fatto accesso almeno una
+volta. Un server Armony 0.2 non ha `/api/info`: il client lo tratta come
+"solo ascolto" e usa ancora il vecchio codice di accesso, se c'è.
+**Da rivedere se:** Navidrome aggiunge le chiavi API (revocabili una per una),
+oppure serve un permesso che i ruoli Navidrome non esprimono.
+
 ## 2026-10-08 — Client multipiattaforma: un solo codice, tre involucri
 
 **Contesto:** i client devono esistere su web, PC e Android, contro server

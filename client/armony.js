@@ -16,6 +16,28 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('armony:' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('armony:' + k, JSON.stringify(v)); } catch {} }
 };
+// nell'app Android/PC il client è servito da sé stesso: mai usare location.origin come indirizzo del server
+const NATIVE = !!window.Capacitor?.isNativePlatform?.();
+// MD5 per l'autenticazione Subsonic token + sale: crypto.subtle non lo offre
+function md5(str) {
+  const R = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21], K = [];
+  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 2 ** 32) | 0;
+  const b = new TextEncoder().encode(str), n = ((b.length + 8) >> 6) + 1, w = new Int32Array(n * 16);
+  for (let i = 0; i < b.length; i++) w[i >> 2] |= b[i] << (i % 4 * 8);
+  w[b.length >> 2] |= 0x80 << (b.length % 4 * 8); w[n * 16 - 2] = b.length * 8;
+  let a0 = 0x67452301, b0 = 0xefcdab89 | 0, c0 = 0x98badcfe | 0, d0 = 0x10325476;
+  for (let o = 0; o < w.length; o += 16) {
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      const q = i >> 4, f = q === 0 ? (B & C) | (~B & D) : q === 1 ? (D & B) | (~D & C) : q === 2 ? B ^ C ^ D : C ^ (B | ~D);
+      const g = q === 0 ? i : q === 1 ? (5 * i + 1) % 16 : q === 2 ? (3 * i + 5) % 16 : (7 * i) % 16;
+      const x = (A + f + K[i] + w[o + g]) | 0, r = R[q * 4 + i % 4];
+      A = D; D = C; C = B; B = (B + ((x << r) | (x >>> (32 - r)))) | 0;
+    }
+    a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+  }
+  return [a0, b0, c0, d0].map(v => [0, 8, 16, 24].map(s => ((v >>> s) & 255).toString(16).padStart(2, '0')).join('')).join('');
+}
 const Bus = new EventTarget();
 const emit = (type, detail) => Bus.dispatchEvent(new CustomEvent(type, { detail }));
 let toastTimer;
@@ -112,7 +134,6 @@ const savePrefs = () => store.set('prefs', P);
 const S = {
   servers: store.get('servers', []),
   active: store.get('active', null),
-  dl: store.get('downloader', { url: /^https?:/.test(location.protocol) ? location.origin : '', token: '' }),
   queue: store.get('queue', []),
   index: store.get('index', -1),
   shuffle: store.get('shuffle', false),
@@ -121,6 +142,22 @@ const S = {
   lastList: [], me: {}
 };
 if (!S.servers.find(s => s.id === S.active)) S.active = S.servers[0]?.id || null;
+// credenziali Subsonic: si conserva token + sale, mai la password (che negli URL sarebbe leggibile)
+const subsonicCreds = pass => { const salt = uid(12); return { tok: md5(pass + salt), salt }; };
+function migrateCreds(list) {
+  for (const s of list) if (s.pass) { Object.assign(s, subsonicCreds(s.pass)); delete s.pass; delete s.session; }
+  return list;
+}
+migrateCreds(S.servers); store.set('servers', S.servers);
+// Armony è il server in uso: la sessione arriva dall'accesso (armonyLogin). 'downloader' è il vecchio
+// codice di accesso separato, usato solo finché il server non ha una sessione (server Armony 0.2 o precedenti)
+Object.defineProperty(S, 'dl', {
+  get() {
+    const s = srv(); if (s?.session) return { url: absUrl(s.url), token: s.session };
+    const l = store.get('downloader', null); return l?.url && l?.token ? l : { url: '', token: '' };
+  }
+});
+const access = () => srv()?.session ? srv().me || {} : S.dl.token ? { admin: true, upload: true, download: true } : {};
 if (P.theme !== 'auto') document.documentElement.dataset.theme = P.theme;
 const srv = id => S.servers.find(s => s.id === (id || S.active));
 const key = t => t.serverId + ':' + t.id;
@@ -132,7 +169,8 @@ const activeQuality = () => (onMobileData() && P.qualityMobile !== 'same') ? P.q
 function absUrl(u) { try { return new URL(u, location.href).toString().replace(/\/+$/, ''); } catch { return u; } }
 function apiParams(s, params = {}) {
   const p = new URLSearchParams();
-  const all = { u: s.user, p: 'enc:' + hex(s.pass), v: '1.16.1', c: S.device, f: 'json', ...params };
+  const auth = s.tok ? { t: s.tok, s: s.salt } : { p: 'enc:' + hex(s.pass || '') };
+  const all = { u: s.user, ...auth, v: '1.16.1', c: S.device, f: 'json', ...params };
   for (const [k, v] of Object.entries(all)) {
     if (Array.isArray(v)) v.forEach(x => p.append(k, x)); else if (v !== undefined && v !== null && v !== '') p.set(k, v);
   }
@@ -149,7 +187,7 @@ async function api(method, params, s = srv(), post = false) {
   } catch { throw new Error(`Non riesco a raggiungere ${s.name}. Controlla indirizzo e connessione.`); }
   if (!r.ok) throw new Error(`${s.name} ha risposto con errore ${r.status}.`);
   const sr = (await r.json())['subsonic-response'];
-  if (sr.status !== 'ok') throw new Error(sr.error?.message || 'Il server ha rifiutato la richiesta.');
+  if (sr.status !== 'ok') throw new Error(sr.error?.code === 40 ? 'Utente o password errati.' : sr.error?.message || 'Il server ha rifiutato la richiesta.');
   return sr;
 }
 const norm = (x, sid = S.active) => ({
@@ -162,6 +200,33 @@ const norm = (x, sid = S.active) => ({
 const coverUrl = (coverArt, size = 300, sid) => { const s = srv(sid); return coverArt && s ? apiUrl(s, 'getCoverArt', { id: coverArt, size }) : ''; };
 const streamUrl = (t, q = activeQuality()) => apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params });
 const imgTag = (coverArt, size, sid) => { const u = coverUrl(coverArt, size, sid); return u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : ''; };
+
+/* ================= accesso ad Armony (sessione per utente, permessi dal ruolo Navidrome) ================= */
+async function armonyLogin(s) {
+  const base = absUrl(s.url);
+  const info = await fetch(base + '/api/info').then(r => r.ok ? r.json() : null).catch(() => undefined);
+  if (info === undefined) return null;  // irraggiungibile: si riprova al prossimo avvio
+  if (!info?.armony) { s.armony = false; delete s.session; delete s.me; return null; }  // Subsonic senza Armony, o Armony 0.2
+  const r = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: s.user, t: s.tok, s: s.salt, device: S.device }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Errore ${r.status}`);
+  s.armony = true; s.session = j.session; delete j.session; s.me = j;
+  return j;
+}
+async function syncSessions() {
+  for (const s of S.servers) {
+    if (!s.tok) continue;  // anche i server "senza Armony": potrebbero averlo installato nel frattempo
+    if (s.session) {
+      const r = await fetch(absUrl(s.url) + '/api/me', { headers: { 'X-Token': s.session } }).catch(() => null);
+      if (r?.ok) { s.me = await r.json(); continue; }
+      if (r?.status !== 401) continue;
+      delete s.session;
+    }
+    await armonyLogin(s).catch(() => {});
+  }
+  persistServers();
+  if (srv()?.session) store.set('downloader', null);
+}
 
 /* ================= router ================= */
 const NAV = [
@@ -232,7 +297,7 @@ const listActions = (extra = '') => `<div class="row" style="margin-bottom:16px"
   <button class="btn" data-act="enqueueall">${ic('plus')} In coda</button>
   <button class="btn" data-act="offlineall">${ic('offline')} Offline</button>${extra}</div>`;
 function noServer() {
-  const local = /^https?:/.test(location.protocol);
+  const local = /^https?:/.test(location.protocol) && !NATIVE;
   view.innerHTML = `<h1>Benvenuto in Armony</h1><p class="sub">La musica della vostra compagnia, dai vostri server.</p>
   <div class="empty"><h3>Collega il primo server</h3><p>Ti servono un nome utente e una password del server musicale.</p>
   <div class="row" style="justify-content:center">
@@ -1000,10 +1065,14 @@ async function makeWrapped() {
 }
 
 /* ================= download ================= */
-async function dlApi(path, opts = {}) {
-  if (!S.dl.url) throw new Error('Configura il servizio di download in Impostazioni.');
+async function dlApi(path, opts = {}, retry = true) {
+  if (!S.dl.url) throw new Error(srv() ? 'Questo server non ha Armony: download, caricamenti e aggiornamenti non sono disponibili.' : 'Aggiungi un server in Impostazioni.');
   const r = await fetch(S.dl.url.replace(/\/+$/, '') + path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Token': S.dl.token, ...(opts.headers || {}) } });
-  if (r.status === 401) throw new Error('Codice di accesso del servizio di download errato.');
+  if (r.status === 401) {
+    const s = srv();
+    if (retry && s?.session) { delete s.session; await armonyLogin(s).catch(() => {}); persistServers(); if (s.session) return dlApi(path, opts, false); }
+    throw new Error('Accesso scaduto: in Impostazioni modifica il server e reinserisci la password.');
+  }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `Errore ${r.status}`);
   return j;
@@ -1018,6 +1087,7 @@ async function vDownload(sub = '') {
   const t = ['cerca', 'carica'].includes(tab) ? tab : 'link';
   const tabs = `<div class="tabs"><a href="#/scarica" class="${t === 'link' ? 'on' : ''}">Da un link</a><a href="#/scarica/cerca" class="${t === 'cerca' ? 'on' : ''}">Cerca online</a><a href="#/scarica/carica" class="${t === 'carica' ? 'on' : ''}">Dal dispositivo</a></div>`;
   if (t === 'carica') return vUpload(tabs);
+  if (S.dl.url && !access().download) { view.innerHTML = `<h1>Scarica</h1>${tabs}<div class="empty">I download non sono abilitati per il tuo utente. Chiedilo a chi gestisce il server.</div>`; return; }
   view.innerHTML = `<h1>Scarica</h1><p class="sub">Da YouTube, SoundCloud, Bandcamp, Vimeo e centinaia di altri siti. L'audio entra nella libreria, i video restano qui sotto.</p>
   ${tabs}
   <div class="panel">
@@ -1113,6 +1183,7 @@ async function refreshVideos() {
 const UP_EXT = /\.(mp3|flac|m4a|aac|ogg|oga|opus|wav|aif|aiff|wma|wv|ape)$/i, UP_COVER = /^(cover|folder)\.(jpe?g|png)$/i;
 const Up = { list: [], busy: false };
 function vUpload(tabs) {
+  if (S.dl.url && !access().upload) { view.innerHTML = `<h1>Scarica</h1>${tabs}<div class="empty">Il caricamento non è abilitato per il tuo utente. Chiedilo a chi gestisce il server.</div>`; return; }
   view.innerHTML = `<h1>Scarica</h1><p class="sub">Dal telefono o dal computer alla libreria del server: file singoli o cartelle intere. Le copertine cover.jpg e folder.jpg vengono caricate insieme agli album.</p>
   ${tabs}
   <div class="panel">
@@ -1143,7 +1214,7 @@ async function readEntry(en) {
   return (await Promise.all(out.map(readEntry))).flat();
 }
 function upAdd(files) {
-  if (!S.dl.url) return toast('Configura il servizio di download in Impostazioni.');
+  if (!S.dl.url) return toast('Questo server non ha Armony: il caricamento non è disponibile.');
   const folder = $('#upDest')?.value.trim() || store.get('upDir', 'Caricati');
   let skipped = 0;
   for (const [file, path] of files) {
@@ -1376,7 +1447,7 @@ function vSettings() {
 
   <h2>Server musicali</h2><p class="sub">Qualsiasi server compatibile Subsonic: Navidrome, Gonic, Airsonic, Ampache.</p>
   <div>${S.servers.map(s => `<div class="list-item" style="cursor:default">
-    <span class="grow"><b>${esc(s.name)} ${s.id === S.active ? '<span class="tag ok">in uso</span>' : ''}</b><small>${esc(s.url)}, utente ${esc(s.user)}</small></span>
+    <span class="grow"><b>${esc(s.name)} ${s.id === S.active ? '<span class="tag ok">in uso</span>' : ''}</b><small>${esc(s.url)}, utente ${esc(s.user)}${s.me ? (s.me.admin ? ', amministratore' : '') + ` · Armony ${esc(s.me.version || '')}` : s.armony === false ? ' · solo ascolto (server senza Armony)' : ''}</small></span>
     ${s.id !== S.active ? `<button class="btn sm" data-act="usesrv" data-id="${s.id}">Usa</button>` : ''}
     <button class="btn sm" data-act="editsrv" data-id="${s.id}">Modifica</button>
     <button class="icon-btn" data-act="delsrv" data-id="${s.id}" aria-label="Rimuovi">${ic('trash')}</button></div>`).join('') || '<p class="sub">Nessun server.</p>'}</div>
@@ -1412,13 +1483,8 @@ function vSettings() {
     </div>
   </div>
 
-  <h2>Servizio di download</h2><div class="panel grid2">
-    <label class="f">Indirizzo<input type="url" id="dlUrl" value="${esc(S.dl.url)}" placeholder="http://192.168.1.10:8080"></label>
-    <label class="f">Codice di accesso<input type="password" id="dlTok" value="${esc(S.dl.token)}"></label>
-    <div class="row"><button class="btn" data-act="testdl">Prova connessione</button></div>
-  </div>
-
-  <h2>Aggiornamenti</h2><div class="panel" id="updBox"><p class="sub">${S.dl.url ? 'Inserisci il codice di accesso qui sopra per controllare gli aggiornamenti.' : 'Configura il servizio di download qui sopra: indirizzo e codice di accesso.'}</p></div>
+  ${access().admin ? `${srv()?.session ? '<h2>Utenti</h2><p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div>' : ''}
+  <h2>Aggiornamenti</h2><div class="panel" id="updBox"><p class="sub">Controllo…</p></div>` : ''}
 
   <h2>Aspetto</h2>
   <div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
@@ -1436,8 +1502,7 @@ function vSettings() {
   });
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  ['dlUrl', 'dlTok'].forEach(id => $('#' + id).onchange = () => { S.dl = { url: $('#dlUrl').value.trim().replace(/\/+$/, ''), token: $('#dlTok').value }; store.set('downloader', S.dl); toast('Servizio di download salvato.'); if (S.dl.url && S.dl.token) refreshUpdate(); });
-  if (S.dl.url && S.dl.token) refreshUpdate();
+  if (access().admin) { refreshUpdate(); refreshUsers(); }
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
 }
 /* ================= aggiornamenti dell'app (dal server Armony, verso i tag GitHub) ================= */
@@ -1459,33 +1524,57 @@ async function refreshUpdate(force) {
   if (busy) setTimeout(() => refreshUpdate(), 5000);
   return u;
 }
+async function refreshUsers() {
+  const box = $('#usrBox'); if (!box) return;
+  let list; try { list = await dlApi('/api/users'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  box.innerHTML = list.length ? list.map(u => `<div class="list-item" style="cursor:default;flex-wrap:wrap">
+    <span class="grow"><b>${esc(u.user)}</b><small>${u.admin ? 'amministratore' : 'utente'}${u.seen ? ', ultimo accesso ' + new Date(u.seen * 1000).toLocaleDateString() : ''}</small></span>
+    <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="upload" ${u.upload || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Caricamento</span></label>
+    <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="download" ${u.download || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Download</span></label>
+    ${u.sessions ? `<button class="btn sm" data-act="usrrevoke" data-user="${esc(u.user)}">Disconnetti</button>` : ''}</div>`).join('')
+    : '<div class="empty">Nessun utente ha ancora fatto accesso da Armony.</div>';
+  box.querySelectorAll('[data-usr]').forEach(el => el.onchange = async () => {
+    const name = el.dataset.usr, v = p => box.querySelector(`[data-usr="${CSS.escape(name)}"][data-perm="${p}"]`).checked;
+    try { await dlApi('/api/users/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ upload: v('upload'), download: v('download') }) }); toast('Permessi aggiornati.'); }
+    catch (e) { toast(e.message); refreshUsers(); }
+  });
+}
 async function notifyUpdate() {
-  if (!S.dl.url || !S.dl.token) return;
+  if (!access().admin) return;
   const u = await dlApi('/api/update').catch(() => null);
   if (u?.available && store.get('updSeen') !== u.latest) { store.set('updSeen', u.latest); toast(`Armony ${u.latest} disponibile: aggiorna da Impostazioni.`, 6000); }
 }
 function serverDialog(s, preset = {}) {
-  s = s || { id: uid(8), name: preset.name || '', url: preset.url || '', user: '', pass: '', shareBase: '' };
+  s = s || { id: uid(8), name: preset.name || '', url: preset.url || '', user: '', shareBase: '' };
   const d = $('#dlg'); d.className = '';
   d.innerHTML = `<h3>${s.user ? 'Modifica server' : 'Nuovo server'}</h3><div class="stack">
     <label class="f">Nome<input type="text" id="sName" value="${esc(s.name)}" placeholder="Casa di Marco"></label>
     <label class="f">Indirizzo<input type="url" id="sUrl" value="${esc(s.url)}" placeholder="http://192.168.1.10:8080"></label>
     <label class="f">Utente<input type="text" id="sUser" value="${esc(s.user)}" autocomplete="username"></label>
-    <label class="f">Password<input type="password" id="sPass" value="${esc(s.pass)}" autocomplete="current-password"></label>
+    <label class="f">Password<input type="password" id="sPass" value="" autocomplete="current-password" ${s.tok ? 'placeholder="Lascia vuoto per non cambiarla"' : ''}></label>
     <details><summary class="small" style="cursor:pointer;color:var(--muted)">Avanzate</summary>
       <label class="f" style="margin-top:8px">Indirizzo pubblico per i link condivisi<input type="url" id="sShare" value="${esc(s.shareBase || '')}" placeholder="https://musica.miodominio.it"></label></details>
     <p id="sMsg" class="small" style="margin:0;color:var(--muted)"></p>
     <div class="row"><button class="btn primary" id="sSave">Salva</button><button class="btn" id="sTest">Prova</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div></div>`;
-  const read = () => ({ ...s, name: $('#sName').value.trim() || $('#sUrl').value.trim(), url: $('#sUrl').value.trim().replace(/\/+$/, ''), user: $('#sUser').value.trim(), pass: $('#sPass').value, shareBase: $('#sShare').value.trim() });
+  const read = () => {
+    const pass = $('#sPass').value, user = $('#sUser').value.trim();
+    const n = { ...s, name: $('#sName').value.trim() || $('#sUrl').value.trim(), url: $('#sUrl').value.trim().replace(/\/+$/, ''), user, shareBase: $('#sShare').value.trim() };
+    if (pass) Object.assign(n, subsonicCreds(pass));
+    else if (user !== s.user) delete n.tok;  // utente cambiato senza password: credenziali vecchie non valide
+    return n;
+  };
   $('#sTest').onclick = async () => { $('#sMsg').textContent = 'Provo…'; try { await api('ping', {}, read()); $('#sMsg').textContent = 'Connessione riuscita.'; } catch (e) { $('#sMsg').textContent = e.message; } };
   $('#sSave').onclick = async () => {
-    const n = read(); if (!n.url || !n.user) { $('#sMsg').textContent = 'Indirizzo e utente sono obbligatori.'; return; }
+    const n = read(); if (!n.url || !n.user || !n.tok) { $('#sMsg').textContent = 'Indirizzo, utente e password sono obbligatori.'; return; }
     $('#sMsg').textContent = 'Verifico…';
     try { await api('ping', {}, n); } catch (e) { if (!confirm(`${e.message}\nSalvare comunque?`)) { $('#sMsg').textContent = e.message; return; } }
+    delete n.session; delete n.armony; delete n.me;
+    try { await armonyLogin(n); } catch (e) { $('#sMsg').textContent = 'Armony: ' + e.message; return; }
     const i = S.servers.findIndex(x => x.id === n.id); if (i >= 0) S.servers[i] = n; else S.servers.push(n);
     if (!S.active) S.active = n.id;
-    if (!S.dl.url && /^https?:/.test(n.url)) { S.dl.url = n.url; store.set('downloader', S.dl); }
+    if (n.session && S.active === n.id) store.set('downloader', null);
     persistServers(); d.close(); route();
+    toast(n.me ? `Collegato a ${n.name}${n.me.admin ? ' come amministratore' : ''}.` : `Collegato a ${n.name}: solo ascolto, il server non ha Armony.`);
   };
   d.showModal();
 }
@@ -1622,38 +1711,42 @@ view.addEventListener('click', async e => {
       case 'delsrv': if (confirm('Rimuovere questo server da Armony?')) { S.servers = S.servers.filter(s => s.id !== id); if (S.active === id) S.active = S.servers[0]?.id || null; persistServers(); vSettings(); } break;
       case 'lanscan': {
         $('#lanRes').innerHTML = '<p class="sub">Cerco server Armony sulla rete…</p>';
-        const base = S.dl.url || location.origin;
+        const base = S.dl.url || (NATIVE ? '' : location.origin);
         const r = await fetch(base + '/api/lan/servers').then(r => r.json()).catch(() => null);
         const list = r ? [{ name: r.self.name, url: base }, ...r.peers] : [];
         $('#lanRes').innerHTML = list.length ? list.map(s => `<div class="list-item" style="cursor:default"><span class="grow"><b>${esc(s.name)}</b><small>${esc(s.url)}</small></span>
           ${S.servers.some(x => absUrl(x.url) === absUrl(s.url)) ? '<span class="tag ok">già aggiunto</span>' : `<button class="btn sm" data-act="addsrv" data-url="${esc(s.url)}" data-name="${esc(s.name)}">Aggiungi</button>`}</div>`).join('')
           + (r && !r.self.multicast ? '<p class="small" style="color:var(--muted)">Il multicast è spento su questo server: vedrai solo lui.</p>' : '')
-          : '<div class="empty">Nessun server Armony raggiungibile. Imposta prima l\'indirizzo del servizio di download.</div>';
+          : '<div class="empty">Nessun server Armony raggiungibile. Aggiungi prima un server Armony.</div>';
         break;
       }
       case 'updcheck': await refreshUpdate(true); break;
       case 'updrun': if (confirm('Aggiornare il server? Armony si riavvia e per un minuto non risponde.')) { await dlApi('/api/update', { method: 'POST' }); toast('Aggiornamento richiesto.'); refreshUpdate(); } break;
-      case 'testdl': { S.dl = { url: $('#dlUrl').value.trim().replace(/\/+$/, ''), token: $('#dlTok').value }; store.set('downloader', S.dl); const h = await dlApi('/api/health'); toast(`Connesso a ${h.name}, Armony ${h.version}. yt-dlp ${h.ytdlp}.`); break; }
+      case 'usrrevoke': if (confirm(`Disconnettere ${el.dataset.user} da tutti i dispositivi? Dovrà rifare l'accesso.`)) { await dlApi(`/api/users/${encodeURIComponent(el.dataset.user)}/sessions`, { method: 'DELETE' }); refreshUsers(); } break;
       case 'exportset': {
-        const withPw = confirm('Includere le password nel file?\nOK = sì (conservalo al sicuro), Annulla = no');
-        saveFile('armony-impostazioni.json', JSON.stringify({ app: 'armony', version: 2, prefs: { ...P, turn: { ...P.turn, pass: withPw ? P.turn.pass : '' } },
-          downloader: { url: S.dl.url, token: withPw ? S.dl.token : '' }, servers: S.servers.map(s => ({ ...s, pass: withPw ? s.pass : '' })) }, null, 2), 'application/json');
+        const withPw = confirm('Includere le credenziali nel file?\nOK = sì (conservalo al sicuro), Annulla = no');
+        // mai la sessione: è di questo dispositivo. Le credenziali sono token + sale, non la password
+        const strip = ({ session, me, armony, tok, salt, ...rest }) => withPw ? { ...rest, tok, salt } : rest;
+        saveFile('armony-impostazioni.json', JSON.stringify({ app: 'armony', version: 3, prefs: { ...P, turn: { ...P.turn, pass: withPw ? P.turn.pass : '' } },
+          servers: S.servers.map(strip) }, null, 2), 'application/json');
         break;
       }
       case 'importset': {
         const f = await pickFile('.json'); if (!f) return;
         const j = JSON.parse(await f.text());
         if (!['armony', 'cerchia'].includes(j.app)) return toast('Questo file non contiene impostazioni di Armony.');
-        for (const s of arr(j.servers)) {
+        for (const s of migrateCreds(arr(j.servers))) {
+          delete s.session; delete s.me; delete s.armony;
           const ex = S.servers.find(x => absUrl(x.url) === absUrl(s.url) && x.user === s.user);
-          if (ex) Object.assign(ex, { ...s, id: ex.id, pass: s.pass || ex.pass }); else S.servers.push({ ...s, id: uid(8) });
+          if (ex) Object.assign(ex, { ...s, id: ex.id, tok: s.tok || ex.tok, salt: s.tok ? s.salt : ex.salt }); else S.servers.push({ ...s, id: uid(8) });
         }
         if (!S.active) S.active = S.servers[0]?.id;
-        if (j.downloader?.url) { S.dl = { url: j.downloader.url, token: j.downloader.token || S.dl.token }; store.set('downloader', S.dl); }
+        if (j.downloader?.token && !S.dl.token) store.set('downloader', j.downloader);  // file di Armony 0.2
+        syncSessions();
         if (j.prefs) { const nick = P.nick; Object.assign(P, j.prefs, { nick: nick || j.prefs.nick }); savePrefs(); }
         else if (j.quality && QUALITIES[j.quality]) { P.quality = j.quality; savePrefs(); }
         persistServers(); route();
-        toast(arr(j.servers).some(s => !s.pass) ? 'Importato. Inserisci le password mancanti con Modifica.' : 'Impostazioni importate.');
+        toast(S.servers.some(s => !s.tok) ? 'Importato. Inserisci le password mancanti con Modifica.' : 'Impostazioni importate.');
         break;
       }
       default: if (typeof Jam.action === 'function') await Jam.action(act, el);
@@ -1724,5 +1817,5 @@ async function boot() {
   Jam.init();
   route();
   setTimeout(resolvePending, 8000);
-  setTimeout(notifyUpdate, 5000);
+  syncSessions().then(() => { notifyUpdate(); if (/^#\/(impostazioni|scarica)/.test(location.hash)) route(); });
 }

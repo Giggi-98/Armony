@@ -51,8 +51,17 @@ musica/ video/ data/ dati dell'utente (root, montati nei container): non toccarl
   o che tocchi `safetyCode`/ECDH/AES-GCM in `jam.js`, va segnalata prima di
   scriverla. Le funzioni crittografiche esistono solo in contesto sicuro
   (`SUBTLE`): verifica sempre anche il ramo senza HTTPS.
-- **Rotte protette**: la tupla `PROTECTED` in `app.py` decide cosa richiede
-  `ARMONY_TOKEN`. Una nuova rotta di download/gestione file va aggiunta lì.
+- **Accesso e permessi**: la tupla `RULES` in `app.py` dice quale permesso
+  serve per ogni prefisso di rotta (`user`, `download`, `upload`, `admin`). Una
+  rotta nuova che non sia pubblica va aggiunta lì, altrimenti è aperta a tutti.
+  Le sessioni nascono da `/api/login` con token + sale Subsonic verificati su
+  Navidrome; `ARMONY_TOKEN` è solo l'accesso di emergenza dell'amministratore.
+  Il client non conserva mai la password (`tok`/`salt` nei server salvati).
+- **Livello di API**: `API_LEVEL` e `CAPS` in `app.py`. Le app native avranno
+  versioni diverse dal server: se cambi una rotta in modo incompatibile, alza
+  `API_LEVEL`; se aggiungi una funzione, aggiungi la capacità a `CAPS`.
+- **Stato persistente**: `server/db.py` (SQLite, `data/armony/armony.db`).
+  Migrazioni numerate e append-only: mai modificare una già rilasciata.
 - **Larghezza telefono**: la barra di navigazione in alto scorre in
   orizzontale solo grazie a `min-width:0` su `nav` e `minmax(0,1fr)` su
   `.app`. Senza, 12 icone allargano tutta la pagina oltre lo schermo.

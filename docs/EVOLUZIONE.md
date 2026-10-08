@@ -152,6 +152,16 @@ così com'è.
 
 C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 
+## 4b. Stato del passo A (2026-10-08)
+
+| Punto | Stato |
+|---|---|
+| §2.1 accesso unico con ruoli | Fatto: `/api/login`, sessioni in SQLite, permessi per utente, pannello Utenti |
+| §2.2 token + sale | Fatto: il client non conserva più la password; migrazione automatica dei dispositivi esistenti |
+| §2.3 indirizzo del server esplicito | Fatto: `NATIVE` nel client, inviti Jam e scoperta LAN non usano `location.origin` nell'app |
+| §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
+| §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
+
 ## 5. Decisioni prese (2026-10-08)
 
 | Domanda | Risposta |

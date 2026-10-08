@@ -65,7 +65,7 @@ function stereoOpus(sdp) {
 }
 const wire = t => t && ({ id: t.id, title: t.title, artist: t.artist, album: t.album, albumId: t.albumId, artistId: t.artistId, duration: t.duration, coverArt: t.coverArt, rg: t.rg, genre: t.genre, jamBy: t.jamBy, serverUrl: t.serverUrl || absUrl(srv(t.serverId)?.url || '') });
 const localize = w => { if (!w) return null; const s = S.servers.find(x => absUrl(x.url) === w.serverUrl); return { ...w, serverId: s ? s.id : 'nessuno' }; };
-const signalBase = () => (S.dl.url || (/^https?:/.test(location.protocol) ? location.origin : '') || absUrl(srv()?.url || '')).replace(/\/+$/, '');
+const signalBase = () => (S.dl.url || absUrl(srv()?.url || '') || (!NATIVE && /^https?:/.test(location.protocol) ? location.origin : '')).replace(/\/+$/, '');
 
 /* ================= segnalazione tramite server (messaggi cifrati) ================= */
 class Signal {
@@ -184,7 +184,8 @@ const Jam = {
   },
   async inviteLink() {
     const info = { b: this.room.base, r: this.room.id, n: this.room.name, h: this.name(), k: this.room.secret ? b64u.enc(this.room.secret) : null, net: this.net };
-    const base = /^https?:/.test(location.protocol) ? location.origin + location.pathname : (this.room.base || '') + '/';
+    // nell'app nativa l'invito porta al client web del server della Jam, non al telefono
+    const base = !NATIVE && /^https?:/.test(location.protocol) ? location.origin + location.pathname : (this.room.base || '') + '/';
     return `${base}#/jam/entra/${await pack(info)}`;
   },
   async newPeer(id, name, peerPub) {

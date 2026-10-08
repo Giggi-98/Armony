@@ -47,6 +47,7 @@ services:
       - ./video:/videos
       - ./client:/app/client:ro
       - ./updates:/updates
+      - ./data/armony:/data
     depends_on:
       - navidrome
     restart: unless-stopped

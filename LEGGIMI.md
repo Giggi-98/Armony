@@ -25,10 +25,12 @@ armony/
 Serve un computer Linux sempre acceso con Docker: un Raspberry Pi 4/5, un NAS, un vecchio PC o un VPS.
 
 1. Scarica Armony sul server con `git clone https://github.com/Giggi-98/Armony.git armony` ed entra nella cartella.
-2. Copia `.env.example` in `.env` e cambia `ARMONY_TOKEN` (la password per i download e gli aggiornamenti), `TURN_PASS` e, se vuoi, `ARMONY_NAME`. Lascia `ARMONY_REPO` com'è: dice ad Armony dove cercare le versioni nuove.
+2. Copia `.env.example` in `.env` e cambia `ARMONY_TOKEN` (l'accesso di emergenza dell'amministratore: normalmente non serve), `TURN_PASS` e, se vuoi, `ARMONY_NAME`. Lascia `ARMONY_REPO` com'è: dice ad Armony dove cercare le versioni nuove.
 3. Avvia con `docker compose up -d`, poi abilita il tasto «Aggiorna» con `sudo deploy/install-updater.sh` (una volta sola).
 4. Apri `http://IP-DEL-SERVER:4533` e crea l'amministratore di Navidrome. Da lì crei anche un utente per ogni amico.
-5. Apri `http://IP-DEL-SERVER:8080`. Questa è Armony. Aggiungi il server: l'indirizzo è già compilato, inserisci utente e password.
+5. Apri `http://IP-DEL-SERVER:8080`. Questa è Armony. Aggiungi il server: l'indirizzo è già compilato, inserisci utente e password di Navidrome. Gli amministratori di Navidrome lo sono anche in Armony (aggiornamenti, permessi degli utenti); gli altri utenti possono ascoltare, scaricare e caricare musica, e l'amministratore può togliere download o caricamento a chi vuole in Impostazioni → Utenti.
+
+La password non viene salvata sul dispositivo né mandata negli indirizzi: Armony conserva solo un'impronta (token e sale Subsonic).
 
 Per la musica che hai già, copiala in `musica/`: Navidrome la indicizza da solo in pochi minuti.
 
@@ -101,7 +103,7 @@ Salva album, playlist o singoli brani sul telefono, nella qualità che preferisc
 - In Scarica → **Dal dispositivo** carichi sul server la musica che hai sul telefono o sul computer: file singoli, cartelle intere o trascinandoli nella pagina.
 - Formati: MP3, FLAC, M4A/AAC, Opus, OGG, WAV, AIFF, WMA, WavPack, APE. Le copertine `cover.jpg` e `folder.jpg` vengono caricate insieme all'album.
 - I file arrivano nella cartella scelta (predefinita `Caricati`), con la loro struttura di cartelle. Un file identico già presente non viene ricaricato.
-- Serve il codice di accesso, come per i download. Limite di 1 GB per file. Tieni aperta la pagina finché il caricamento non finisce.
+- Serve il permesso di caricamento, attivo per tutti finché l'amministratore non lo toglie. Limite di 1 GB per file. Tieni aperta la pagina finché il caricamento non finisce.
 
 ### Playlist, importazione ed esportazione
 - Playlist condivise con tutti gli utenti del server, con descrizione.
@@ -119,7 +121,7 @@ Si installa come app ("Aggiungi a schermata Home"). Controlli dalla schermata di
 Navidrome funziona anche con app già pronte, collegate allo stesso server e alle stesse playlist: Symfonium o Tempo su Android, Amperfy o play:Sub su iPhone. La Jam però è solo di Armony.
 
 ## Manutenzione
-- **Aggiornare Armony**: quando esce una versione nuova, l'app lo segnala a chi ha inserito il codice di accesso. In Impostazioni → Aggiornamenti premi «Aggiorna»: il server scarica la versione e si riavvia in un minuto. Senza il servizio installato, a mano: `git fetch --tags && git checkout <ultima versione> && docker compose up -d --build`. L'aggiornamento si rifiuta se hai modificato a mano dei file del repository (`.env` e i dati non contano).
+- **Aggiornare Armony**: quando esce una versione nuova, l'app lo segnala agli amministratori. In Impostazioni → Aggiornamenti premi «Aggiorna»: il server scarica la versione e si riavvia in un minuto. Senza il servizio installato, a mano: `git fetch --tags && git checkout <ultima versione> && docker compose up -d --build`. L'aggiornamento si rifiuta se hai modificato a mano dei file del repository (`.env` e i dati non contano).
 - Aggiornare Navidrome e gli altri componenti: `docker compose pull && docker compose up -d`
 - yt-dlp si aggiorna a ogni riavvio. Se un sito smette di funzionare, basta `docker compose restart armony`.
 - Backup: le cartelle `data/` (utenti, playlist, statistiche del server) e `musica/`.

@@ -6,8 +6,12 @@ Armony - server di supporto.
   /api/jam/*            segnalazione per la Jam. Il server inoltra solo messaggi cifrati
                         dai client con la chiave della stanza: non può leggerli né falsificarli
   /api/lan/*            scoperta di altri server Armony e Jam vicine via multicast UDP
-  /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (protetti da token)
-  /api/upload           caricamento di file audio dal client nella libreria (protetto da token)
+  /api/info            pubblica: nome, versione, livello di API e capacità del server
+  /api/login, /api/logout, /api/me   accesso con le credenziali Navidrome (token + sale
+                        Subsonic); la sessione va nell'intestazione X-Token
+  /api/users            permessi per utente (solo amministratori)
+  /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download")
+  /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
                         aggiornamento la esegue l'host (deploy/armony-update.sh), non il container
 """
@@ -16,6 +20,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import socket
 import struct
 import threading
@@ -25,8 +30,10 @@ import uuid
 import mutagen
 import requests
 import yt_dlp
-from flask import Flask, Response, abort, jsonify, request, send_from_directory, stream_with_context
+from flask import Flask, Response, abort, g, jsonify, request, send_from_directory, stream_with_context
 from yt_dlp.postprocessor.metadataparser import MetadataParserPP
+
+import db
 
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
 VIDEO_DIR = os.environ.get("VIDEO_DIR", "/videos")
@@ -49,7 +56,15 @@ AUDIO_FORMATS = {"mp3", "m4a", "opus", "flac"}
 AUDIO_QUALITIES = {"best": "0", "320": "320", "256": "256", "192": "192", "128": "128"}
 VIDEO_QUALITIES = {"best", "2160", "1080", "720", "480", "360"}
 VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
-PROTECTED = ("/api/download", "/api/jobs", "/api/videos", "/api/search", "/api/health", "/api/update", "/api/upload")
+# livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
+# I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
+API_LEVEL = 1
+CAPS = ["login", "upload", "download", "update", "jam", "lan"]
+# prefisso → permesso richiesto. "user" = qualsiasi sessione valida
+RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/upload", "upload"),
+         ("/api/download", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
+         ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"))
+SESSION_DAYS = 180
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,48}$")
 
 app = Flask(__name__, static_folder=None)
@@ -61,18 +76,118 @@ http = requests.Session()
 def cors(resp):
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Token, Range"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     resp.headers["Access-Control-Expose-Headers"] = "Content-Range, Content-Length, Accept-Ranges"
     return resp
+
+
+def identity(tok=None):
+    tok = tok or request.headers.get("X-Token") or request.args.get("token") or ""
+    if not tok:
+        return None
+    # ARMONY_TOKEN resta come accesso di emergenza dell'amministratore
+    if TOKEN and secrets.compare_digest(tok, TOKEN):
+        return dict(user=None, admin=True, upload=True, download=True)
+    s = db.one("SELECT s.user, s.admin, s.seen, coalesce(p.upload, 1) upload, coalesce(p.download, 1) download "
+               "FROM sessions s LEFT JOIN perms p ON p.user = s.user WHERE s.token = ?", tok)
+    if not s or time.time() - s["seen"] > SESSION_DAYS * 86400:
+        return None
+    if time.time() - s["seen"] > 3600:
+        db.run("UPDATE sessions SET seen = ? WHERE token = ?", time.time(), tok)
+    admin = bool(s["admin"])
+    return dict(user=s["user"], admin=admin, upload=admin or bool(s["upload"]), download=admin or bool(s["download"]))
 
 
 @app.before_request
 def guard():
     if request.method == "OPTIONS":
         return ("", 204)
-    if TOKEN and request.path.startswith(PROTECTED):
-        if (request.headers.get("X-Token") or request.args.get("token")) != TOKEN:
-            abort(401)
+    need = next((r for p, r in RULES if request.path.startswith(p)), None)
+    if not need:
+        return None
+    g.who = identity()
+    if not g.who:
+        return jsonify(error="Accesso richiesto: entra con il tuo utente."), 401
+    if need != "user" and not g.who["admin" if need == "admin" else need]:
+        return jsonify(error={"admin": "Serve un amministratore.", "upload": "Il caricamento non è abilitato per il tuo utente.",
+                              "download": "I download non sono abilitati per il tuo utente."}[need]), 403
+    return None
+
+
+# ------------------------------------------------------------------ accesso
+failed = {}  # ip -> [istanti dei tentativi falliti]
+
+
+@app.get("/api/info")
+def info():
+    return jsonify(name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS, armony=True)
+
+
+@app.post("/api/login")
+def login():
+    # il client manda token + sale Subsonic, mai la password: Armony li verifica con Navidrome
+    ip = request.remote_addr or ""
+    recent = [t for t in failed.get(ip, []) if time.time() - t < 600]
+    if len(recent) >= 10:
+        return jsonify(error="Troppi tentativi falliti: riprova fra qualche minuto."), 429
+    d = request.get_json(silent=True) or {}
+    u, t, s = (str(d.get(k) or "")[:100] for k in ("u", "t", "s"))
+    if not (u and t and s):
+        return jsonify(error="Utente e credenziali obbligatori"), 400
+    try:
+        r = http.get(f"{NAVIDROME_URL}/rest/getUser", timeout=10,
+                     params=dict(u=u, t=t, s=s, v="1.16.1", c="armony", f="json", username=u)).json()["subsonic-response"]
+    except (requests.RequestException, ValueError, KeyError):
+        return jsonify(error="Il server musicale non risponde"), 502
+    if r.get("status") != "ok":
+        failed[ip] = recent + [time.time()]
+        return jsonify(error="Utente o password errati"), 401
+    admin = bool(r.get("user", {}).get("adminRole"))
+    tok = secrets.token_urlsafe(32)
+    db.run("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)", tok, u, int(admin), str(d.get("device") or "")[:40], time.time(), time.time())
+    g.who = identity(tok)
+    return jsonify(session=tok, **me_payload())
+
+
+def me_payload():
+    return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"],
+                name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS)
+
+
+@app.get("/api/me")
+def me():
+    return jsonify(me_payload())
+
+
+@app.post("/api/logout")
+def logout():
+    db.run("DELETE FROM sessions WHERE token = ?", request.headers.get("X-Token") or "")
+    return jsonify(ok=True)
+
+
+@app.get("/api/users")
+def users():
+    rows = db.all_("SELECT u.user, max(s.admin) admin, max(s.seen) seen, count(s.token) sessions, "
+                   "coalesce(p.upload, 1) upload, coalesce(p.download, 1) download "
+                   "FROM (SELECT user FROM sessions UNION SELECT user FROM perms) u "
+                   "LEFT JOIN sessions s ON s.user = u.user LEFT JOIN perms p ON p.user = u.user "
+                   "GROUP BY u.user ORDER BY u.user")
+    return jsonify([dict(r, admin=bool(r["admin"]), upload=bool(r["upload"]), download=bool(r["download"])) for r in rows])
+
+
+@app.put("/api/users/<name>")
+def set_user(name):
+    d = request.get_json(silent=True) or {}
+    db.run("INSERT INTO perms (user, upload, download) VALUES (?, ?, ?) "
+           "ON CONFLICT(user) DO UPDATE SET upload = excluded.upload, download = excluded.download",
+           name[:100], int(bool(d.get("upload", True))), int(bool(d.get("download", True))))
+    return jsonify(ok=True)
+
+
+@app.delete("/api/users/<name>/sessions")
+def revoke_user(name):
+    db.run("DELETE FROM sessions WHERE user = ?", name)
+    return jsonify(ok=True)
 
 
 def clean_segment(s, fallback):
@@ -273,9 +388,31 @@ jlock = threading.Lock()
 SLOTS = threading.Semaphore(2)
 
 
+JOB_KEYS = ("url", "mode", "format", "quality", "playlist", "folder", "sponsorblock", "meta")
+DONE = ("completato", "completato con errori", "errore")
+
+
+def jsave(jid):
+    # su disco solo i cambi di stato, non ogni percentuale di avanzamento
+    db.run("INSERT OR REPLACE INTO jobs VALUES (?, ?, ?)", jid, json.dumps(jobs[jid]), jobs[jid]["created"])
+
+
 def jupdate(jid, **kw):
     with jlock:
         jobs[jid].update(kw, updated=time.time())
+        if kw.keys() & {"status", "title", "error"}:
+            jsave(jid)
+
+
+def resume_jobs():
+    # dopo un riavvio (anche un aggiornamento dal tasto) i download a metà ripartono:
+    # yt-dlp riprende i file .part già scritti
+    for r in db.all_("SELECT data FROM jobs ORDER BY created DESC LIMIT 200"):
+        j = json.loads(r["data"])
+        jobs[j["id"]] = j
+        if j["status"] not in DONE:
+            j.update(status="in coda", progress=0)
+            threading.Thread(target=run_job, args=(j["id"], {k: j[k] for k in JOB_KEYS}), daemon=True).start()
 
 
 def lit(s):
@@ -344,7 +481,7 @@ def run_job(jid, j):
 
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True, name=NAME, ytdlp=yt_dlp.version.__version__, version=VERSION)
+    return jsonify(ok=True, name=NAME, ytdlp=yt_dlp.version.__version__, version=VERSION, api=API_LEVEL)
 
 
 # ------------------------------------------------------------------ caricamento dal client
@@ -468,7 +605,8 @@ def download():
     jid = uuid.uuid4().hex[:10]
     with jlock:
         jobs[jid] = dict(j, id=jid, status="in coda", progress=0, title=(f"{j['meta'].get('artist', '')} - {j['meta'].get('title', '')}" if j["meta"] else None),
-                         created=time.time(), updated=time.time())
+                         created=time.time(), updated=time.time(), by=g.who["user"])
+        jsave(jid)
     threading.Thread(target=run_job, args=(jid, j), daemon=True).start()
     return jsonify(jobs[jid]), 201
 
@@ -482,8 +620,9 @@ def list_jobs():
 @app.delete("/api/jobs")
 def clear_jobs():
     with jlock:
-        for k in [k for k, x in jobs.items() if x["status"] in ("completato", "completato con errori", "errore")]:
+        for k in [k for k, x in jobs.items() if x["status"] in DONE]:
             del jobs[k]
+            db.run("DELETE FROM jobs WHERE id = ?", k)
     return jsonify(ok=True)
 
 
@@ -556,6 +695,8 @@ def static_files(p):
 if __name__ == "__main__":
     os.makedirs(os.path.join(MUSIC_DIR, "Scaricati"), exist_ok=True)
     os.makedirs(VIDEO_DIR, exist_ok=True)
+    db.migrate()
+    resume_jobs()
     threading.Thread(target=gc_rooms, daemon=True).start()
     if MULTICAST:
         threading.Thread(target=mcast_sender, daemon=True).start()
