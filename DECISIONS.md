@@ -27,6 +27,54 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — La luce del disco: colori estratti nel client, variabili CSS animate
+
+**Contesto:** §3b di `docs/EVOLUZIONE.md`, "l'unica cosa memorabile".
+**Scelta:** canvas 32×32 della copertina, 12 tinte più i grigi, pesate per
+saturazione; la luce è un livello `#glow` fisso con gradienti radiali, i
+colori sono variabili `@property` così il cambio sfuma (1,2 s). L'intensità
+viene abbassata finché i testi restano AA. Vale per "In riproduzione", album e
+artista.
+**Alternative scartate:** una libreria (es. node-vibrant): una dipendenza in
+un client senza build; colori calcolati sul server: un passaggio in più e
+niente per le copertine di altri server; tinta piena dello sfondo: toglie
+leggibilità e l'identità del blu notte.
+**Conseguenze:** copertine da domini senza CORS non danno luce; nei browser
+senza `@property` il colore cambia di colpo.
+**Da rivedere se:** l'ambra del tema chiaro viene portata ad AA (la riduzione
+del 12% dell'ambra non serve più).
+
+## 2026-10-08 — Telefono: navigazione in basso, attaccata al lettore
+
+**Contesto:** dodici icone in alto da scorrere, fuori dalla portata del pollice.
+**Scelta:** quattro sezioni più "Altro" in una barra sotto il lettore, in un
+blocco unico con la safe-area; il lettore su telefono scende a due righe; in
+alto restano logo e server/qualità, e la barra non è più fissa. Su desktop
+"Server" e "Qualità" diventano una riga compatta che apre un foglio.
+**Alternative scartate:** barra in alto con meno voci (scomoda col pollice);
+barra e lettore separati (due elementi fissi, safe-area doppia); lettore a una
+riga con i comandi solo in "In riproduzione" (toglie comandi).
+**Da rivedere se:** l'app Android usa una navigazione nativa, o "In
+riproduzione" ottiene i comandi completi e il lettore può ridursi a una riga.
+
+## 2026-10-08 — Generi dei download: niente categorie di YouTube
+
+**Contesto:** yt-dlp, senza un genere vero, scrive come genere il primo campo
+fra `genre`, `genres`, `categories`, `tags`: tutta la libreria (551 file su
+551) aveva "Music", "People & Blogs"…
+**Scelta:** `meta_genre` impostato prima del download al genere vero
+(`genre`/`genres`) o vuoto; `deploy/pulisci-generi.py` per i file già scaricati,
+che tocca solo file con un indirizzo YouTube nei tag e per default fa solo una
+prova a secco.
+**Alternative scartate:** togliere l'incorporamento dei metadati (si perdono
+titolo, artista, copertina); usare i tag YouTube come genere (parole chiave
+del video, non generi); dedurre il genere da servizi esterni (dipendenza e
+richieste di rete per ogni download).
+**Conseguenze:** i brani scaricati da YouTube non hanno genere; la sezione
+Generi può restare vuota.
+**Da rivedere se:** si aggiunge una fonte di generi (MusicBrainz, Last.fm) o
+yt-dlp inizia a dare un genere vero per YouTube Music.
+
 ## 2026-10-08 — Storico e preferenze: copia locale completa, server come punto d'incontro
 
 **Contesto:** passo B di `docs/EVOLUZIONE.md`: con web, PC e Android le

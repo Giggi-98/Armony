@@ -117,12 +117,17 @@ Minuti di ascolto, artisti, brani, album e generi preferiti, giorni consecutivi 
 ### Comodità
 Si installa come app ("Aggiungi a schermata Home"). Controlli dalla schermata di blocco e dalle cuffie, tema chiaro o scuro, scorciatoie da tastiera (premi `?`). Il backup delle impostazioni configura il telefono di un amico in dieci secondi.
 
+Sul telefono le sezioni principali sono in basso, sotto il lettore; le altre sono in "Altro". Il server in uso e la qualità si cambiano dal pulsante in alto (in fondo alla barra laterale sul computer). Le impostazioni sono divise in gruppi richiudibili, con una casella di ricerca: scrivi "tema" o "qualità" e restano solo le voci che ti servono.
+
+"In riproduzione", album e artisti prendono la luce dei colori della copertina; se un brano non ha testo, al suo posto compaiono i prossimi brani.
+
 ## App native
 Navidrome funziona anche con app già pronte, collegate allo stesso server e alle stesse playlist: Symfonium o Tempo su Android, Amperfy o play:Sub su iPhone. La Jam però è solo di Armony.
 
 ## Manutenzione
 - **Aggiornare Armony**: quando esce una versione nuova, l'app lo segnala agli amministratori. In Impostazioni → Aggiornamenti premi «Aggiorna»: il server scarica la versione e si riavvia in un minuto. Senza il servizio installato, a mano: `git fetch --tags && git checkout <ultima versione> && docker compose up -d --build`. L'aggiornamento si rifiuta se hai modificato a mano dei file del repository (`.env` e i dati non contano).
 - Aggiornare Navidrome e gli altri componenti: `docker compose pull && docker compose up -d`
+- Generi sbagliati sui brani scaricati prima della 0.5 ("People & Blogs", "Gaming"…, sono le categorie dei video YouTube): `docker compose run --rm --no-deps -v ./deploy:/deploy:ro --entrypoint python armony /deploy/pulisci-generi.py /music` mostra cosa cambierebbe; aggiungi `--applica` per toglierli. Tocca solo i file scaricati da YouTube.
 - yt-dlp si aggiorna a ogni riavvio. Se un sito smette di funzionare, basta `docker compose restart armony`.
 - Backup: le cartelle `data/` (utenti, playlist, statistiche del server) e `musica/`.
 
