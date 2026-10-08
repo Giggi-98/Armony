@@ -119,6 +119,8 @@ Si installa come app ("Aggiungi a schermata Home"). Controlli dalla schermata di
 
 Sul telefono le sezioni principali sono in basso, sotto il lettore; le altre sono in "Altro". Il server in uso e la qualità si cambiano dal pulsante in alto (in fondo alla barra laterale sul computer). Le impostazioni sono divise in gruppi richiudibili, con una casella di ricerca: scrivi "tema" o "qualità" e restano solo le voci che ti servono.
 
+Se nel sistema è attivo «Riduci movimento», Armony lo rispetta: niente dischi che girano né elementi in volo, solo dissolvenze.
+
 "In riproduzione", album e artisti prendono la luce dei colori della copertina; se un brano non ha testo, al suo posto compaiono i prossimi brani.
 
 ## App native

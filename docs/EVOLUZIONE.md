@@ -263,6 +263,14 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**Passo G fatto (2026-10-08)**, con cinque agenti in parallelo: selettore
+della Jam e generi di YouTube (più `deploy/pulisci-generi.py`), luce del disco,
+barra in basso su telefono, sistema di movimento (con la correzione della
+corsa nel router), sezioni home/libreria/statistiche/impostazioni, ambra AA
+per i testi nel tema chiaro. Restano aperti: applicare la pulizia dei generi
+alla libreria vera; il volo "aggiunto alla coda" dal menu ⋯ su telefono; il
+disco che continua a girare se "riduci movimento" si attiva durante un brano.
+
 **Passo B fatto (2026-10-08)**: storico d'ascolto e preferenze per utente sul
 server (`/api/history`, `/api/prefs`), sincronizzati in entrambe le direzioni;
 interruttore in Impostazioni → Profilo.

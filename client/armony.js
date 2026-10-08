@@ -1168,12 +1168,12 @@ const Glow = {
     return this.cache.get(url);
   },
   // adatta il colore al tema e abbassa la luce finché testo, testo secondario e link restano AA (4,5:1) sul fondo
-  // illuminato; un colore già sotto AA sul fondo normale (l'ambra dei link nel tema chiaro) perde al massimo il 12%
+  // illuminato; un colore già sotto AA sul fondo normale perde al massimo il 12%
   tone(c, a0, neutral) {
     const cs = getComputedStyle(document.documentElement), hx = v => { const h = cs.getPropertyValue(v).trim().replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
     const lum = ([r, g, b]) => { const f = v => (v /= 255) <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; return .2126 * f(r) + .7152 * f(g) + .0722 * f(b); };
     const ratio = (x, y) => { const [a, b] = [lum(x), lum(y)].sort((m, n) => n - m); return (a + .05) / (b + .05); };
-    const bg = hx('--bg'), texts = ['--ink', '--muted', '--accent'].map(hx), dark = lum(bg) < .2;
+    const bg = hx('--bg'), texts = ['--ink', '--muted', '--accent-text'].map(hx), dark = lum(bg) < .2;
     let [h, sat, l] = rgbToHsl(c);
     // una luce deve essere più chiara della stanza: sul blu notte anche una copertina blu scura deve vedersi
     sat = neutral ? Math.min(sat, .1) : Math.min(Math.max(sat, .45), .8); l = dark ? Math.min(Math.max(l, .48), .62) : Math.min(Math.max(l, .66), .8);

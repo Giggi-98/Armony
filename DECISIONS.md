@@ -27,6 +27,24 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Movimento: View Transitions per le pagine, WAAPI per il disco
+
+**Contesto:** §3b di `docs/EVOLUZIONE.md`.
+**Scelta:** cambio pagina con `document.startViewTransition` che avvolge solo
+lo scambio con le sagome di caricamento (la navigazione non aspetta la rete);
+il disco gira con la Web Animations API e accelera e rallenta cambiando
+`playbackRate`; play/pausa con la proprietà CSS `d`. Ogni navigazione ha un
+numero (`Scene.nav`): una vista superata non scrive più nel DOM.
+**Alternative scartate:** animazione CSS `spin` (non può accelerare né
+rallentare dolcemente); transizione che aspetta il caricamento della vista
+(pagina congelata durante le richieste); una libreria di animazioni
+(dipendenza, contraria a "niente npm").
+**Conseguenze:** dove le View Transitions non ci sono il cambio pagina è
+istantaneo come prima; lettore, barra laterale e barra in basso hanno nomi di
+transizione fissi.
+**Da rivedere se:** l'app nativa ha bisogno di transizioni fra documenti
+diversi.
+
 ## 2026-10-08 — La luce del disco: colori estratti nel client, variabili CSS animate
 
 **Contesto:** §3b di `docs/EVOLUZIONE.md`, "l'unica cosa memorabile".
@@ -41,8 +59,11 @@ niente per le copertine di altri server; tinta piena dello sfondo: toglie
 leggibilità e l'identità del blu notte.
 **Conseguenze:** copertine da domini senza CORS non danno luce; nei browser
 senza `@property` il colore cambia di colpo.
-**Da rivedere se:** l'ambra del tema chiaro viene portata ad AA (la riduzione
-del 12% dell'ambra non serve più).
+Per i link il calcolo usa `--accent-text`, l'ambra come testo: nel tema chiaro
+`#9c5806` (4,8:1 sul fondo) invece di `#c9750f` (3,05:1, sotto AA da prima),
+che resta per pulsanti e barre.
+**Da rivedere se:** la luce diventa troppo tenue su molte copertine per
+rispettare l'AA: allora meglio un velo dietro ai testi che abbassare la luce.
 
 ## 2026-10-08 — Telefono: navigazione in basso, attaccata al lettore
 
