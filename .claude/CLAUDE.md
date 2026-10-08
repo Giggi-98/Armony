@@ -76,6 +76,12 @@ musica/ video/ data/ dati dell'utente (root, montati nei container): non toccarl
   La chiave di firma è in `data/android/` (fuori da git): senza di lei gli
   aggiornamenti dell'APK non si installano. Non c'è un emulatore su questa
   macchina: il codice nativo si collauda sul telefono.
+- **Riproduzione su più dispositivi** (`Live` in `armony.js`, `/api/live`):
+  `currentTrack`, `isPlaying`, `playPos`, `playDur` e i comandi `ctl*` hanno
+  tre casi: ospite della Jam, telecomando di un altro dispositivo
+  (`Live.remote()`), riproduzione locale. Una funzione nuova che legge o
+  comanda la riproduzione deve passare da lì, non da `Engine` direttamente.
+  Ogni dispositivo collegato occupa un thread di waitress (sono 96).
 - **Lingua**: interfaccia, commenti e messaggi sono in italiano. Mantienilo.
 
 ## 1. Think Before Coding

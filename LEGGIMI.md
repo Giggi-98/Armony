@@ -60,6 +60,8 @@ In alternativa: un dominio con Caddy davanti alla porta 8080 (HTTPS automatico),
 - **Timer di spegnimento** con sfumata finale, oppure "a fine brano".
 - **Più server** contemporaneamente. La coda può mescolare brani di server diversi.
 - **Continua su un altro dispositivo**: la coda viene salvata sul server, così apri Armony sul PC e riprendi dal punto esatto.
+- **Un dispositivo suona, gli altri lo comandano.** Se avvii la musica sul telefono e stava suonando sul PC, il PC si ferma e il suo lettore mostra cosa suona sul telefono: pausa, avanti, indietro e la barra comandano il telefono, e viceversa. Il pulsante con l'altoparlante nel lettore ("Dove suona") elenca i tuoi dispositivi collegati: tocca quello su cui vuoi la musica e si sposta lì dallo stesso punto; se lo scegli prima di avviare un album, l'album parte lì. Nello stesso foglio puoi sganciare un dispositivo ("suona per conto suo"): PC e telefono suonano cose diverse senza fermarsi a vicenda. Vale per i dispositivi collegati allo stesso utente; si spegne in Impostazioni → Profilo, dove dai anche un nome al dispositivo.
+- **La barra ondeggia** mentre suona, come nei lettori di Android, e torna dritta in pausa.
 
 ### Scoperta
 - **Testi sincronizzati** in stile karaoke. Tocchi una riga e la musica salta lì, e puoi correggere la sincronia di mezzo secondo alla volta. I testi arrivano dal server o, se non ci sono, da LRCLIB (si può disattivare).

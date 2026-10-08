@@ -263,6 +263,10 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.8.0 (2026-10-08)**: barra a onde morbide; riproduzione condivisa fra i
+dispositivi dell'utente (un solo dispositivo suona, gli altri lo comandano,
+"Dove suona" per spostarla, dispositivi sganciati).
+
 **0.7.0 (2026-10-08)**: abbellimento generale a token (tavolozza, caratteri,
 pulsanti, lettore, telefono) con le skill di design; l'app Android si aggiorna
 da sola (scarica, verifica lo sha256, conferma di Android).

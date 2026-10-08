@@ -27,6 +27,50 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Dal vivo: un solo dispositivo suona, gli altri lo comandano (SSE)
+
+**Contesto:** fermare la musica sul PC deve fermarla sul telefono e viceversa;
+si deve poter scegliere su quale dispositivo suona, spostarla, e anche lasciare
+due dispositivi liberi di suonare cose diverse.
+**Scelta:** modello "Connect": ogni dispositivo di un utente tiene aperto un
+canale SSE (`/api/live`); chi suona pubblica brano, play/pausa e posizione solo
+quando cambiano; chi comincia a suonare ferma gli altri, che diventano
+telecomandi (`Live.remote()`, sullo stesso schema dell'ospite della Jam in
+`currentTrack`/`isPlaying`/`ctl*`). "Dove suona" sposta la coda (`transfer`)
+o chiede al dispositivo che suona di passarla (`handoff`). Un dispositivo "per
+conto suo" (`P.solo`) è sganciato. Stato in memoria del server.
+**Alternative scartate:**
+- WebSocket: waitress non li gestisce; servirebbe un secondo server.
+- Interrogare il server ogni pochi secondi: ritardo visibile e richieste
+  continue anche da fermi.
+- Tutti i dispositivi che suonano insieme sincronizzati: è la Jam, con i suoi
+  costi (orologio condiviso, WebRTC).
+- Solo un "ferma tutto": non dice cosa suona dove e non permette di spostarla.
+**Conseguenze:** ogni dispositivo collegato occupa un thread di waitress per il
+suo canale (portati a 96). Nel browser l'audio spostato da un altro dispositivo
+può essere bloccato dalla regola dell'autoplay se la pagina non è mai stata
+toccata (avviso a schermo); nell'app no. La notifica del telefono riguarda solo
+la musica che suona sul telefono.
+**Da rivedere se:** i dispositivi collegati diventano tanti da esaurire i
+thread (allora un server asincrono per `/api/live`), oppure serve spostare la
+musica fra utenti diversi (oggi è per utente).
+
+## 2026-10-08 — Barra di avanzamento a onda: canvas sotto l'input
+
+**Contesto:** il lettore deve mostrare l'avanzamento come un'onda morbida (stile
+One UI / Android 13+), fatta di onde asincrone.
+**Scelta:** canvas sotto `<input type=range id=seek>`, somma di tre sinusoidi
+con lunghezze e velocità diverse, disegnato con requestAnimationFrame solo
+mentre suona o mentre l'ampiezza cambia; l'input resta per trascinamento,
+tastiera e accessibilità, con il binario trasparente.
+**Alternative scartate:** SVG con animazione CSS (onda periodica, si vede la
+ripetizione; nessun controllo sull'ampiezza in pausa); sostituire l'input con
+un controllo disegnato (si perdono tastiera e accessibilità native); animazione
+continua anche in pausa (consuma batteria per niente).
+**Conseguenze:** con «Riduci movimento» la barra è una linea dritta.
+**Da rivedere se:** il disegno pesa sui telefoni economici (allora meno punti o
+30 fps).
+
 ## 2026-10-08 — Grafica: tavolozza, caratteri e componenti a token
 
 **Contesto:** richiesta di un abbellimento generale (caratteri, colori, lettore,
