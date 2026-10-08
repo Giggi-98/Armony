@@ -10,6 +10,8 @@ Armony - server di supporto.
   /api/login, /api/logout, /api/me   accesso con le credenziali Navidrome (token + sale
                         Subsonic); la sessione va nell'intestazione X-Token
   /api/users            permessi per utente (solo amministratori)
+  /api/tracks/delete    elimina file dalla libreria (permesso "delete"); il percorso vero viene dal DB di
+                        Navidrome, letto in sola lettura, mai dal client
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
   /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download")
@@ -19,6 +21,7 @@ Armony - server di supporto.
 """
 import hashlib
 import ipaddress
+import sqlite3
 import queue
 import json
 import os
@@ -62,9 +65,9 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
-RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/upload", "upload"),
+RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/upload", "upload"), ("/api/tracks/delete", "delete"),
          ("/api/download", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -91,15 +94,16 @@ def identity(tok=None):
         return None
     # ARMONY_TOKEN resta come accesso di emergenza dell'amministratore
     if TOKEN and secrets.compare_digest(tok, TOKEN):
-        return dict(user=None, admin=True, upload=True, download=True)
-    s = db.one("SELECT s.user, s.admin, s.seen, coalesce(p.upload, 1) upload, coalesce(p.download, 1) download "
+        return dict(user=None, admin=True, upload=True, download=True, delete=True)
+    s = db.one("SELECT s.user, s.admin, s.seen, coalesce(p.upload, 1) upload, coalesce(p.download, 1) download, coalesce(p.del, 0) del "
                "FROM sessions s LEFT JOIN perms p ON p.user = s.user WHERE s.token = ?", tok)
     if not s or time.time() - s["seen"] > SESSION_DAYS * 86400:
         return None
     if time.time() - s["seen"] > 3600:
         db.run("UPDATE sessions SET seen = ? WHERE token = ?", time.time(), tok)
     admin = bool(s["admin"])
-    return dict(user=s["user"], admin=admin, upload=admin or bool(s["upload"]), download=admin or bool(s["download"]))
+    return dict(user=s["user"], admin=admin, upload=admin or bool(s["upload"]), download=admin or bool(s["download"]),
+                delete=admin or bool(s["del"]))
 
 
 @app.before_request
@@ -114,7 +118,8 @@ def guard():
         return jsonify(error="Accesso richiesto: entra con il tuo utente."), 401
     if need != "user" and not g.who["admin" if need == "admin" else need]:
         return jsonify(error={"admin": "Serve un amministratore.", "upload": "Il caricamento non è abilitato per il tuo utente.",
-                              "download": "I download non sono abilitati per il tuo utente."}[need]), 403
+                              "download": "I download non sono abilitati per il tuo utente.",
+                              "delete": "L'eliminazione non è abilitata per il tuo utente."}[need]), 403
     return None
 
 
@@ -154,7 +159,7 @@ def login():
 
 
 def me_payload():
-    return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"],
+    return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"], delete=g.who["delete"],
                 name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS)
 
 
@@ -172,19 +177,20 @@ def logout():
 @app.get("/api/users")
 def users():
     rows = db.all_("SELECT u.user, max(s.admin) admin, max(s.seen) seen, count(s.token) sessions, "
-                   "coalesce(p.upload, 1) upload, coalesce(p.download, 1) download "
+                   "coalesce(p.upload, 1) upload, coalesce(p.download, 1) download, coalesce(p.del, 0) del "
                    "FROM (SELECT user FROM sessions UNION SELECT user FROM perms) u "
                    "LEFT JOIN sessions s ON s.user = u.user LEFT JOIN perms p ON p.user = u.user "
                    "GROUP BY u.user ORDER BY u.user")
-    return jsonify([dict(r, admin=bool(r["admin"]), upload=bool(r["upload"]), download=bool(r["download"])) for r in rows])
+    return jsonify([{**{k: r[k] for k in ("user", "seen", "sessions")}, "admin": bool(r["admin"]), "upload": bool(r["upload"]),
+                     "download": bool(r["download"]), "delete": bool(r["del"])} for r in rows])
 
 
 @app.put("/api/users/<name>")
 def set_user(name):
     d = request.get_json(silent=True) or {}
-    db.run("INSERT INTO perms (user, upload, download) VALUES (?, ?, ?) "
-           "ON CONFLICT(user) DO UPDATE SET upload = excluded.upload, download = excluded.download",
-           name[:100], int(bool(d.get("upload", True))), int(bool(d.get("download", True))))
+    db.run("INSERT INTO perms (user, upload, download, del) VALUES (?, ?, ?, ?) "
+           "ON CONFLICT(user) DO UPDATE SET upload = excluded.upload, download = excluded.download, del = excluded.del",
+           name[:100], int(bool(d.get("upload", True))), int(bool(d.get("download", True))), int(bool(d.get("delete", False))))
     return jsonify(ok=True)
 
 
@@ -698,6 +704,74 @@ def upload():
         dest, n = f"{base} ({n}).{e}", n + 1
     os.replace(tmp, dest)
     return jsonify(status="caricato", path=os.path.relpath(dest, MUSIC_DIR), size=size), 201
+
+
+# ------------------------------------------------------------------ eliminazione dalla libreria
+# ─── PERCHÉ NON BASTA il percorso di getSong (Subsonic) ───
+# Navidrome ai client Subsonic dà un percorso inventato ("Artista/Album/03 - Titolo.mp3"), salvo che il
+# singolo client abbia attivato "report real path". Il percorso vero sta solo nel suo DB (media_file.path,
+# relativo alla libreria): lo leggiamo in sola lettura. Un percorso mandato dal client non è mai accettato.
+NAVIDROME_DB = os.environ.get("NAVIDROME_DB", "/navidrome/navidrome.db")
+NAVIDROME_MUSIC = os.environ.get("NAVIDROME_MUSIC", "/music").rstrip("/")  # la libreria come la vede Navidrome
+
+
+def prune(d, root):
+    # risalendo verso la radice: via le cartelle rimaste senza audio (al più con le copertine), mai la radice
+    while d != root and d.startswith(root + os.sep):
+        try:
+            names = os.listdir(d)
+        except OSError:
+            return
+        if any(n.lower() not in UPLOAD_COVER for n in names):
+            return
+        try:
+            for n in names:
+                os.remove(os.path.join(d, n))
+            os.rmdir(d)
+        except OSError:
+            return
+        d = os.path.dirname(d)
+
+
+@app.post("/api/tracks/delete")
+def tracks_delete():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or not ids or len(ids) > 500 or not all(isinstance(i, str) and ID_RE.match(i) for i in ids):
+        return jsonify(error="Elenco di brani non valido (al massimo 500)"), 400
+    try:
+        nd = sqlite3.connect(f"file:{NAVIDROME_DB}?mode=ro", uri=True, timeout=10)
+        rows = nd.execute("SELECT m.id, l.path, m.path FROM media_file m JOIN library l ON l.id = m.library_id "
+                          f"WHERE m.id IN ({','.join('?' * len(ids))})", ids).fetchall()
+        nd.close()
+    except sqlite3.Error:
+        return jsonify(error="Non riesco a leggere il database di Navidrome: controlla il montaggio in docker-compose.yml"), 503
+    found = {r[0]: (r[1], r[2]) for r in rows}
+    root = os.path.realpath(MUSIC_DIR)
+    done, errors, dirs = [], {}, set()
+    for i in ids:
+        if i not in found:
+            errors[i] = "Brano non trovato"
+            continue
+        lib, rel = found[i]
+        if lib.rstrip("/") != NAVIDROME_MUSIC:
+            errors[i] = "Il brano sta in un'altra libreria"
+            continue
+        f = os.path.realpath(os.path.join(root, rel))  # risolve anche i collegamenti: niente uscite dalla cartella
+        if not f.startswith(root + os.sep):
+            errors[i] = "Percorso fuori dalla cartella della musica"
+            continue
+        try:
+            os.remove(f)
+        except FileNotFoundError:
+            pass  # già sparito: Navidrome lo toglie alla prossima scansione
+        except OSError as e:
+            errors[i] = str(e)[:200]
+            continue
+        done.append(i)
+        dirs.add(os.path.dirname(f))
+    for d in sorted(dirs, key=len, reverse=True):
+        prune(d, root)
+    return jsonify(deleted=len(done), ids=done, errors=errors)
 
 
 # ------------------------------------------------------------------ aggiornamenti

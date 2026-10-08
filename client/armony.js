@@ -526,7 +526,8 @@ async function vAlbum(id) {
     <div><h1>${esc(a.name)}</h1><p class="sub"><a href="#/artista/${encodeURIComponent(a.artistId || '')}">${esc(a.artist)}</a>${a.year ? ', ' + a.year : ''}${a.genre ? ', ' + esc(a.genre) : ''}. ${songs.length} brani, ${fmtLong(tot)}${discs > 1 ? ', ' + discs + ' dischi' : ''}.</p></div></div>
     ${listActions(`<button class="btn ${a.starred ? 'primary' : ''}" data-act="staralbum" data-id="${esc(id)}" data-on="${a.starred ? 1 : 0}">${ic('heart', a.starred)} ${a.starred ? 'Nei preferiti' : 'Preferito'}</button>
       <button class="btn" data-act="shareitem" data-id="${esc(id)}" data-name="${esc(a.name)}">${ic('share')} Condividi</button>
-      <button class="btn" data-act="addalltopl">${ic('addlist')} In playlist</button>`)}
+      <button class="btn" data-act="addalltopl">${ic('addlist')} In playlist</button>${canDelete() ? `
+      <button class="btn danger" data-act="delalbum" data-name="${esc(a.name)}">${ic('trash')} Elimina album</button>` : ''}`)}
     ${songList(songs, { showAlbum: false, art: false, numbers: true })}`;
 }
 async function vGenre(name) {
@@ -1806,6 +1807,27 @@ async function radioFrom(t) {
 }
 
 /* ================= menu di un brano ================= */
+/* ================= eliminazione dal server (permesso "delete", /api/tracks/delete) ================= */
+const canDelete = sid => { const s = srv(sid); return !!s?.session && !!s.me?.caps?.includes('delete') && !!(s.me.delete || s.me.admin); };
+async function deleteTracks(tracks, what) {
+  const sid = tracks[0]?.serverId, s = srv(sid);
+  if (!tracks.length || !canDelete(sid)) return false;
+  if (!confirm(`Eliminare definitivamente «${what}» dal server? Il file viene cancellato per tutti.`)) return false;
+  let r;
+  try {
+    const res = await fetch(absUrl(s.url) + '/api/tracks/delete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': s.session }, body: JSON.stringify({ ids: tracks.map(t => t.id) }) });
+    r = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(r.error || `Errore ${res.status}`);
+  } catch (e) { toast('Eliminazione non riuscita: ' + e.message); return false; }
+  // via dalla coda (il brano in riproduzione resta finché suona) e dalle liste a schermo
+  const gone = new Set(arr(r.ids).map(id => sid + ':' + id)), cur = S.queue[S.index];
+  S.queue = S.queue.filter((t, i) => i === S.index || !gone.has(key(t))); if (cur) S.index = S.queue.indexOf(cur); persistQueue();
+  $$('.song').forEach(el => { const x = S.lastList[+el.dataset.i]; if (x && gone.has(key(x))) el.remove(); });
+  api('startScan', {}, s).catch(() => {});
+  const errs = Object.values(r.errors || {});
+  toast(errs.length ? `${r.deleted} eliminati, ${errs.length} non riusciti: ${errs[0]}.` : r.deleted === 1 ? 'Brano eliminato dal server.' : `${r.deleted} brani eliminati dal server.`, 5000);
+  return r.deleted > 0;
+}
 function songMenu(t, ctx = {}) {
   const d = $('#dlg'); d.className = 'sheet';
   const items = [
@@ -1821,10 +1843,11 @@ function songMenu(t, ctx = {}) {
       : ['offline', 'Salva per l\'offline', () => Offline.save([t])],
     ['down', 'Scarica il file originale', () => { const a = document.createElement('a'); a.href = apiUrl(srv(t.serverId), 'download', { id: t.id }); a.download = ''; a.click(); }],
     ['lyrics', 'Testo', () => { if (key(currentTrack() || {}) !== key(t)) return toast('Il testo si apre per il brano in riproduzione.'); sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; }],
-    ctx.pl != null ? ['trash', 'Togli dalla playlist', async () => { await api('updatePlaylist', { playlistId: view.dataset.pl, songIndexToRemove: ctx.pl }); route(); }] : null
+    ctx.pl != null ? ['trash', 'Togli dalla playlist', async () => { await api('updatePlaylist', { playlistId: view.dataset.pl, songIndexToRemove: ctx.pl }); route(); }] : null,
+    canDelete(t.serverId) ? ['trash', 'Elimina dal server', () => deleteTracks([t], t.title), 'danger'] : null
   ].filter(Boolean);
   d.innerHTML = `<div class="head"><span class="pic">${imgTag(t.coverArt, 100, t.serverId)}</span><span style="min-width:0"><b style="display:block">${esc(t.title)}</b><small style="color:var(--muted)">${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small></span></div>
-    ${items.map(([i, l], n) => `<button class="mi" data-n="${n}">${ic(i)}${l}</button>`).join('')}`;
+    ${items.map(([i, l, , cls], n) => `<button class="mi${cls ? ' ' + cls : ''}" data-n="${n}">${ic(i)}${l}</button>`).join('')}`;
   d.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { d.close(); items[+b.dataset.n][2](); });
   d.onclose = () => { d.className = ''; d.onclose = null; };
   d.showModal();
@@ -1959,11 +1982,12 @@ async function refreshUsers() {
     <span class="grow"><b>${esc(u.user)}</b><small>${u.admin ? 'amministratore' : 'utente'}${u.seen ? ', ultimo accesso ' + new Date(u.seen * 1000).toLocaleDateString() : ''}</small></span>
     <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="upload" ${u.upload || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Caricamento</span></label>
     <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="download" ${u.download || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Download</span></label>
+    <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="delete" ${u.delete || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Eliminazione</span></label>
     ${u.sessions ? `<button class="btn sm" data-act="usrrevoke" data-user="${esc(u.user)}">Disconnetti</button>` : ''}</div>`).join('')
     : '<div class="empty">Nessun utente ha ancora fatto accesso da Armony.</div>';
   box.querySelectorAll('[data-usr]').forEach(el => el.onchange = async () => {
     const name = el.dataset.usr, v = p => box.querySelector(`[data-usr="${CSS.escape(name)}"][data-perm="${p}"]`).checked;
-    try { await dlApi('/api/users/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ upload: v('upload'), download: v('download') }) }); toast('Permessi aggiornati.'); }
+    try { await dlApi('/api/users/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ upload: v('upload'), download: v('download'), delete: v('delete') }) }); toast('Permessi aggiornati.'); }
     catch (e) { toast(e.message); refreshUsers(); }
   });
 }
@@ -2184,6 +2208,7 @@ view.addEventListener('click', async e => {
       }
       case 'updcheck': await refreshUpdate(true); break;
       case 'updrun': if (confirm('Aggiornare il server? Armony si riavvia e per un minuto non risponde.')) { await dlApi('/api/update', { method: 'POST' }); toast('Aggiornamento richiesto.'); refreshUpdate(); } break;
+      case 'delalbum': if (await deleteTracks(S.lastList.slice(), el.dataset.name)) location.hash = '#/libreria/album'; break;
       case 'usrrevoke': if (confirm(`Disconnettere ${el.dataset.user} da tutti i dispositivi? Dovrà rifare l'accesso.`)) { await dlApi(`/api/users/${encodeURIComponent(el.dataset.user)}/sessions`, { method: 'DELETE' }); refreshUsers(); } break;
       case 'exportset': {
         const withPw = confirm('Includere le credenziali nel file?\nOK = sì (conservalo al sicuro), Annulla = no');
