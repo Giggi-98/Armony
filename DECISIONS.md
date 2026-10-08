@@ -27,6 +27,32 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Federazione: forma generale
+
+**Contesto:** i server Armony diventano librerie personali da collegare fra
+loro. Il progetto completo è in `docs/FEDERAZIONE.md`; qui solo le scelte che
+hanno chiuso delle strade.
+**Scelta:** collegamenti fra server creati dall'amministratore, visibilità per
+utente tramite le librerie di Navidrome; un nodo collegato = una libreria
+Navidrome in `federati/<nodo>/`, mai dentro `musica/`; abbonamenti in una sola
+direzione, scaricati da chi riceve; prima la copia fisica; cancellazioni a
+monte *conservate* per default; niente condivisione transitiva; abbinamento con
+codice di sicurezza e richieste firmate Ed25519; protocollo versionato
+`/fed/v1`. Prima della federazione si fa il caricamento di file dal client.
+**Alternative scartate:**
+- Collegamenti fra singoli utenti: Armony non ha un modello di utenti suo, e
+  le reti di collegamenti si moltiplicherebbero per ogni utente.
+- Ascolto a distanza come primo modo: richiede di rifare navigazione e
+  streaming remoti nel client, e funziona solo se l'altro server è acceso.
+- Cancellazioni sempre rispecchiate: un errore di chi offre cancellerebbe
+  musica a tutti quelli che la ricevono.
+- Relay propri per server non raggiungibili: costi e responsabilità; bastano
+  LAN, Tailscale (anche *node sharing*) o HTTPS pubblico.
+**Conseguenze:** la musica ricevuta occupa spazio; serve stato persistente
+(SQLite) e un modulo server separato, da registrare quando si implementa.
+**Da rivedere se:** le librerie da collegare diventano troppo grandi per
+essere copiate, oppure i server diventano davvero multiutente.
+
 ## 2026-10-08 — L'updater non stacca un checkout di sviluppo dal suo ramo
 
 **Contesto:** precisa la voce «Aggiornamenti da GitHub» qui sotto, che diceva

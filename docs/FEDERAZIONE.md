@@ -1,8 +1,9 @@
 # Federazione fra server Armony — documento di progetto
 
-Stato: **proposta**, 2026-10-08. Nulla di questo è implementato. Le scelte
-marcate *(da decidere)* aspettano una risposta; le altre sono la raccomandazione
-del documento e diventano voci di `DECISIONS.md` quando si implementano.
+Stato: **progetto approvato**, 2026-10-08. Nulla di questo è implementato.
+Le domande aperte hanno avuto risposta (§13) e sono registrate in
+`DECISIONS.md`. Restano da decidere solo dettagli di implementazione, segnati
+*(in implementazione)*.
 
 ## 1. Obiettivo
 
@@ -44,9 +45,9 @@ Il collegamento è simmetrico, il flusso no: ogni abbonamento va in **una
 direzione**. "Sincronizzare in entrambi i sensi" significa due abbonamenti,
 uno per parte, e nessuno dei due nodi scrive mai nella libreria dell'altro.
 
-## 4. Chi decide *(da decidere)*
+## 4. Chi decide
 
-**Raccomandazione: il collegamento è fra server e lo crea l'amministratore;
+**Deciso: il collegamento è fra server e lo crea l'amministratore;
 la visibilità è per utente.** Chi ha il codice di accesso (`ARMONY_TOKEN`)
 collega i server e sceglie offerte e abbonamenti. Poi, tramite i permessi delle
 librerie di Navidrome, decide quali utenti del proprio server vedono la libreria
@@ -140,8 +141,13 @@ B (riceve)                                   A (offre)
 Tutta la libreria · cartelle · artisti · album · playlist. Le regole sono
 **dinamiche**: offrire un artista vuol dire anche i suoi album futuri. Il
 manifest si calcola a ogni richiesta interrogando il DB di Navidrome in sola
-lettura, oppure la sua API, *(da decidere in implementazione: l'API è più
-stabile fra versioni, il DB più veloce)*.
+lettura, oppure la sua API *(in implementazione: l'API è più stabile fra
+versioni, il DB più veloce)*.
+
+**Avviso sui diritti**: la prima volta che si crea un'offerta compare un
+avviso breve (condividere musica protetta fra persone diverse non è copia
+privata) da confermare una volta sola per server. La nota in `LEGGIMI.md` va
+estesa alla federazione.
 
 ## 8. Versioni e compatibilità
 
@@ -209,16 +215,14 @@ hash, stato dei giri.
 La fase 3 è l'unica che richiede lavoro nel client oltre alle impostazioni,
 per questo è ultima.
 
-## 13. Domande aperte
+## 13. Decisioni prese (2026-10-08)
 
-1. **Chi decide** (§4): collegamenti fra server con visibilità per utente,
-   come raccomandato, oppure fra singoli utenti?
-2. **Copia prima di streaming** (§12): va bene partire dalla copia fisica e
-   lasciare l'ascolto a distanza alla fase 3?
-3. **Cancellazioni** (§7): il predefinito *conserva* va bene?
-4. **Fase 0**: il caricamento dal client si fa prima della federazione o
-   in parallelo?
-5. **Diritti**: condividere musica protetta fra persone diverse non è copia
-   privata (vedi la nota in `LEGGIMI.md`). La federazione non controlla cosa
-   si offre, e la nota andrà estesa. Va bene così, o si vuole un avviso
-   esplicito al momento di creare un'offerta?
+| Domanda | Risposta |
+|---|---|
+| Chi crea i collegamenti (§4) | Il server, tramite l'amministratore; la visibilità della libreria ricevuta si sceglie per utente (predefinito: tutti) |
+| Copia o ascolto a distanza (§12) | Prima la copia fisica (fase 1); l'ascolto a distanza nella fase 3 |
+| Cancellazioni a monte (§7) | Predefinito *conserva*; *rispecchia* sceglibile per abbonamento dalla fase 2 |
+| Caricamento dal client (fase 0) | Prima della federazione |
+| Diritti | Nota estesa in `LEGGIMI.md` e avviso alla prima offerta, confermato una volta |
+
+Prossimo passo: fase 0.
