@@ -48,6 +48,8 @@ services:
       - ./client:/app/client:ro
       - ./updates:/updates
       - ./data/armony:/data
+      # solo lettura: il percorso vero dei brani da eliminare (/api/tracks/delete)
+      - ./data/navidrome:/navidrome:ro
     depends_on:
       - navidrome
     restart: unless-stopped

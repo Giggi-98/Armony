@@ -27,6 +27,10 @@ MIGRATIONS = [
                           ts REAL NOT NULL, data TEXT NOT NULL, UNIQUE (user, hid));
     CREATE TABLE prefs (user TEXT PRIMARY KEY, data TEXT NOT NULL, updated REAL NOT NULL);
     """,
+    # 3: permesso di eliminare brani dal server, spento per gli utenti (gli amministratori possono sempre)
+    """
+    ALTER TABLE perms ADD COLUMN del INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 _local = threading.local()
