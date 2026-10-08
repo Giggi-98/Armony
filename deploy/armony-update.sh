@@ -23,7 +23,13 @@ TAG=$(g tag -l 'v*.*.*' --sort=-v:refname | head -n1)
 [ -n "$TAG" ] || fail "nessun tag di versione nel repository"
 V=$(g show "$TAG:VERSION" 2>/dev/null)
 [ "$V" = "${TAG#v}" ] || fail "il tag $TAG ha VERSION=$V: tag non valido"
-g -c advice.detachedHead=false checkout --quiet "$TAG" || fail "checkout di $TAG non riuscito"
+if g symbolic-ref -q HEAD >/dev/null; then
+  # checkout di sviluppo su un ramo: resta sul ramo, avanza solo in fast-forward
+  g merge-base --is-ancestor "$TAG" HEAD || g merge --quiet --ff-only "$TAG" \
+    || fail "il ramo $(g symbolic-ref --short HEAD) non può avanzare a $TAG senza merge"
+else
+  g -c advice.detachedHead=false checkout --quiet "$TAG" || fail "checkout di $TAG non riuscito"
+fi
 docker compose up -d --build || fail "docker compose non riuscito: journalctl -u armony-update"
 status "fatto" "$TAG"
 echo "armony-update: aggiornato a $TAG"

@@ -31,6 +31,8 @@ musica/ video/ data/ dati dell'utente (root, montati nei container): non toccarl
   aggiorna dai tag `vX.Y.Z`: **un tag è un rilascio a tutti i server**. Non
   creare né pushare tag senza richiesta esplicita; quando lo fai, `VERSION`
   deve contenere lo stesso numero (senza `v`), altrimenti l'updater rifiuta.
+  `deploy/pre-commit` blocca `.env` e le cartelle dati: in un clone nuovo si
+  attiva con `git config core.hooksPath deploy`. Push via SSH (`pushurl`).
 - **È in produzione su questa macchina** (`armony-app`, `armony-navidrome`
   girano adesso, accanto ad altri container non nostri). Non fermare, ricreare
   o fare `down` senza chiedere. `data/navidrome/navidrome.db` è il DB vivo.

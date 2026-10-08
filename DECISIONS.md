@@ -27,6 +27,22 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — L'updater non stacca un checkout di sviluppo dal suo ramo
+
+**Contesto:** precisa la voce «Aggiornamenti da GitHub» qui sotto, che diceva
+di sviluppare in un clone separato. Su questa macchina sviluppo e produzione
+sono la stessa cartella, e un checkout del tag la lascerebbe "detached".
+**Scelta:** se HEAD è su un ramo, `armony-update.sh` non fa checkout: se il
+tag è già nel ramo ricostruisce soltanto, altrimenti avanza in fast-forward, e
+se servirebbe un merge rifiuta. Se HEAD è già detached (server di sola
+produzione) fa checkout del tag.
+**Alternative scartate:** obbligare a un clone separato per la produzione
+(cartella dati da spostare, doppia configurazione); merge automatico (un
+conflitto a metà lascerebbe il server rotto).
+**Conseguenze:** su un ramo con commit locali non pubblicati il tasto rifiuta
+finché non si allinea a mano.
+**Da rivedere se:** la produzione si sposta in una cartella separata.
+
 ## 2026-10-08 — Aggiornamenti da GitHub: tag, avviso e tasto eseguito dall'host
 
 **Contesto:** Armony girerà su più server di persone diverse; ognuno deve

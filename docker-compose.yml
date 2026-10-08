@@ -36,7 +36,7 @@ services:
     environment:
       ARMONY_TOKEN: "${ARMONY_TOKEN:?manca ARMONY_TOKEN in .env}"
       ARMONY_NAME: "${ARMONY_NAME:-Casa}"
-      ARMONY_REPO: "${ARMONY_REPO:-}"
+      ARMONY_REPO: "${ARMONY_REPO:-Giggi-98/Armony}"
       ARMONY_PORT: "8080"
       ARMONY_MULTICAST: "1"
       NAVIDROME_URL: "http://127.0.0.1:4533"

@@ -24,7 +24,7 @@ armony/
 
 Serve un computer Linux sempre acceso con Docker: un Raspberry Pi 4/5, un NAS, un vecchio PC o un VPS.
 
-1. Scarica Armony sul server con `git clone https://github.com/TUO-UTENTE/armony.git` ed entra nella cartella.
+1. Scarica Armony sul server con `git clone https://github.com/Giggi-98/Armony.git armony` ed entra nella cartella.
 2. Copia `.env.example` in `.env` e cambia `ARMONY_TOKEN` (la password per i download e gli aggiornamenti), `TURN_PASS` e, se vuoi, `ARMONY_NAME`. Lascia `ARMONY_REPO` com'è: dice ad Armony dove cercare le versioni nuove.
 3. Avvia con `docker compose up -d`, poi abilita il tasto «Aggiorna» con `sudo deploy/install-updater.sh` (una volta sola).
 4. Apri `http://IP-DEL-SERVER:4533` e crea l'amministratore di Navidrome. Da lì crei anche un utente per ogni amico.
