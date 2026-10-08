@@ -3,7 +3,8 @@ Armony - server di supporto.
 
   /                     client web (cartella client)
   /rest/*, /share/*     proxy verso Navidrome: tutto su un'unica porta e un'unica origine
-  /api/jam/*            segnalazione per la Jam. Il server inoltra solo messaggi cifrati
+  /api/jam/*            segnalazione per la Jam, e nel modo "tramite il server" tutti i suoi messaggi;
+                        /api/jam/ora è l'orologio comune. Il server inoltra solo messaggi cifrati
                         dai client con la chiave della stanza: non può leggerli né falsificarli
   /api/lan/*            scoperta di altri server Armony e Jam vicine via multicast UDP
   /api/info            pubblica: nome, versione, livello di API e capacità del server
@@ -512,6 +513,14 @@ def jam_recv(rid):
             if left <= 0:
                 return jsonify(messages=[])
             cond.wait(left)
+
+
+@app.get("/api/jam/ora")
+def jam_ora():
+    # orologio comune per la Jam "tramite il server": ogni partecipante stima lo scarto col server (stile NTP)
+    resp = jsonify(t=time.time() * 1000)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.get("/api/jam/nearby")

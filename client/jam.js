@@ -3,6 +3,9 @@
    Collegamento: WebRTC. L'host è al centro, ogni ospite ha un canale diretto con lui.
    - Rete locale: nessun server STUN/TURN, solo indirizzi locali. Il traffico non esce dalla rete.
    - Internet (5G): STUN per attraversare i NAT, TURN facoltativo. Il relay vede solo dati cifrati.
+   - Tramite il server: niente WebRTC. I messaggi della Jam passano dal relay di Armony
+     (/api/jam/<id>/send e /recv) con gli stessi strati 2 e 3 qui sotto; il server fa anche da
+     orologio comune (/api/jam/ora). Solo ascolto sincronizzato: serve un account sul server.
 
    Sicurezza (a strati):
    1. DTLS-SRTP di WebRTC: cifratura punto-punto di audio e dati, con chiavi effimere (ECDHE).
@@ -10,8 +13,8 @@
       viaggia solo nel link d'invito, dopo il #, quindi non arriva mai al server. Il server
       inoltra messaggi che non può leggere né falsificare: niente attacchi "man in the middle".
    3. Canale dati cifrato una seconda volta con chiave da scambio ECDH P-256 tra i due dispositivi.
-   4. Codice di sicurezza: 5 simboli calcolati dalle impronte DTLS di entrambi. Se coincidono
-      sui due telefoni, nessuno si è messo in mezzo.
+   4. Codice di sicurezza: 5 simboli calcolati dalle impronte DTLS di entrambi (tramite il server:
+      dalle due chiavi pubbliche ECDH). Se coincidono sui due telefoni, nessuno si è messo in mezzo.
    Gli strati 2 e 3 richiedono una pagina HTTPS (vincolo dei browser per la crittografia). */
 'use strict';
 
@@ -65,11 +68,18 @@ function stereoOpus(sdp) {
 }
 const wire = t => t && ({ id: t.id, title: t.title, artist: t.artist, album: t.album, albumId: t.albumId, artistId: t.artistId, duration: t.duration, coverArt: t.coverArt, rg: t.rg, genre: t.genre, jamBy: t.jamBy, serverUrl: t.serverUrl || absUrl(srv(t.serverId)?.url || '') });
 const localize = w => { if (!w) return null; const s = S.servers.find(x => absUrl(x.url) === w.serverUrl); return { ...w, serverId: s ? s.id : 'nessuno' }; };
+async function relayCode(a, b) {
+  const [x, y] = [a, b].sort(), h = new Uint8Array(await crypto.subtle.digest('SHA-256', te.encode(x + '.' + y)));
+  return [...h.slice(0, 5)].map(v => SYMBOLS[v % 64]).join(' ');
+}
+// un account sul server della Jam: serve per ascoltare "tramite il server" (ognuno scarica la musica da lì)
+const hasAccount = base => !!base && S.servers.some(s => absUrl(s.url) === absUrl(base) && (s.tok || s.pass));
+const serverLabel = base => { try { return new URL(base).host; } catch { return 'quel server'; } };
 const signalBase = () => (S.dl.url || absUrl(srv()?.url || '') || (!NATIVE && /^https?:/.test(location.protocol) ? location.origin : '')).replace(/\/+$/, '');
 
 /* ================= segnalazione tramite server (messaggi cifrati) ================= */
 class Signal {
-  constructor(base, room, peer, key) { Object.assign(this, { base, room, peer, key, running: false }); }
+  constructor(base, room, peer, key) { Object.assign(this, { base, room, peer, key, running: false, chains: new Map() }); }
   async send(to, obj, plain = false) {
     const data = this.key && !plain ? 'e:' + await JC.seal(this.key, obj) : 'p:' + JSON.stringify(obj);
     const r = await fetch(`${this.base}/api/jam/${this.room}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: this.peer, to, data }) });
@@ -86,7 +96,8 @@ class Signal {
         for (const m of j.messages) {
           let obj = null, enc = m.data.startsWith('e:');
           try { obj = enc ? (this.key ? await JC.open(this.key, m.data.slice(2)) : null) : JSON.parse(m.data.slice(2)); } catch { obj = null; }
-          if (obj) onMsg(m.from, obj, enc);
+          // in ordine per mittente (una chiave va ricavata prima dei dati), senza bloccare gli altri
+          if (obj) this.chains.set(m.from, (this.chains.get(m.from) || Promise.resolve()).then(() => onMsg(m.from, obj, enc)).catch(() => {}));
         }
       } catch { await sleep(2500); }
     }
@@ -136,6 +147,27 @@ class Peer {
   }
   close() { try { this.dc?.close(); } catch {} try { this.pc.close(); } catch {} }
 }
+/* ================= collegamento tramite il server (senza WebRTC) =================
+   Stessa interfaccia di Peer. Ogni messaggio va dentro la segnalazione (già cifrata con la chiave della stanza)
+   e dentro un secondo strato AES-GCM con chiave ECDH della coppia: un altro invitato, che conosce la chiave
+   della stanza, non può leggere né falsificare i messaggi fra host e un ospite. */
+class RelayPeer {
+  constructor(id, opts) { Object.assign(this, { id, name: opts.name || 'Ospite', kp: opts.kp, key: null, rtt: null, conn: 'tramite il server', safety: '', state: 'connected', want: 'sync', relay: true, seen: Date.now(), q: Promise.resolve() }); }
+  async setKey(peerPub) { this.key = await JC.shared(this.kp, peerPub, 'armony-relay', Jam.room.id); this.safety = await relayCode(await JC.pub(this.kp), peerPub); }
+  raw(obj) { const to = this.id; this.q = this.q.then(() => Jam.sig?.send(to, obj)).catch(() => {}); return this.q; }
+  async send(obj) { if (this.key) return this.raw({ t: 'data', d: await JC.seal(this.key, obj) }); }
+  async open(d) { try { return await JC.open(this.key, d); } catch { return null; } }
+  detectRoute() {}
+  close() {}
+}
+// orologio del server: scarto stimato come NTP, tenendo il campione con il tempo di andata e ritorno minore
+const SrvClock = {
+  off: 0, samples: [], t: null, base: '',
+  async sample() { const t0 = now(); const j = await (await fetch(this.base + '/api/jam/ora', { cache: 'no-store' })).json(); const t1 = now(); this.samples.push({ rtt: t1 - t0, off: j.t - (t0 + t1) / 2 }); this.samples = this.samples.slice(-16); this.off = this.samples.reduce((a, b) => b.rtt < a.rtt ? b : a).off; },
+  async start(base) { this.stop(); this.base = base; this.samples = []; for (let i = 0; i < 6; i++) { try { await this.sample(); } catch {} } this.t = setInterval(() => this.sample().catch(() => {}), 15000); },
+  stop() { clearInterval(this.t); this.t = null; },
+  ready() { return this.samples.length > 0; }
+};
 const waitIce = pc => new Promise(res => { if (pc.iceGatheringState === 'complete') return res(); const t = setTimeout(res, 5000); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); });
 
 /* ================= Jam ================= */
@@ -143,7 +175,7 @@ const Jam = {
   role: null, mode: 'sync', room: null, me: uid(12), sig: null, peers: new Map(), host: null,
   track: null, queue: [], playing: false, st: null, offset: 0, samples: [], remoteAudio: null, duck: 1,
   set: { control: false, openQueue: true, visible: true, approve: false },
-  chat: [], proposals: [], votes: new Map(), pending: new Map(), timers: [], net: 'lan', renderT: null,
+  chat: [], proposals: [], votes: new Map(), pending: new Map(), timers: [], net: 'lan', via: 'direct', lastHost: 0, renderT: null,
 
   init() {
     ['track', 'play', 'pause', 'seek', 'queue'].forEach(ev => Bus.addEventListener(ev, () => { if (this.role === 'host') { this.pushState(); if (ev === 'track' || ev === 'queue') this.pushQueue(); } }));
@@ -156,7 +188,13 @@ const Jam = {
     return { iceServers: ice, bundlePolicy: 'max-bundle' };
   },
   name() { return P.nick || srv()?.user || 'Anonimo'; },
-  estPos() { const st = this.st; if (!st) return 0; return st.pos + (st.playing ? Math.max(0, (now() + this.offset - st.at) / 1000) * (st.rate || 1) : 0); },
+  // posizione dell'host adesso: con l'orologio dell'host (ping sul canale diretto) o con quello del server
+  estPos() {
+    const st = this.st; if (!st) return 0;
+    const srvTime = this.via === 'server' && st.sat && SrvClock.ready();
+    const el = srvTime ? now() + SrvClock.off - st.sat : now() + this.offset - st.at;
+    return st.pos + (st.playing ? Math.max(0, el / 1000) * (st.rate || 1) : 0);
+  },
   paintPill() {
     const p = $('#jamPill'); p.hidden = !this.role;
     p.className = 'pill jam'; p.textContent = this.role === 'host' ? `Jam, ${this.peers.size + 1} persone` : `Jam con ${this.st?.hostName || 'host'}`;
@@ -176,9 +214,13 @@ const Jam = {
         if (!r.ok) throw 0;
         this.sig = new Signal(this.room.base, this.room.id, this.me, key);
         this.sig.loop((from, m, enc) => this.hostSignal(from, m, enc), () => toast('Il server ha chiuso la Jam.'));
+        SrvClock.start(this.room.base);  // per gli ospiti che arrivano tramite il server
       } catch { this.sig = null; toast('Server della Jam non raggiungibile: usa gli inviti con codice.'); }
     }
-    this.timers.push(setInterval(() => this.pushState(), 3000), setInterval(() => this.peers.forEach(p => p.state === 'connected' && p.detectRoute()), 10000));
+    this.timers.push(setInterval(() => this.pushState(), 3000), setInterval(() => {
+      this.peers.forEach(p => p.state === 'connected' && p.detectRoute());
+      this.peers.forEach(p => p.relay && Date.now() - p.seen > 40000 && this.peerGone(p));  // ospite tramite server sparito
+    }, 10000));
     this.sys('Jam creata. Invita gli amici con il link o il codice.');
     this.render();
   },
@@ -199,6 +241,17 @@ const Jam = {
   async hostSignal(from, m, enc) {
     if (!enc && this.room.secret && m.t !== 'knock') return;
     if (m.t === 'knock') return this.onKnock(from, m);
+    if (m.t === 'data') { const p = this.peers.get(from); if (!p?.relay) return; const o = await p.open(m.d); if (o) { p.seen = Date.now(); this.onData(p, o); } return; }
+    if (m.t === 'hello' && m.via === 'server') {
+      // ospite tramite il server (scelto, o ripiego quando il collegamento diretto non si apre)
+      if (!SUBTLE || !m.pub) return this.sig.send(from, { t: 'deny' });
+      const old = this.peers.get(from); if (old) { old.close(); this.peers.delete(from); }
+      else if (this.set.approve && !(await this.confirmGuest(m.name))) return this.sig.send(from, { t: 'deny' });
+      const p = new RelayPeer(from, { name: String(m.name || 'Ospite').slice(0, 30), kp: await JC.ecdh() });
+      await p.setKey(m.pub); this.peers.set(from, p);
+      await p.raw({ t: 'relay', pub: await JC.pub(p.kp) });
+      return this.peerOpen(p);
+    }
     if (m.t === 'hello') {
       if (this.set.approve && !(await this.confirmGuest(m.name))) return this.sig.send(from, { t: 'deny' });
       this.peers.get(from)?.close();
@@ -251,6 +304,7 @@ const Jam = {
     }
   },
   async startBroadcast(p) {
+    if (p.relay) { p.send({ t: 'chat', sys: true, text: 'Tramite il server la trasmissione non c\'è: ascolti in modo sincronizzato.' }); return; }
     Engine.graph();
     if (!Engine.dest) { p.send({ t: 'chat', sys: true, text: 'L\'host usa la modalità compatibile: la trasmissione non è disponibile.' }); return; }
     const track = Engine.dest.stream.getAudioTracks()[0];
@@ -259,7 +313,8 @@ const Jam = {
   },
   hostState() {
     const t = S.queue[S.index];
-    return { t: 'state', track: wire(t), pos: Engine.time(), playing: !Engine.el.paused && !!t, at: now(), rate: P.speed, hostName: this.name(), room: this.room.name };
+    const at = now();  // sat: lo stesso istante con l'orologio del server, per chi è collegato tramite il server
+    return { t: 'state', track: wire(t), pos: Engine.time(), playing: !Engine.el.paused && !!t, at, sat: SrvClock.ready() ? at + SrvClock.off : null, rate: P.speed, hostName: this.name(), room: this.room.name };
   },
   pushState(only) { if (this.role !== 'host') return; const st = this.hostState(); only ? only.send(st) : this.broadcast(st); },
   queueMsg() {
@@ -282,7 +337,7 @@ const Jam = {
       case 'ping': p.send({ t: 'pong', t0: m.t0, th: now() }); break;
       case 'chat': { const text = String(m.text || '').slice(0, 500); if (!text) break; this.addChat(p.name, text, p.id); this.broadcast({ t: 'chat', name: p.name, text, from: p.id }, p); break; }
       case 'react': if (REACTIONS.includes(m.e)) { floatReaction(m.e); this.broadcast({ t: 'react', e: m.e }, p); } break;
-      case 'mode': p.want = m.want === 'broadcast' ? 'broadcast' : 'sync'; if (p.want === 'broadcast') this.startBroadcast(p); else p.sender?.replaceTrack(null); break;
+      case 'mode': p.want = m.want === 'broadcast' && !p.relay ? 'broadcast' : 'sync'; if (p.want === 'broadcast') this.startBroadcast(p); else p.sender?.replaceTrack(null); break;
       case 'suggest': {
         const t = localize(m.track); if (!t || t.serverId === 'nessuno') { p.send({ t: 'chat', sys: true, text: 'Questo brano non è sul server dell\'host.' }); break; }
         t.jamBy = p.name;
@@ -323,22 +378,42 @@ const Jam = {
   async join(info, { name, want } = {}) {
     if (this.role) await this.leave(true);
     if (name) { P.nick = name; savePrefs(); }
-    this.net = info.net || 'internet'; this.role = 'guest'; this.mode = want || 'sync';
+    const viaServer = info.net === 'server';
+    if (viaServer && !SUBTLE) { toast('Per entrare tramite il server serve Armony in HTTPS (o l\'app).'); return; }
+    if (viaServer && !hasAccount(info.b)) { toast(`Per ascoltare tramite il server ti serve un account su ${serverLabel(info.b)}.`, 6000); return; }
+    this.net = info.net || 'internet'; this.role = 'guest'; this.mode = viaServer ? 'sync' : want || 'sync'; this.via = viaServer ? 'server' : 'direct';
     this.room = { id: info.r, name: info.n, base: info.b, secret: info.k ? b64u.dec(info.k) : null };
     const key = this.room.secret && SUBTLE ? await JC.aesFrom(this.room.secret, 'armony-signal', this.room.id) : null;
     if (this.room.secret && !SUBTLE) { toast('Questa Jam è cifrata e serve Armony in HTTPS per entrare.'); this.role = null; return; }
     this.sig = new Signal(this.room.base, this.room.id, this.me, key);
-    const kp = SUBTLE ? await JC.ecdh() : null;
+    const kp = SUBTLE ? await JC.ecdh() : null; this.kp = kp;
     this.sig.loop((from, m, enc) => this.guestSignal(from, m, enc, kp), () => { toast('La Jam è stata chiusa.'); this.leave(true); });
-    try { await this.sig.send('host', { t: 'hello', name: this.name(), pub: kp ? await JC.pub(kp) : null, want: this.mode }); }
+    if (viaServer) await SrvClock.start(this.room.base);
+    try { await this.sig.send('host', { t: 'hello', name: this.name(), pub: kp ? await JC.pub(kp) : null, want: this.mode, via: viaServer ? 'server' : undefined }); }
     catch (e) { toast(e.message); this.leave(true); return; }
-    this.sys(`Collegamento a ${info.h ? 'la Jam di ' + info.h : 'la Jam'}…`);
+    this.sys(`Collegamento a ${info.h ? 'la Jam di ' + info.h : 'la Jam'}${viaServer ? ' tramite il server' : ''}…`);
     this.timers.push(setInterval(() => this.syncTick(), 1000));
+    // collegamento diretto che non si apre (NAT difficili, 5G): con un account si passa al server
+    if (!viaServer) setTimeout(() => this.fallback(), 10000);
     this.render(); location.hash = '#/jam';
+  },
+  async fallback() {
+    if (this.role !== 'guest' || this.via === 'server' || this.host?.dc?.readyState === 'open') return;
+    if (!SUBTLE || !hasAccount(this.room.base) || !this.sig) return toast('Il collegamento diretto non si apre. Con un account sul server dell\'host potresti entrare tramite il server.', 6000);
+    this.host?.close(); this.peers.clear(); this.host = null;
+    this.via = 'server'; this.mode = 'sync'; this.remoteAudio?.pause();
+    await SrvClock.start(this.room.base);
+    await this.sig.send('host', { t: 'hello', name: this.name(), pub: await JC.pub(this.kp), want: 'sync', via: 'server' }).catch(() => {});
+    this.sys('Il collegamento diretto non si apriva: passo tramite il server.'); this.render();
   },
   async guestSignal(from, m, enc, kp) {
     if (!enc && this.room.secret && !['deny'].includes(m.t)) return;
     if (m.t === 'deny') { toast('L\'host non ti ha fatto entrare.'); return this.leave(true); }
+    if (m.t === 'relay' && this.via === 'server') {
+      const p = new RelayPeer(from, { name: 'host', kp }); await p.setKey(m.pub);
+      this.host = p; this.peers.set(from, p); this.lastHost = Date.now(); return this.peerOpen(p);
+    }
+    if (m.t === 'data') { const p = this.peers.get(from); if (!p?.relay) return; const o = await p.open(m.d); if (o) { this.lastHost = Date.now(); this.onData(p, o); } return; }
     if (m.t === 'offer') {
       const p = new Peer(from, { name: 'host', kp }); p.peerPub = m.pub; this.host = p; this.peers.set(from, p);
       p.pc.ondatachannel = e => p.attach(e.channel);
@@ -389,6 +464,7 @@ const Jam = {
     this.syncTick(true);
   },
   async syncTick(force) {
+    if (this.role === 'guest' && this.via === 'server' && this.host && Date.now() - this.lastHost > 40000) { toast('L\'host non risponde più.'); return this.leave(true); }
     if (this.role !== 'guest' || !this.st) return;
     paintTime();
     if (this.mode !== 'sync' || !this.track || this.track.serverId === 'nessuno') return;
@@ -476,9 +552,9 @@ const Jam = {
     } else if (was === 'guest') { this.host?.send({ t: 'bye' }); this.sig?.send('host', { t: 'bye' }).catch(() => {}); }
     await sleep(80);
     this.sig?.stop(); this.peers.forEach(p => p.close()); this.peers.clear(); this.pending.forEach(p => p.close()); this.pending.clear();
-    this.timers.forEach(clearInterval); this.timers = [];
+    this.timers.forEach(clearInterval); this.timers = []; SrvClock.stop();
     if (was === 'guest') { Engine.stop(); this.remoteAudio?.pause(); if (this.remoteAudio) this.remoteAudio.srcObject = null; }
-    Object.assign(this, { role: null, room: null, sig: null, host: null, track: null, st: null, queue: [], proposals: [], votes: new Map(), roster: null, samples: [], me: uid(12) });
+    Object.assign(this, { role: null, room: null, sig: null, host: null, track: null, st: null, queue: [], proposals: [], votes: new Map(), roster: null, samples: [], me: uid(12), via: 'direct', kp: null });
     if (!silent) toast(was === 'host' ? 'Jam chiusa.' : 'Sei uscito dalla Jam.');
     updateNowPlaying(); this.render(); paintTime();
     if (was === 'guest' && S.queue[S.index] && !silent) Engine.load(S.queue[S.index], Engine.cur, { autoplay: false });
@@ -558,25 +634,30 @@ async function vJam(sub = '') {
   if (sub.startsWith('entra/') && !Jam.role) {
     const code = sub.slice(6), n = Scene.nav; let info; try { info = await unpack(code); } catch { if (!stale(n)) view.innerHTML = '<div class="empty">Link d\'invito non valido.</div>'; return; }
     if (stale(n)) return;
-    view.innerHTML = `<h1>${esc(info.n)}</h1><p class="sub">${esc(info.h)} ti invita ad ascoltare insieme.</p>
+    const viaServer = info.net === 'server', noAcc = viaServer && !hasAccount(info.b);
+    view.innerHTML = `<h1>${esc(info.n)}</h1><p class="sub">${esc(info.h)} ti invita ad ascoltare insieme${viaServer ? ', tramite il server' : ''}.</p>
       <div class="panel stack" style="max-width:520px">
         <label class="f">Il tuo nome<input type="text" id="jName" value="${esc(P.nick)}" maxlength="30" placeholder="Come ti chiami?"></label>
-        ${joinModeSeg()}
-        <button class="btn primary" data-act="jamconfirm" data-code="${esc(code)}">${ic('jam')} Entra nella Jam</button>
+        ${viaServer ? `<p class="small" style="color:var(--muted);margin:0">Ognuno ascolta dal server, alla sua qualità, allineato all'host.</p>` : joinModeSeg()}
+        ${noAcc ? `<p class="small" style="margin:0">Per ascoltare tramite il server ti serve un account su ${esc(serverLabel(info.b))}.</p>
+          <button class="btn primary" data-act="addsrv" data-url="${esc(info.b)}">${ic('plus')} Accedi o crea un account</button>`
+          : `<button class="btn primary" data-act="jamconfirm" data-code="${esc(code)}">${ic('jam')} Entra nella Jam</button>`}
         <p class="small" style="color:var(--muted);margin:0">${secureNote}</p>
       </div>`;
     return;
   }
   if (!Jam.role) {
+    const canRelay = SUBTLE && !!signalBase() && !!srv(), defNet = canRelay ? 'server' : 'lan';
     view.innerHTML = `<h1>Jam</h1><p class="sub">Ascoltate la stessa musica nello stesso momento, ognuno dal suo telefono. Proponete brani, votate, chattate.</p>
     <div class="grid2" style="align-items:start">
       <div class="panel stack"><h3>Crea una Jam</h3>
         <label class="f">Il tuo nome<input type="text" id="jName" value="${esc(P.nick)}" maxlength="30"></label>
         <label class="f">Nome della Jam<input type="text" id="jRoom" placeholder="La Jam di ${esc(Jam.name())}" maxlength="60"></label>
-        <div class="seg" role="radiogroup" aria-label="Rete">
-          <label><input type="radio" name="jnet" value="lan" checked><span>${ic('wifi')} Stessa rete</span></label>
-          <label><input type="radio" name="jnet" value="internet"><span>${ic('globe')} Internet / 5G</span></label></div>
-        <p class="small" style="color:var(--muted);margin:0">Stessa rete: la musica viaggia solo dentro casa o sul Wi-Fi del locale. Internet: funziona anche da reti mobili diverse.</p>
+        <div class="seg jnet" role="radiogroup" aria-label="Collegamento">
+          <label><input type="radio" name="jnet" value="server" ${canRelay ? (defNet === 'server' ? 'checked' : '') : 'disabled'}><span>${ic('speaker')} Server</span></label>
+          <label><input type="radio" name="jnet" value="lan" ${defNet === 'lan' ? 'checked' : ''}><span>${ic('wifi')} Stessa rete</span></label>
+          <label><input type="radio" name="jnet" value="internet"><span>${ic('globe')} Internet</span></label></div>
+        <p class="small" style="color:var(--muted);margin:0">Server: il più affidabile, anche in 5G; ognuno ascolta dal server allineato all'host (serve un account sul server${canRelay ? '' : ' e Armony in HTTPS o l\'app'}). Stessa rete: collegamento diretto dentro casa o sul Wi-Fi del locale. Internet: diretto fra reti diverse, permette anche la trasmissione dall'host.</p>
         <label class="check"><input type="checkbox" id="jVis" checked><span>Visibile a chi è sulla mia rete<small>Chi è vicino può chiedere di entrare senza link. Entra solo se lo accetti.</small></span></label>
         <button class="btn primary" data-act="jamcreate">${ic('jam')} Crea</button>
       </div>
@@ -598,12 +679,13 @@ async function vJam(sub = '') {
   const roster = host ? [{ id: Jam.me, name: Jam.name(), host: true }, ...[...Jam.peers.values()].map(p => ({ id: p.id, name: p.name, conn: p.conn, rtt: p.rtt, safety: p.safety, state: p.state }))]
     : (Jam.roster || []).map(r => r.host && Jam.host ? { ...r, conn: Jam.host.conn, rtt: Jam.host.rtt, safety: Jam.host.safety } : r);
   S.lastList = upcoming;
-  view.innerHTML = `<div class="row between"><div><h1>${esc(Jam.room.name)}</h1><p class="sub">${host ? 'Sei l\'host.' : `Ospite di ${esc(Jam.st?.hostName || '…')}.`} ${Jam.net === 'lan' ? 'Solo rete locale.' : 'Via internet.'}</p></div>
+  view.innerHTML = `<div class="row between"><div><h1>${esc(Jam.room.name)}</h1><p class="sub">${host ? 'Sei l\'host.' : `Ospite di ${esc(Jam.st?.hostName || '…')}.`} ${Jam.role === 'guest' && Jam.via === 'server' ? 'Tramite il server.' : { lan: 'Solo rete locale.', server: 'Tramite il server.' }[Jam.net] || 'Via internet.'}</p></div>
     <button class="btn danger" data-act="jamleave">${host ? 'Chiudi la Jam' : 'Esci'}</button></div>
   <div class="jamgrid"><div>
     ${cur ? `<div class="list-item" style="cursor:pointer" onclick="location.hash='#/ora'"><span class="pic">${imgTag(cur.coverArt, 100, cur.serverId)}</span><span class="grow"><b>${esc(cur.title)}</b><small>${esc(cur.artist)}${cur.jamBy ? `, proposto da ${esc(cur.jamBy)}` : ''}</small></span><span class="tag ${isPlaying() ? 'ok' : ''}">${isPlaying() ? 'in onda' : 'in pausa'}</span></div>`
       : `<div class="empty">${host ? 'Avvia un brano: tutti lo sentiranno.' : 'In attesa che l\'host faccia partire la musica.'}</div>`}
-    ${host ? '' : `<div class="panel" style="margin-top:14px"><h3>Come ascolti</h3>${joinModeSeg(Jam.mode, true)}
+    ${host ? '' : Jam.via === 'server' ? `<div class="panel" style="margin-top:14px"><h3>Come ascolti</h3><p class="small" style="color:var(--muted);margin:0">Tramite il server: scarichi la musica dal server alla tua qualità e resti allineato all'host con l'orologio del server.</p></div>`
+      : `<div class="panel" style="margin-top:14px"><h3>Come ascolti</h3>${joinModeSeg(Jam.mode, true)}
       <p class="small" style="color:var(--muted);margin:8px 0 0">${Jam.mode === 'sync' ? 'Ogni telefono scarica la musica dal server alla qualità scelta e resta allineato all\'host.' : 'Ascolti l\'audio trasmesso dall\'host. Non serve un account sul suo server.'}</p></div>`}
     ${host ? `<div class="panel" style="margin-top:14px"><h3>Invita</h3><div class="row">
         <button class="btn primary" data-act="jamcopy">${ic('share')} Link d'invito</button><button class="btn" data-act="jamqr">QR code</button>
