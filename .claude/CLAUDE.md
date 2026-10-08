@@ -52,6 +52,9 @@ musica/ video/ data/ dati dell'utente (root, montati nei container): non toccarl
   (`SUBTLE`): verifica sempre anche il ramo senza HTTPS.
 - **Rotte protette**: la tupla `PROTECTED` in `app.py` decide cosa richiede
   `ARMONY_TOKEN`. Una nuova rotta di download/gestione file va aggiunta lì.
+- **Larghezza telefono**: la barra di navigazione in alto scorre in
+  orizzontale solo grazie a `min-width:0` su `nav` e `minmax(0,1fr)` su
+  `.app`. Senza, 12 icone allargano tutta la pagina oltre lo schermo.
 - **Multicast** solo con `network_mode: host` su Linux; il resto dell'app deve
   funzionare anche con `ARMONY_MULTICAST=0`.
 - **Lingua**: interfaccia, commenti e messaggi sono in italiano. Mantienilo.

@@ -225,4 +225,5 @@ per questo è ultima.
 | Caricamento dal client (fase 0) | Prima della federazione |
 | Diritti | Nota estesa in `LEGGIMI.md` e avviso alla prima offerta, confermato una volta |
 
-Prossimo passo: fase 0.
+Fase 0 fatta (2026-10-08): Scarica → Dal dispositivo, `PUT /api/upload`.
+Prossimo passo: fase 1.

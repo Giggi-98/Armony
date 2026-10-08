@@ -1015,9 +1015,11 @@ function dlOptions() {
 }
 async function vDownload(sub = '') {
   const [tab, ...rest] = (sub || '').split('/'); const q0 = rest.join('/');
-  const t = tab === 'cerca' ? 'cerca' : 'link';
+  const t = ['cerca', 'carica'].includes(tab) ? tab : 'link';
+  const tabs = `<div class="tabs"><a href="#/scarica" class="${t === 'link' ? 'on' : ''}">Da un link</a><a href="#/scarica/cerca" class="${t === 'cerca' ? 'on' : ''}">Cerca online</a><a href="#/scarica/carica" class="${t === 'carica' ? 'on' : ''}">Dal dispositivo</a></div>`;
+  if (t === 'carica') return vUpload(tabs);
   view.innerHTML = `<h1>Scarica</h1><p class="sub">Da YouTube, SoundCloud, Bandcamp, Vimeo e centinaia di altri siti. L'audio entra nella libreria, i video restano qui sotto.</p>
-  <div class="tabs"><a href="#/scarica" class="${t === 'link' ? 'on' : ''}">Da un link</a><a href="#/scarica/cerca" class="${t === 'cerca' ? 'on' : ''}">Cerca online</a></div>
+  ${tabs}
   <div class="panel">
     ${t === 'link' ? `<label class="f">Link, uno per riga<textarea id="dUrl" placeholder="https://www.youtube.com/watch?v=..."></textarea></label>`
       : `<div class="row" style="flex-wrap:nowrap"><input type="search" id="ySearch" placeholder="Artista e titolo" value="${esc(q0)}"><select id="ySrc" style="width:auto"><option value="yt">YouTube</option><option value="sc">SoundCloud</option></select><button class="btn primary" id="yGo">${ic('search')}</button></div>`}
@@ -1106,6 +1108,96 @@ async function refreshVideos() {
       : '<div class="empty">Nessun video. Scegli "Video" per scaricarne uno.</div>';
   } catch { box.innerHTML = ''; }
 }
+
+/* ================= caricamento dal dispositivo nella libreria del server ================= */
+const UP_EXT = /\.(mp3|flac|m4a|aac|ogg|oga|opus|wav|aif|aiff|wma|wv|ape)$/i, UP_COVER = /^(cover|folder)\.(jpe?g|png)$/i;
+const Up = { list: [], busy: false };
+function vUpload(tabs) {
+  view.innerHTML = `<h1>Scarica</h1><p class="sub">Dal telefono o dal computer alla libreria del server: file singoli o cartelle intere. Le copertine cover.jpg e folder.jpg vengono caricate insieme agli album.</p>
+  ${tabs}
+  <div class="panel">
+    <div class="drop" id="upDrop"><b>Trascina qui file o cartelle</b><small>MP3, FLAC, M4A, Opus, OGG, WAV, AIFF e altri formati audio</small>
+      <div class="row" style="justify-content:center;margin-top:12px"><label class="btn primary">${ic('plus')} Scegli file<input type="file" id="upFiles" multiple accept="audio/*,.flac,.opus,.ape,.wv,.wma" hidden></label><label class="btn">Scegli cartella<input type="file" id="upDir" webkitdirectory hidden></label></div></div>
+    <label class="f" style="margin-top:14px">Cartella nella libreria<input type="text" id="upDest" value="${esc(store.get('upDir', 'Caricati'))}"></label>
+  </div>
+  <div class="row between"><h2>Caricamenti</h2><button class="btn sm" data-act="upclear">Rimuovi conclusi</button></div>
+  <div id="ups"></div>`;
+  $('#upDest').onchange = e => store.set('upDir', e.target.value.trim() || 'Caricati');
+  $('#upFiles').onchange = e => { upAdd([...e.target.files].map(f => [f, f.name])); e.target.value = ''; };
+  $('#upDir').onchange = e => { upAdd([...e.target.files].map(f => [f, f.webkitRelativePath || f.name])); e.target.value = ''; };
+  const drop = $('#upDrop');
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = async e => {
+    e.preventDefault(); drop.classList.remove('over');
+    const entries = [...e.dataTransfer.items].map(i => i.webkitGetAsEntry?.()).filter(Boolean);
+    upAdd(entries.length ? (await Promise.all(entries.map(readEntry))).flat() : [...e.dataTransfer.files].map(f => [f, f.name]));
+  };
+  upRender();
+}
+// una cartella trascinata va letta a pezzi: readEntries restituisce al massimo 100 voci per volta
+async function readEntry(en) {
+  if (en.isFile) return [[await new Promise((res, rej) => en.file(res, rej)), en.fullPath.replace(/^\//, '')]];
+  const r = en.createReader(), out = [];
+  for (let batch; (batch = await new Promise((res, rej) => r.readEntries(res, rej))).length;) out.push(...batch);
+  return (await Promise.all(out.map(readEntry))).flat();
+}
+function upAdd(files) {
+  if (!S.dl.url) return toast('Configura il servizio di download in Impostazioni.');
+  const folder = $('#upDest')?.value.trim() || store.get('upDir', 'Caricati');
+  let skipped = 0;
+  for (const [file, path] of files) {
+    const name = path.split('/').pop();
+    if (UP_EXT.test(name) || UP_COVER.test(name)) Up.list.push({ file, path, folder, status: 'in coda', progress: 0 });
+    else if (!name.startsWith('.')) skipped++;
+  }
+  if (skipped) toast(skipped === 1 ? '1 file ignorato: non è audio né una copertina.' : `${skipped} file ignorati: non sono audio né copertine.`);
+  upRender(); upRun();
+}
+async function upRun() {
+  if (Up.busy) return; Up.busy = true;
+  let added = 0;
+  for (let u; (u = Up.list.find(x => x.status === 'in coda'));) {
+    u.status = 'in corso'; upRender();
+    try {
+      const r = await upSend(u);
+      u.status = r.status; if (r.status === 'caricato') added++;
+    } catch (e) { u.status = 'errore'; u.error = e.message; }
+    upRender();
+  }
+  Up.busy = false;
+  if (added) api('startScan').then(() => toast(`${added} file caricati: la libreria si aggiorna tra poco.`)).catch(() => {});
+}
+function upSend(u) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();  // fetch non dà l'avanzamento dell'invio
+    x.open('PUT', `${S.dl.url.replace(/\/+$/, '')}/api/upload?folder=${encodeURIComponent(u.folder)}&path=${encodeURIComponent(u.path)}`);
+    x.setRequestHeader('X-Token', S.dl.token);
+    x.upload.onprogress = e => { if (e.lengthComputable) { u.progress = Math.round(e.loaded * 100 / e.total); upRender(u); } };
+    x.onload = () => {
+      let j = {}; try { j = JSON.parse(x.responseText); } catch {}
+      if (x.status === 401) rej(new Error('Codice di accesso del servizio di download errato.'));
+      else if (x.status === 413) rej(new Error('File troppo grande per il server.'));
+      else if (x.status >= 400) rej(new Error(j.error || `Errore ${x.status}`));
+      else res(j);
+    };
+    x.onerror = () => rej(new Error('Server non raggiungibile.'));
+    x.send(u.file);
+  });
+}
+function upRender(only) {
+  const box = $('#ups'); if (!box) return;
+  if (only) { const b = box.querySelector(`[data-ui="${Up.list.indexOf(only)}"] .bar i`); if (b) { b.style.width = only.progress + '%'; return; } }
+  const n = s => Up.list.filter(x => x.status === s).length, left = n('in coda') + n('in corso');
+  box.innerHTML = Up.list.length ? (left ? `<p class="small" style="color:var(--muted);margin:0 0 8px">${left} da caricare. Tieni aperta questa pagina finché non finisce.</p>` : '')
+    + Up.list.map((u, i) => `<div class="panel" style="padding:12px 14px" data-ui="${i}">
+      <div class="row between" style="flex-wrap:nowrap"><b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.path)}</b>
+      <span class="tag ${u.status === 'caricato' || u.status === 'già presente' ? 'ok' : u.status === 'errore' ? 'err' : ''}">${esc(u.status)}</span></div>
+      <small style="color:var(--muted)">${bytes(u.file.size)}</small>
+      ${u.status === 'errore' ? `<p style="color:var(--danger);margin:6px 0 0;font-size:.88rem">${esc(u.error)}</p>` : u.status === 'in corso' ? `<div class="bar"><i style="width:${u.progress}%"></i></div>` : ''}
+    </div>`).join('') : '<div class="empty">Nessun caricamento.</div>';
+}
+addEventListener('beforeunload', e => { if (Up.busy) e.preventDefault(); });
 
 /* ================= playlist: import, export, completamento ================= */
 function parseCSV(text) {
@@ -1508,6 +1600,7 @@ view.addEventListener('click', async e => {
         d.showModal(); break;
       }
       case 'delpl': if (confirm('Eliminare questa playlist? I brani restano in libreria.')) { await api('deletePlaylist', { id }); location.hash = '#/playlist'; } break;
+      case 'upclear': Up.list = Up.list.filter(u => ['in coda', 'in corso'].includes(u.status)); upRender(); break;
       case 'clearjobs': await dlApi('/api/jobs', { method: 'DELETE' }); refreshJobs(); break;
       case 'playvideo': {
         const d = $('#dlg'); d.className = 'wide';

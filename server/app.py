@@ -7,9 +7,11 @@ Armony - server di supporto.
                         dai client con la chiave della stanza: non può leggerli né falsificarli
   /api/lan/*            scoperta di altri server Armony e Jam vicine via multicast UDP
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (protetti da token)
+  /api/upload           caricamento di file audio dal client nella libreria (protetto da token)
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
                         aggiornamento la esegue l'host (deploy/armony-update.sh), non il container
 """
+import hashlib
 import ipaddress
 import json
 import os
@@ -20,6 +22,7 @@ import threading
 import time
 import uuid
 
+import mutagen
 import requests
 import yt_dlp
 from flask import Flask, Response, abort, jsonify, request, send_from_directory, stream_with_context
@@ -46,7 +49,7 @@ AUDIO_FORMATS = {"mp3", "m4a", "opus", "flac"}
 AUDIO_QUALITIES = {"best": "0", "320": "320", "256": "256", "192": "192", "128": "128"}
 VIDEO_QUALITIES = {"best", "2160", "1080", "720", "480", "360"}
 VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
-PROTECTED = ("/api/download", "/api/jobs", "/api/videos", "/api/search", "/api/health", "/api/update")
+PROTECTED = ("/api/download", "/api/jobs", "/api/videos", "/api/search", "/api/health", "/api/update", "/api/upload")
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,48}$")
 
 app = Flask(__name__, static_folder=None)
@@ -342,6 +345,58 @@ def run_job(jid, j):
 @app.get("/api/health")
 def health():
     return jsonify(ok=True, name=NAME, ytdlp=yt_dlp.version.__version__, version=VERSION)
+
+
+# ------------------------------------------------------------------ caricamento dal client
+UPLOAD_AUDIO = {"mp3", "flac", "m4a", "aac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wma", "wv", "ape"}
+UPLOAD_COVER = {"cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.jpeg", "folder.png"}
+
+
+def file_hash(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+@app.put("/api/upload")
+def upload():
+    # un file per richiesta, corpo grezzo: niente multipart da tenere in memoria,
+    # e il client può mostrare l'avanzamento e riprovare file per file
+    parts = [p for p in (request.args.get("path") or "").replace("\\", "/").split("/") if p.strip(" .")]
+    if not parts or len(parts) > 8:
+        return jsonify(error="Percorso del file non valido"), 400
+    name = parts[-1]
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if ext not in UPLOAD_AUDIO and name.lower() not in UPLOAD_COVER:
+        return jsonify(error="Formato non supportato"), 415
+    rel = [clean_segment(request.args.get("folder"), "Caricati")] + [clean_segment(p, "_") for p in parts]
+    dest = os.path.join(MUSIC_DIR, *rel)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + ".armony-part"  # estensione che Navidrome non indicizza
+    h, size = hashlib.sha256(), 0
+    try:
+        with open(tmp, "wb") as f:
+            for b in iter(lambda: request.stream.read(1 << 20), b""):
+                f.write(b); h.update(b); size += len(b)
+        if not size:
+            raise ValueError("File vuoto")
+        if ext in UPLOAD_AUDIO and mutagen.File(tmp) is None:
+            raise ValueError("Non è un file audio riconosciuto")
+    except Exception as e:  # noqa: BLE001
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        return jsonify(error=str(e)[:200]), 415 if isinstance(e, (ValueError, mutagen.MutagenError)) else 500
+    digest, stem, n = h.hexdigest(), dest, 2
+    while os.path.exists(dest):
+        if os.path.getsize(dest) == size and file_hash(dest) == digest:
+            os.remove(tmp)
+            return jsonify(status="già presente", path=os.path.relpath(dest, MUSIC_DIR))
+        base, dot, e = stem.rpartition(".")
+        dest, n = f"{base} ({n}).{e}", n + 1
+    os.replace(tmp, dest)
+    return jsonify(status="caricato", path=os.path.relpath(dest, MUSIC_DIR), size=size), 201
 
 
 # ------------------------------------------------------------------ aggiornamenti

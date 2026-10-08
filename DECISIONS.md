@@ -27,6 +27,34 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Caricamento dal client: un file per richiesta, dietro il token
+
+**Contesto:** fase 0 di `docs/FEDERAZIONE.md`: caricare musica dal
+dispositivo nella libreria del server.
+**Scelta:** `PUT /api/upload?folder=…&path=…` con il file come corpo grezzo,
+un file per richiesta, scritto su disco man mano che arriva come
+`.armony-part` e rinominato a fine invio. Solo estensioni audio e copertine
+(`cover`/`folder`), verificate con `mutagen`. Doppioni riconosciuti per sha256
+e saltati, omonimi diversi rinominati con ` (2)`. Nessuna conversione: il file
+entra com'è. Protetto da `ARMONY_TOKEN`, come i download.
+**Alternative scartate:**
+- `multipart/form-data` con più file: niente avanzamento e niente nuovi
+  tentativi file per file, e Flask lo analizza in memoria o su file temporanei
+  prima di poterlo validare.
+- Caricamento aperto a ogni utente Navidrome: Armony non ha un modello di
+  utenti suo e il server riempirebbe il disco di chiunque abbia un account.
+- Conversione in un formato unico: perde qualità e toglie a chi carica la
+  scelta del formato.
+- Archivi zip: un formato in più da validare e spacchettare, e cartelle e
+  trascinamento coprono lo stesso caso.
+**Conseguenze:** limite di 1 GB per file, quello predefinito di waitress
+(`max_request_body_size`). I file sono di root, come quelli scaricati. Un file
+con estensione sbagliata ma audio valido (un FLAC chiamato `.mp3`) viene
+accettato.
+**Da rivedere se:** si vuole che gli utenti senza codice di accesso carichino
+nella propria parte della libreria (servirebbero cartelle per utente e un
+limite di spazio).
+
 ## 2026-10-08 — Federazione: forma generale
 
 **Contesto:** i server Armony diventano librerie personali da collegare fra

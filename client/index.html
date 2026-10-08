@@ -127,6 +127,9 @@ label.check small{display:block;color:var(--muted)}
 .letter{font:800 1.4rem var(--display);color:var(--accent);margin:22px 0 4px}
 .empty{padding:36px 20px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:16px}
 .empty h3{color:var(--ink)}
+.drop{padding:28px 20px;text-align:center;border:1.5px dashed var(--line);border-radius:16px;transition:border-color .2s,background .2s}
+.drop small{display:block;color:var(--muted);margin-top:4px}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
 .bar{height:6px;background:var(--surface2);border-radius:99px;overflow:hidden;margin-top:8px}
 .bar i{display:block;height:100%;background:var(--accent);transition:width .3s}
 .tag{display:inline-block;font-size:.78rem;padding:2px 9px;border-radius:99px;background:var(--surface2);color:var(--muted);white-space:nowrap}
@@ -231,10 +234,10 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
 
 @media (max-width:860px){
   :root{--player-h:128px}
-  .app{grid-template-columns:1fr}
+  .app{grid-template-columns:minmax(0,1fr)}
   aside{position:sticky;height:auto;z-index:10;background:var(--bg);flex-direction:row;align-items:center;padding:10px 12px;gap:10px;border-right:0;border-bottom:1px solid var(--line);top:env(safe-area-inset-top,0px);overflow:visible}
   .brand{font-size:1.2rem;padding:0}
-  nav{flex-direction:row;overflow-x:auto;scrollbar-width:none}
+  nav{flex-direction:row;overflow-x:auto;scrollbar-width:none;min-width:0}
   nav a{padding:7px 10px;white-space:nowrap;font-size:.92rem}
   nav a span.lbl{display:none}
   nav a.on span.lbl{display:inline}

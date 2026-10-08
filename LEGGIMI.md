@@ -97,6 +97,12 @@ Salva album, playlist o singoli brani sul telefono, nella qualità che preferisc
 - Copertina e metadati inclusi. **SponsorBlock** taglia intro, parti parlate e sponsor dai video musicali.
 - La libreria si aggiorna da sola e i video si guardano dentro l'app.
 
+### Caricamento dal dispositivo
+- In Scarica → **Dal dispositivo** carichi sul server la musica che hai sul telefono o sul computer: file singoli, cartelle intere o trascinandoli nella pagina.
+- Formati: MP3, FLAC, M4A/AAC, Opus, OGG, WAV, AIFF, WMA, WavPack, APE. Le copertine `cover.jpg` e `folder.jpg` vengono caricate insieme all'album.
+- I file arrivano nella cartella scelta (predefinita `Caricati`), con la loro struttura di cartelle. Un file identico già presente non viene ricaricato.
+- Serve il codice di accesso, come per i download. Limite di 1 GB per file. Tieni aperta la pagina finché il caricamento non finisce.
+
 ### Playlist, importazione ed esportazione
 - Playlist condivise con tutti gli utenti del server, con descrizione.
 - **Importa da Spotify**: esporta le tue playlist con Exportify (exportify.app) e importa il CSV. Armony trova i brani che hai già, poi **cerca, scarica e aggiunge da solo i mancanti** appena sono pronti. Funziona anche con M3U e JSON.
