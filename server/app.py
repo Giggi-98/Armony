@@ -19,7 +19,10 @@ Armony - server di supporto.
                         (stesso permesso "delete": «Modifica ed eliminazione»); i file non si spostano
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
   /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi;
-                        /api/live/beat è il battito dei client con hb=1 (capacità "livehb")
+                        /api/live/beat è il battito dei client con hb=1 (capacità "livehb").
+                        Sullo stesso canale arrivano a tutti gli utenti "presence" (chi ascolta cosa sul server) e
+                        "activity" (download, caricamenti, playlist pubbliche, Jam); /api/live/privacy li spegne
+                        per il proprio utente (capacità "presenza")
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download");
                         /api/jobs?grouped=1 riunisce i brani di un'importazione in un gruppo con l'avanzamento
   /api/discografia      tutta la discografia di un artista e un suo album, da Deezer (permesso "download")
@@ -29,6 +32,7 @@ Armony - server di supporto.
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
                         aggiornamento la esegue l'host (deploy/armony-update.sh), non il container
 """
+import collections
 import hashlib
 import ipaddress
 import sqlite3
@@ -78,7 +82,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "presenza"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
@@ -420,6 +424,16 @@ def proxy(p):
     except requests.RequestException:
         return jsonify(error="Il server musicale non risponde"), 502
     out = {k: v for k, v in r.headers.items() if k.lower() in PASS_RESP}
+    m = p.rsplit("/", 1)[-1].removesuffix(".view")
+    if prefix == "rest" and m in ("createPlaylist", "updatePlaylist") and r.status_code == 200:
+        # risposta piccola: letta intera per sapere se è andata, poi l'attività in un thread a parte
+        body = r.content
+        q = urllib.parse.parse_qs(request.query_string.decode(errors="replace"))
+        if request.method == "POST" and "form" in (request.content_type or ""):
+            for k, v in urllib.parse.parse_qs(request.get_data(as_text=True)).items():
+                q.setdefault(k, []).extend(v)
+        threading.Thread(target=pl_attivita, args=(m, q, body), daemon=True).start()
+        return Response(body, status=r.status_code, headers=out)
     return Response(stream_with_context(r.iter_content(64 * 1024)), status=r.status_code,
                     headers=out, direct_passthrough=True)
 
@@ -464,10 +478,17 @@ def jam_open(rid):
     with cond:
         if rid in rooms and rooms[rid]["host"] != host:
             abort(409)
+        new = rid not in rooms
         rooms[rid] = dict(id=rid, host=host, name=str(d.get("name", "Jam"))[:60],
                           hostName=str(d.get("hostName", ""))[:40], visible=bool(d.get("visible")),
                           ip=request.remote_addr, created=time.time(), seen=time.time(),
                           queues=rooms.get(rid, {}).get("queues", {}))
+    # il server non conosce il segreto (sta dopo il # del link): annuncia al più il nome di una Jam visibile
+    who = identity() if new and request.headers.get("X-Token") else None
+    if who:
+        vis = bool(d.get("visible"))
+        attivita(who["user"], "jam", f"ha aperto la Jam «{str(d.get('name', 'Jam'))[:60]}»" if vis else "ha avviato una Jam",
+                 {"amici": 1} if vis else None)
     return jsonify(ok=True)
 
 
@@ -652,6 +673,7 @@ def prefs_put():
         return jsonify(error="Preferenze troppo grandi"), 400
     db.run("INSERT INTO prefs VALUES (?, ?, ?) ON CONFLICT(user) DO UPDATE SET data = excluded.data, "
            "updated = excluded.updated WHERE excluded.updated > prefs.updated", u, data, float(d["updated"]))
+    pcache.pop(u, None)  # il nome da mostrare agli altri (nick) può essere cambiato
     return prefs_get()
 
 
@@ -704,8 +726,15 @@ def live_stream():
                 lstates.get(u, {}).pop(dev, None)  # lo stato era della sessione di prima
         lconns.setdefault(u, {})[cid] = me
         others = {c["device"]: c["name"] for c in lconns[u].values() if c["device"] != dev}
-        hello = json.dumps({"type": "hello", "devices": [{"device": d, "name": n} for d, n in others.items()],
-                            "states": [s for d, s in lstates.get(u, {}).items() if d != dev]})
+        hello = {"type": "hello", "devices": [{"device": d, "name": n} for d, n in others.items()],
+                 "states": [s for d, s in lstates.get(u, {}).items() if d != dev]}
+    if old and hb:
+        pres_gone(u, dev)
+    # presenza e attività di tutto il server: chi si collega vede subito chi sta ascoltando
+    with alock:
+        recent = [act_pub(a) for a in acts]
+    hello = json.dumps({**hello, "presence": pres_all(), "activity": [a for a in recent if pres_who(a["user"])[0]],
+                        "share": pres_who(u)[0], "now": time.time()})
     if not old or hb:  # dopo un fantasma "join" dice agli altri di dimenticare lo stato vecchio
         live_put(u, {"type": "join", "device": dev, "name": name}, skip=dev)
 
@@ -730,6 +759,7 @@ def live_stream():
                     lstates.get(u, {}).pop(dev, None)
             if gone:
                 live_put(u, {"type": "gone", "device": dev})
+                pres_gone(u, dev)
 
     return Response(stream_with_context(gen()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -760,6 +790,7 @@ def live_state():
     with llock:
         lstates.setdefault(u, {})[dev] = st
     live_put(u, {"type": "state", "state": st}, skip=dev)
+    pres_update(u, st)
     return jsonify(ok=True)
 
 
@@ -779,6 +810,153 @@ def live_cmd():
         value = None
     live_put(u, {"type": "cmd", "cmd": cmd, "value": value, "from": str(d.get("from") or "")[:40]}, only=to)
     return jsonify(ok=True)
+
+
+# ------------------------------------------------------------------ presenza e attività: chi ascolta cosa, su tutto il server
+# Niente canale nuovo: ogni dispositivo collegato tiene già un thread per /api/live. A tutti gli utenti collegati
+# arriva {"type":"presence"} quando qualcuno cambia brano, mette play o pausa o salta (non a ogni pubblicazione)
+# e {"type":"activity"} per download finiti, caricamenti, playlist pubbliche e Jam. Chi spegne "Mostra agli altri
+# cosa ascolto" (/api/live/privacy) non compare: lo filtra il server, non il client di chi guarda.
+PRES_TRACK = ("id", "title", "artist", "album", "albumId", "artistId", "coverArt", "duration", "serverUrl")
+PRES_JUMP = 8  # secondi di scarto dalla posizione attesa che contano come un salto
+psent = {}     # (utente, dispositivo) -> (brano, suona, posizione, istante) dell'ultima presenza inoltrata
+acts = collections.deque(maxlen=50)  # attività recenti, solo in memoria
+alock = threading.Lock()
+pcache = {}    # utente -> (condivide, nome da mostrare, istante della lettura)
+
+
+def pres_who(u):
+    # (condivide?, nome da mostrare): il nome è il "nick" delle preferenze, se c'è
+    c = pcache.get(u)
+    if c and time.time() - c[2] < 60:
+        return c[0], c[1]
+    hide = db.one("SELECT value FROM settings WHERE key = ?", "nascondi:" + u)
+    r = db.one("SELECT data FROM prefs WHERE user = ?", u)
+    try:
+        nick = str((json.loads(r["data"]) if r else {}).get("nick") or "").strip()[:30]
+    except (ValueError, AttributeError):
+        nick = ""
+    pcache[u] = (not hide, nick or u, time.time())
+    return pcache[u][0], pcache[u][1]
+
+
+def pres_entry(u, st, now=None):
+    # la posizione è portata ad "adesso": chi riceve non deve conoscere l'orologio del server
+    now = now or time.time()
+    t = st["track"] if isinstance(st.get("track"), dict) else {}
+    rate = st.get("rate") if isinstance(st.get("rate"), (int, float)) else 1
+    pos = (st.get("position") if isinstance(st.get("position"), (int, float)) else 0) + ((now - st["at"]) * rate if st.get("playing") else 0)
+    return {"user": u, "name": pres_who(u)[1], "device": st["device"], "devName": st.get("name"), "playing": bool(st.get("playing")),
+            "position": round(pos, 1), "duration": st.get("duration") or t.get("duration") or 0, "rate": rate,
+            "track": {k: t[k] for k in PRES_TRACK if k in t}, "since": round(now - st["at"])}
+
+
+def pres_all():
+    with llock:
+        items = [(u, dict(st)) for u, d in lstates.items() for st in d.values() if isinstance(st.get("track"), dict)]
+    return [pres_entry(u, st) for u, st in items if pres_who(u)[0]]
+
+
+def pres_put(msg):
+    # a tutti gli utenti collegati, non solo ai dispositivi di chi suona
+    with llock:
+        users = list(lconns)
+    for u in users:
+        live_put(u, msg)
+
+
+def pres_update(u, st):
+    t = st.get("track") if isinstance(st.get("track"), dict) else {}
+    tid, playing, now = t.get("id"), bool(st.get("playing")), time.time()
+    pos = st.get("position") if isinstance(st.get("position"), (int, float)) else 0
+    last = psent.get((u, st["device"]))
+    if last and last[0] == tid and last[1] == playing:
+        rate = st.get("rate") if isinstance(st.get("rate"), (int, float)) else 1
+        if abs(last[2] + ((now - last[3]) * rate if playing else 0) - pos) < PRES_JUMP:
+            return  # stesso brano, stesso stato, nessun salto: gli altri stimano l'avanzamento da soli
+    psent[(u, st["device"])] = (tid, playing, pos, now)
+    if tid and pres_who(u)[0]:
+        pres_put({"type": "presence", "entry": pres_entry(u, st, now)})
+
+
+def pres_gone(u, dev):
+    if psent.pop((u, dev), None) and pres_who(u)[0]:
+        pres_put({"type": "presence", "gone": {"user": u, "device": dev}})
+
+
+def act_pub(a):
+    return {k: v for k, v in a.items() if k != "merge"}
+
+
+def attivita(u, kind, text, link=None, merge=None, many=None, inc=1, window=600):
+    """Un'attività per tutti. Con merge, quelle dello stesso tipo a breve distanza diventano una sola
+    ("ha caricato 12 brani"): stesso id, il client la sostituisce invece di aggiungerne una."""
+    if not u:
+        return  # l'accesso di emergenza non è un utente
+    share, name = pres_who(u)
+    if not share:
+        return
+    now = time.time()
+    with alock:
+        a = next((x for x in acts if merge and x["user"] == u and x["kind"] == kind and x["merge"] == merge and now - x["at"] < window), None)
+        if a:
+            acts.remove(a)
+            a.update(n=a["n"] + inc, at=now, link=link or a["link"], name=name)
+        else:
+            a = {"id": uuid.uuid4().hex[:10], "user": u, "name": name, "kind": kind, "link": link, "at": now, "n": inc, "merge": merge}
+        a["text"] = many.replace("{n}", str(a["n"])) if many and a["n"] > 1 else text
+        acts.appendleft(a)
+        out = act_pub(a)
+    pres_put({"type": "activity", "item": out})
+
+
+@app.put("/api/live/privacy")
+def live_privacy():
+    u, d = user_or_400(), request.get_json(silent=True) or {}
+    share = d.get("share") is not False
+    if share:
+        db.run("DELETE FROM settings WHERE key = ?", "nascondi:" + u)
+    else:
+        db.run("INSERT OR REPLACE INTO settings VALUES (?, '1')", "nascondi:" + u)
+    pcache.pop(u, None)
+    if share:
+        for e in pres_all():
+            if e["user"] == u:
+                pres_put({"type": "presence", "entry": e})
+    else:
+        with llock:
+            devs = list(lstates.get(u, {}))
+        for dev in devs:
+            pres_put({"type": "presence", "gone": {"user": u, "device": dev}})
+        with alock:
+            for a in [x for x in acts if x["user"] == u]:
+                acts.remove(a)
+        pres_put({"type": "activity", "hide": u})
+    return jsonify(share=share)
+
+
+def pl_attivita(m, q, body):
+    # playlist: solo quelle pubbliche (le private restano private); nome e visibilità li chiede a Navidrome come l'utente
+    try:
+        r = json.loads(body)["subsonic-response"]
+        if r.get("status") != "ok":
+            return
+        pid = (q.get("playlistId") or [None])[0] or (r.get("playlist") or {}).get("id")
+        auth = {k: q[k][0] for k in ("u", "t", "s", "p", "v", "c") if q.get(k)}
+        pl = http.get(f"{NAVIDROME_URL}/rest/getPlaylist", params=dict(auth, id=pid, f="json"), timeout=10).json()["subsonic-response"]["playlist"]
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return
+    if not pl.get("public"):
+        return
+    u, name, link = auth.get("u"), pl.get("name") or "Playlist", {"playlist": pl.get("id")}
+    added = len(q.get("songIdToAdd") or [])
+    if m == "createPlaylist" and not q.get("playlistId"):
+        attivita(u, "playlist", f"ha creato la playlist «{name}»", link)
+    elif (q.get("public") or [""])[0] == "true":
+        attivita(u, "playlist", f"ha condiviso la playlist «{name}»", link, merge="pub:" + pl["id"])
+    elif added:
+        attivita(u, "playlist", f"ha aggiunto {'un brano' if added == 1 else f'{added} brani'} a «{name}»", link, merge="add:" + pl["id"],
+                 many=f"ha aggiunto {{n}} brani a «{name}»", inc=added)
 
 
 # ------------------------------------------------------------------ download
@@ -889,6 +1067,10 @@ def run_job(jid, j):
         with yt_dlp.YoutubeDL(opts) as y:
             code = y.download([j["url"]])
         jupdate(jid, status="completato" if code == 0 else "completato con errori", progress=100, finished=time.time())
+        t = jobs[jid].get("title") or "un brano"
+        attivita(jobs[jid].get("by"), "download", f"ha scaricato «{t}»" if audio else f"ha scaricato il video «{t}»",
+                 {"album": meta["album"], "artist": meta.get("artist")} if audio and meta.get("album") else None,
+                 merge="dl" if audio else "video", many="ha scaricato {n} brani" if audio else "ha scaricato {n} video")
     except Exception as e:  # noqa: BLE001
         jupdate(jid, status="errore", error=str(e)[:400], finished=time.time())
 
@@ -984,6 +1166,10 @@ def run_brano(jid, j):
         dest = metadati.sistema(got, base, m)
         jupdate(jid, status="completato", progress=100, finished=time.time(), path=os.path.relpath(dest, MUSIC_DIR),
                 album=m.get("album"), track_no=m.get("track"))
+        label = jobs[jid].get("label")
+        attivita(jobs[jid].get("by"), "download", f"ha scaricato «{title}»" + (f" di {artists[0]}" if artists else ""),
+                 {"album": m["album"], "artist": m.get("albumartist") or (artists or [None])[0]} if m.get("album") else None,
+                 merge=jobs[jid].get("batch") or "dl", many="ha scaricato {n} brani" + (f" di «{label}»" if label else ""))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1121,6 +1307,14 @@ def upload():
         base, dot, e = stem.rpartition(".")
         dest, n = f"{base} ({n}).{e}", n + 1
     os.replace(tmp, dest)
+    if ext in UPLOAD_AUDIO:
+        try:
+            tg = mutagen.File(dest, easy=True) or {}
+            title, album, artist = ((tg.get(k) or [None])[0] for k in ("title", "album", "artist"))
+        except Exception:  # noqa: BLE001 — senza tag basta il nome del file
+            title = album = artist = None
+        attivita(g.who["user"], "upload", f"ha caricato «{title or name.rsplit('.', 1)[0]}»", {"album": album, "artist": artist} if album else None,
+                 merge="up", many="ha caricato {n} brani")
     return jsonify(status="caricato", path=os.path.relpath(dest, MUSIC_DIR), size=size), 201
 
 

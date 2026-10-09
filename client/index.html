@@ -892,6 +892,91 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   /* maniglia: dice che è un foglio, come nel resto del telefono */
   dialog.sheet::before{content:"";position:absolute;top:8px;left:50%;width:36px;height:4px;margin-left:-18px;border-radius:99px;background:var(--line)}
 }
+/* === P: presenza, chi ascolta cosa sul server (Presence in armony.js) === */
+.pav{--sz:32px;width:var(--sz);height:var(--sz);flex:none;border-radius:50%;display:inline-grid;place-items:center;background:var(--pav);color:#fff;font:700 calc(var(--sz) * .45)/1 var(--body)}
+.pav.xs{--sz:16px}.pav.s{--sz:24px}.pav.m{--sz:44px}.pav.l{--sz:56px}
+/* il piccolo equalizzatore di chi suona: le stesse barre della riga in riproduzione */
+.peq{display:none;width:11px;height:10px;margin-left:6px;flex:none;background:linear-gradient(var(--accent-text) 0 0) 0 100%/3px 55% no-repeat,linear-gradient(var(--accent-text) 0 0) 4px 100%/3px 100% no-repeat,linear-gradient(var(--accent-text) 0 0) 8px 100%/3px 35% no-repeat}
+.peq.on{display:inline-block;animation:eqbars .95s ease-in-out infinite alternate}
+.pbar{display:block;height:3px;border-radius:2px;background:var(--surface2);overflow:hidden;margin-top:var(--s2)}
+.pbar i{display:block;height:100%;background:var(--accent);transform-origin:left;transform:scaleX(0);transition:transform 1s linear}
+.paused .pbar i{background:var(--muted)}
+.pdot{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--bg)}
+dialog.sheet .mi .pdot{position:static;margin-left:auto;box-shadow:none}
+/* barra laterale: chi ascolta, sopra le playlist */
+#sidePres{display:flex;flex-direction:column;margin:0 -6px;padding:var(--s3) 6px 0;border-top:1px solid var(--line)}
+#sidePres h3{margin:0 12px var(--s2);font-size:var(--fs-small);color:var(--muted)}
+#sidePres .plist{display:flex;flex-direction:column;gap:2px;max-height:32vh;overflow-y:auto;scrollbar-width:thin}
+.prow{display:flex;align-items:center;border-radius:var(--r-s)}
+.prow .pgo{flex:1;min-width:0;display:flex;align-items:center;gap:var(--s3);padding:6px 8px;border:0;background:none;color:var(--ink);text-align:left;cursor:pointer;border-radius:var(--r-s)}
+.prow .grow{min-width:0}
+.prow b{display:flex;align-items:center;font-weight:600;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow small{display:block;color:var(--muted);font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow.paused .pav{opacity:.55}
+.prow .icon-btn{width:32px;height:32px}
+.prow .icon-btn svg{width:18px;height:18px}
+/* telefono: le "storie" in cima alla Home */
+.stories{display:flex;gap:var(--s2);overflow-x:auto;scrollbar-width:none;margin:calc(-1 * var(--s2)) calc(-1 * var(--pad-x)) var(--s4);padding:var(--s2) var(--pad-x) var(--s1);scroll-snap-type:x proximity;overscroll-behavior-x:contain}
+.stories::-webkit-scrollbar{display:none}
+.story{flex:none;width:76px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:0;border:0;background:none;color:var(--ink);cursor:pointer;scroll-snap-align:start;text-align:center;min-width:0}
+.story .ring{position:relative;padding:4px;border-radius:50%;background:var(--line);margin-bottom:var(--s1);transition:transform var(--t-tap) var(--ease-out)}
+.story.on .ring{background:var(--accent)}
+.story .ring .pav{box-shadow:0 0 0 2px var(--bg)}
+.story:not(.on) .ring .pav{opacity:.6}
+.story .scov{position:absolute;right:-3px;bottom:-3px;width:24px;height:24px;border-radius:6px;overflow:hidden;background:var(--surface2);box-shadow:0 0 0 2px var(--bg)}
+.story .scov img{width:100%;height:100%;object-fit:cover}
+.story b,.story small{display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.story b{font-size:.8rem;font-weight:600;line-height:1.25}
+.story small{font-size:.72rem;color:var(--muted);line-height:1.25}
+.story:active .ring{transform:scale(.94)}
+@media (min-width:861px){.stories{display:none!important}}
+@media (max-width:860px){#sidePres{display:none!important}}
+/* pagina Amici: chi ascolta ora e il diario delle attività */
+.pnow{display:flex;flex-direction:column;gap:var(--s2)}
+.pnow-row{display:flex;align-items:center;gap:var(--s3);padding:var(--s3);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l)}
+.pnow-row.empty{display:block;padding:var(--s6) var(--s5);border:0}
+.pnow-row .pgo{flex:1;min-width:0;display:flex;gap:var(--s3);align-items:flex-start;border:0;background:none;padding:0;text-align:left;color:inherit;cursor:pointer}
+.pnow-row .pgo>.grow{flex:1;min-width:0}
+.pnow-row .pgo>.grow>b{display:flex;align-items:center;font-weight:700;white-space:nowrap;overflow:hidden}
+.pnow-row .pgo>.grow>b small{font-weight:500;color:var(--muted);font-size:var(--fs-small);overflow:hidden;text-overflow:ellipsis}
+.pnow-row.paused .pav{opacity:.6}
+.ptrack{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s1);min-width:0}
+.ptrack .pic,dialog.sheet .pcard .pic{width:40px;height:40px;border-radius:4px;overflow:hidden;background:var(--surface2);flex:none}
+.ptrack img,dialog.sheet .pcard img{width:100%;height:100%;object-fit:cover}
+.ptrack .grow,dialog.sheet .pcard .grow{flex:1;min-width:0}
+.ptrack b,.ptrack small,dialog.sheet .pcard b,dialog.sheet .pcard small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptrack b{font-weight:500}
+.ptrack small,dialog.sheet .pcard small{color:var(--muted);font-size:var(--fs-small)}
+dialog.sheet .pcard{display:flex;gap:var(--s3);align-items:center;padding:var(--s2) 14px var(--s3)}
+dialog.sheet .pcard .pic{width:56px;height:56px;border-radius:var(--r-s)}
+.pfeed{display:flex;flex-direction:column}
+.pact{display:flex;align-items:center;gap:var(--s3);min-height:56px;padding:var(--s2);border-bottom:1px solid var(--line);border-radius:var(--r-s)}
+.pact.go{cursor:pointer}
+.pact .grow{flex:1;min-width:0}
+.pact .grow>span{display:block;overflow-wrap:anywhere;line-height:1.35}
+.pact small{display:block;color:var(--muted);font-size:var(--fs-small)}
+.pact>svg{width:18px;height:18px;color:var(--muted);flex:none}
+/* segni sui contenuti: qualcuno sul server sta ascoltando proprio questo */
+.pmark{display:inline-flex;align-items:center;gap:4px;margin-right:6px;padding:0 7px 0 1px;border-radius:99px;background:var(--accent-soft);color:var(--ink);font-size:.74rem;font-weight:600;line-height:18px;vertical-align:1px;animation:pin .3s var(--ease-out)}
+.pmark .pav+.pav,.pmark-h .pav+.pav{margin-left:-8px;box-shadow:0 0 0 2px var(--accent-soft)}
+.pmark-h{display:inline-flex;align-items:center;gap:var(--s2);max-width:100%;margin-top:var(--s3);padding:4px 14px 4px 4px;border:0;border-radius:99px;background:var(--accent-soft);color:var(--ink);font:inherit;font-size:var(--fs-small);cursor:pointer;animation:pin .3s var(--ease-out)}
+.pmark-h>span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pmark-h .peq{margin:0}
+@keyframes pin{from{opacity:0;transform:scale(.92)}}
+@media (hover:hover) and (pointer:fine){
+  .prow .pgo:hover,.pact.go:hover{background:var(--surface2)}
+  .prow .icon-btn:hover{color:var(--ink)}
+  .pnow-row .pgo:hover .ptrack b{text-decoration:underline}
+  .pmark-h:hover{background:color-mix(in srgb,var(--accent) 30%,var(--accent-soft))}
+}
+@media (max-width:420px){.pnow-row .btn{font-size:0;gap:0;padding:0;width:var(--hit);min-height:var(--hit)}.pnow-row .btn svg{width:20px;height:20px}}
+@media (prefers-reduced-motion:reduce){
+  .peq.on{animation:none}
+  .pbar i,.story .ring{transition:none}
+  .pmark,.pmark-h{animation:pfade .2s ease}
+  @keyframes pfade{from{opacity:0}}
+}
+/* === fine P === */
 </style>
 </head>
 <body>
@@ -900,6 +985,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   <aside>
     <a class="brand" href="#/home"><i></i>armony</a>
     <nav id="nav"></nav>
+    <div id="sidePres" hidden></div>
     <div id="sidePl"></div>
     <button class="ctx" id="ctxBtn" aria-haspopup="dialog"></button>
   </aside>

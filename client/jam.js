@@ -210,7 +210,9 @@ const Jam = {
     const key = secret ? await JC.aesFrom(secret, 'armony-signal', this.room.id) : null;
     if (this.room.base) {
       try {
-        const r = await fetch(`${this.room.base}/api/jam/${this.room.id}/open`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: this.me, name: this.room.name, hostName: this.name(), visible }) });
+        // la sessione (se la Jam sta sul server in uso) serve solo all'attività "ha avviato una Jam": il segreto resta nel link
+        const tok = srv()?.session && absUrl(srv().url) === this.room.base ? { 'X-Token': srv().session } : {};
+        const r = await fetch(`${this.room.base}/api/jam/${this.room.id}/open`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...tok }, body: JSON.stringify({ host: this.me, name: this.room.name, hostName: this.name(), visible }) });
         if (!r.ok) throw 0;
         this.sig = new Signal(this.room.base, this.room.id, this.me, key);
         this.sig.loop((from, m, enc) => this.hostSignal(from, m, enc), () => toast('Il server ha chiuso la Jam.'));
