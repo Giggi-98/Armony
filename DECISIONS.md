@@ -27,6 +27,36 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-09 — Nuova disposizione: un solo carattere, AutoAnimate nel repo, tempo reale a intervalli
+
+**Contesto:** richiesta di rifare disposizione ed elenchi in stile Spotify:
+Cerca vuota, poco spazio usato sul computer, interruttori e scelte fuori stile,
+playlist che non mostrano i brani appena aggiunti o scaricati, animazioni e
+copertine all'altezza.
+**Scelta:** Figtree per tutto il testo, gerarchia fatta da peso e grandezza
+(`--fs-*`); Bricolage Grotesque resta solo nel marchio. Ribalta in parte la voce
+«Grafica: tavolozza, caratteri e componenti a token» del 2026-10-08, che teneva
+i due caratteri insieme nei titoli: due famiglie nella stessa schermata
+facevano sembrare le pagine di app diverse. Tre misure di copertina (scheda,
+intestazione, miniatura della riga) e un solo modello per pagina: intestazione
+con la fascia del colore della copertina, barra azioni con ▶ ambra e icone, il
+resto nel foglio ⋯. Riquadri colorati con una tavolozza unica scelta dal nome.
+Interruttori per le impostazioni, caselle solo per le scelte multiple.
+Animazioni delle liste con AutoAnimate 0.10.0 (MIT, 3 kB) copiato in
+`client/vendor/` e caricato come modulo; dialoghi con `@starting-style`.
+Playlist e album aperti si aggiornano da soli: subito quando il cambiamento
+parte da questo dispositivo (`api()` emette `playlists`/`libreria`), altrimenti
+con un controllo ogni 20 secondi; i brani nuovi entrano con un breve alone ambra.
+**Alternative scartate:** Motion One o GSAP (più pesanti, servono per
+coreografie che qui non ci sono); caricare AutoAnimate da CDN (l'app Android e
+l'offline lo perderebbero); avvisare le pagine aperte via SSE da Navidrome
+(Navidrome non emette eventi sulle playlist, servirebbe un osservatore sul
+server per un guadagno di qualche secondo).
+**Conseguenze:** fino a 20 s di ritardo per i cambiamenti fatti da altri
+dispositivi o dai download; un file di terzi nel repo da aggiornare a mano.
+**Da rivedere se:** Navidrome espone eventi sulle playlist, o se servono
+animazioni coordinate fra più elementi che AutoAnimate non sa fare.
+
 ## 2026-10-08 — Modifica dei brani e copertine: tag scritti nel file, file fermi, copertine solo da Deezer o caricate
 
 **Contesto:** cambiare titolo, artisti, album, anno, generi, traccia e scegliere

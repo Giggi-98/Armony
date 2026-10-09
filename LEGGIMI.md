@@ -121,6 +121,7 @@ Dal menu di un brano ("Elimina dal server") o dalla pagina dell'album ("Elimina 
 ### Playlist, importazione ed esportazione
 - Playlist condivise con tutti gli utenti del server, con descrizione.
 - **Importa da Spotify**: esporta le tue playlist con Exportify (exportify.app) e importa i CSV, anche tutti insieme: ogni file diventa una playlist (se esiste già, vi si aggiungono solo i brani mancanti, quindi si può rifare). Armony riconosce i brani che hai già da titolo, artisti e durata, poi **cerca, scarica e aggiunge da solo i mancanti** appena sono pronti, una volta sola anche se stanno in più playlist. I brani scaricati arrivano già ordinati: titolo, tutti gli artisti, album, artista dell'album, data d'uscita, numero di traccia, generi, etichetta e copertina (dal CSV, completati con Deezer), in `Spotify/<artista>/<album>/<NN - titolo>`; la ricerca online guarda i primi risultati e sceglie il migliore (durata più vicina, audio ufficiale di YouTube Music, niente live o cover non richiesti), e scarica comunque il migliore anche se la durata non coincide al secondo. Funziona anche con M3U e JSON.
+- **In tempo reale**: con una playlist o un album aperti, i brani appena aggiunti o scaricati compaiono da soli (subito se li aggiungi tu, entro 20 secondi se arrivano da un altro dispositivo o da un download).
 - Esporta in M3U, JSON o CSV.
 - **Link di condivisione** di 30 giorni per album, playlist o brani, ascoltabili anche da chi non ha un account.
 
@@ -131,6 +132,8 @@ Minuti di ascolto, artisti, brani, album e generi preferiti, giorni consecutivi 
 Si installa come app ("Aggiungi a schermata Home"). Controlli dalla schermata di blocco e dalle cuffie, tema chiaro o scuro, scorciatoie da tastiera (premi `?`). Il backup delle impostazioni configura il telefono di un amico in dieci secondi.
 
 Sul telefono le sezioni principali sono in basso, sotto il lettore; le altre sono in "Altro". Il server in uso e la qualità si cambiano dal pulsante in alto (in fondo alla barra laterale sul computer). Le impostazioni sono divise in gruppi richiudibili, con una casella di ricerca: scrivi "tema" o "qualità" e restano solo le voci che ti servono.
+
+La **Home** si apre con l'accesso rapido agli album che ascolti, i mix "Fatti per te" e gli scaffali (ascoltati di recente, aggiunti di recente, da riscoprire); "Mostra tutto" porta all'elenco completo. **Cerca** mostra le ricerche recenti e i riquadri colorati per raccolte, generi e decenni; mentre scrivi compaiono il risultato migliore, i brani, gli artisti e gli album. Sul computer la barra laterale elenca anche le tue playlist. Ogni album, artista e playlist ha la stessa intestazione: copertina grande, il colore della copertina sullo sfondo, ▶ per ascoltare e le altre azioni nel tasto ⋯.
 
 Se nel sistema è attivo «Riduci movimento», Armony lo rispetta: niente dischi che girano né elementi in volo, solo dissolvenze.
 

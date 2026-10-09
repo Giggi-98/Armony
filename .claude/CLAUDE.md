@@ -184,7 +184,7 @@ elementi sovrapposti su schermo da telefono, stati vuoti mai visti. Apri l'app
 in entrambi i temi e a larghezza telefono (l'app si usa soprattutto da lì).
 Per la Jam servono due schede/contesti collegati.
 
-L'app ha già un suo linguaggio visivo (Bricolage Grotesque + Figtree, stili in
+L'app ha già un suo linguaggio visivo (Figtree per tutto, Bricolage solo nel marchio; stili in
 `index.html`): conformati. Le skill di design servono come spunto, non per
 imporre un altro stile.
 
