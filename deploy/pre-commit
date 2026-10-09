@@ -1,7 +1,7 @@
 #!/bin/sh
 # Armony: il repository è pubblico. Blocca i commit di segreti e dati.
 # Attivo con: git config core.hooksPath deploy  (lo fa install-updater.sh)
-bad=$(git diff --cached --name-only --diff-filter=AM | grep -E '(^|/)\.env$|(^|/)\.env\.[^e]|^(musica|video|data|updates)/')
+bad=$(git diff --cached --name-only --diff-filter=AM | grep -E '(^|/)\.env$|(^|/)\.env\.[^e]|^(musica|video|federati|data|updates)/')
 if [ -n "$bad" ]; then
   echo "Commit bloccato: questi file non devono finire su GitHub:" >&2
   echo "$bad" | sed 's/^/  /' >&2

@@ -37,6 +37,22 @@ MIGRATIONS = [
     CREATE TABLE invites (code TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL, by TEXT,
                           used_by TEXT, used_at REAL, revoked INTEGER NOT NULL DEFAULT 0);
     """,
+    # 5: federazione. Nodi collegati (chiave fissata, stato), inviti fra server (solo l'hash del segreto),
+    # il mio catalogo con le versioni per riga (i vicini chiedono le differenze), la cache dei cataloghi
+    # dei vicini per la ricerca, le impronte sha256 dei miei file
+    """
+    CREATE TABLE fed_nodes (id TEXT PRIMARY KEY, pub TEXT NOT NULL, name TEXT NOT NULL, owner TEXT, url TEXT NOT NULL,
+                            state TEXT NOT NULL, created REAL NOT NULL, seen REAL, app TEXT, proto INTEGER,
+                            ver INTEGER NOT NULL DEFAULT 0, songs INTEGER NOT NULL DEFAULT 0, albums INTEGER NOT NULL DEFAULT 0,
+                            transitive INTEGER NOT NULL DEFAULT 0, error TEXT, synced REAL);
+    CREATE TABLE fed_invites (hash TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL, used_by TEXT);
+    CREATE TABLE fed_mine (id TEXT PRIMARY KEY, ver INTEGER NOT NULL, gone INTEGER NOT NULL DEFAULT 0, cover TEXT, data TEXT NOT NULL);
+    CREATE INDEX fed_mine_ver ON fed_mine(ver);
+    CREATE TABLE fed_catalog (node TEXT NOT NULL, id TEXT NOT NULL, q TEXT NOT NULL, qa TEXT NOT NULL, alb TEXT NOT NULL,
+                              data TEXT NOT NULL, PRIMARY KEY (node, id));
+    CREATE INDEX fed_catalog_alb ON fed_catalog(node, alb);
+    CREATE TABLE fed_hash (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime REAL NOT NULL, sha TEXT NOT NULL);
+    """,
 ]
 
 _local = threading.local()

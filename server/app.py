@@ -28,6 +28,9 @@ Armony - server di supporto.
   /api/spazio           disco del server: totale, occupato, libero, peso di musica e video
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
                         aggiornamento la esegue l'host (deploy/armony-update.sh), non il container
+  /fed/hello, /fed/v1/*  federazione fra server (federazione.py): richieste firmate Ed25519 dai nodi collegati
+  /api/fed/*            collegamenti fra server, solo amministratori (federazione.py)
+  /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download"
 """
 import hashlib
 import ipaddress
@@ -40,6 +43,7 @@ import secrets
 import shutil
 import socket
 import struct
+import sys
 import threading
 import time
 import urllib.parse
@@ -52,6 +56,7 @@ from flask import Flask, Response, abort, g, jsonify, request, send_from_directo
 from yt_dlp.postprocessor.metadataparser import MetadataParserPP
 
 import db
+import federazione
 import metadati
 
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
@@ -78,9 +83,9 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
-RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -789,7 +794,7 @@ jq = queue.Queue()
 COOKIES = os.path.join(os.path.dirname(db.PATH), "youtube-cookies.txt")
 
 
-JOB_KEYS = ("url", "mode", "format", "quality", "playlist", "folder", "sponsorblock", "meta", "track")
+JOB_KEYS = ("url", "mode", "format", "quality", "playlist", "folder", "sponsorblock", "meta", "track", "fed")
 DONE = ("completato", "completato con errori", "errore")
 
 
@@ -820,7 +825,7 @@ def worker():
     while True:
         jid, j = jq.get()
         try:
-            (run_brano if j.get("track") else run_job)(jid, j)
+            (run_brano if j.get("track") else federazione.run_copy if j.get("fed") else run_job)(jid, j)
         except Exception as e:  # noqa: BLE001 — un lavoro rotto non deve fermare la coda
             jupdate(jid, status="errore", error=str(e)[:400], finished=time.time())
 
@@ -1551,6 +1556,10 @@ def delete_video(p):
     return jsonify(ok=True)
 
 
+# federazione fra server: rotte /fed e /api/fed, /api/rete (usano da qui http, credenziali Navidrome, lavori)
+federazione.init(app, sys.modules[__name__])
+
+
 # ------------------------------------------------------------------ client
 @app.get("/")
 def index():
@@ -1573,6 +1582,7 @@ if __name__ == "__main__":
         threading.Thread(target=worker, daemon=True).start()
     resume_jobs()
     threading.Thread(target=gc_rooms, daemon=True).start()
+    federazione.start()
     if MULTICAST:
         threading.Thread(target=mcast_sender, daemon=True).start()
         threading.Thread(target=mcast_listener, daemon=True).start()

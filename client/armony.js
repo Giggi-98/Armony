@@ -220,8 +220,17 @@ const norm = (x, sid = S.active) => ({
 });
 // coverBust: dopo aver cambiato una copertina, l'indirizzo cambia e il browser non mostra quella vecchia dalla cache
 let coverBust = 0;
-const coverUrl = (coverArt, size = 300, sid) => { const s = srv(sid); return coverArt && s ? s.local ? Local.cover(coverArt, size) : apiUrl(s, 'getCoverArt', { id: coverArt, size, ...(coverBust ? { v: coverBust } : {}) }) : ''; };
-const streamUrl = (t, q = activeQuality()) => srv(t.serverId)?.local ? Local.stream(t.id) : apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params });
+// brani della rete (server collegati, /api/rete): copertina e audio passano dal mio server Armony, che fa da proxy firmato
+const reteUrl = (s, path, p) => absUrl(s.url) + '/api/rete/' + path + '?' + new URLSearchParams({ ...p, token: s.session || '' });
+const coverUrl = (coverArt, size = 300, sid) => {
+  const s = srv(sid); if (!coverArt || !s) return '';
+  if (s.local) return Local.cover(coverArt, size);
+  if (String(coverArt).startsWith('rete|')) { const [, r, id] = coverArt.split('|'); return reteUrl(s, 'cover', { r, id, size }); }
+  return apiUrl(s, 'getCoverArt', { id: coverArt, size, ...(coverBust ? { v: coverBust } : {}) });
+};
+const streamUrl = (t, q = activeQuality()) => srv(t.serverId)?.local ? Local.stream(t.id)
+  : t.fed ? reteUrl(srv(t.serverId), 'stream', { r: t.fed.r, id: t.fed.id, ...QUALITIES[q].params })
+  : apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params });
 const imgTag = (coverArt, size, sid) => { const u = coverUrl(coverArt, size, sid); return u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : ''; };
 
 /* ================= accesso ad Armony (sessione per utente, permessi dal ruolo Navidrome) ================= */
@@ -334,7 +343,7 @@ const PP = { play: ['M7 4L13.5 8L13.5 16L7 20Z', 'M13.5 8L20 12L20 12L13.5 16Z']
 /* ================= router ================= */
 const NAV = [
   ['home', 'Home', 'home'], ['cerca', 'Cerca', 'search'], ['libreria', 'Libreria', 'lib'], ['playlist', 'Playlist', 'list'],
-  ['preferiti', 'Preferiti', 'heart'], ['jam', 'Jam', 'jam'], ['amici', 'Amici', 'friends'], ['offline', 'Offline', 'offline'],
+  ['preferiti', 'Preferiti', 'heart'], ['jam', 'Jam', 'jam'], ['amici', 'Amici', 'friends'], ['rete', 'Rete', 'globe'], ['offline', 'Offline', 'offline'],
   ['statistiche', 'Statistiche', 'stats'], ['scarica', 'Scarica', 'down'], ['impostazioni', 'Impostazioni', 'gear']
 ];
 const view = $('#view');
@@ -355,7 +364,7 @@ async function route() {
   const fn = {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite
+    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav; Scene.hash = location.hash; Scene.r = r;
   const run = async () => {
@@ -879,8 +888,8 @@ async function vSearch() {
       const ar = arr(r.artist), al = arr(r.album), so = arr(r.song).map(x => norm(x)), V = cleanTxt(v);
       if (!ar.length && !al.length && !so.length) {
         $('#res').innerHTML = `<div class="empty hres"><h3>Nessun risultato per "${esc(v)}"</h3><p>Controlla come l'hai scritto, oppure cercalo online e scaricalo.</p>
-          <a class="btn primary" href="#/scarica/cerca/${encodeURIComponent(v)}">${ic('down')} Cerca "${esc(v)}" online</a></div>`;
-        return;
+          <a class="btn primary" href="#/scarica/cerca/${encodeURIComponent(v)}">${ic('down')} Cerca "${esc(v)}" online</a></div><div id="netRes"></div>`;
+        return netSearch(v, n, q);
       }
       // risultato migliore: l'artista se il nome coincide con la ricerca, altrimenti il primo album, altrimenti il primo brano
       const bestA = ar.find(a => cleanTxt(a.name) === V) || (ar[0] && cleanTxt(ar[0].name).startsWith(V) ? ar[0] : null);
@@ -896,14 +905,82 @@ async function vSearch() {
         ${top.length ? `<section class="hbest-songs"><div class="hsec"><h2>Brani</h2>${so.length > 4 ? `<button class="hsec-more" id="allSongs">Mostra tutti (${so.length})</button>` : ''}</div><div id="songsBox">${songList(top)}</div></section>` : ''}
         </div>
         ${ar.length ? `<div class="hsec"><h2>Artisti</h2></div><div class="hgrid shelf">${ar.map(lArtistCard).join('')}</div>` : ''}
-        ${al.length ? `<div class="hsec"><h2>Album</h2></div>${albumGrid(al, { strip: true })}` : ''}</div>`;
-     
+        ${al.length ? `<div class="hsec"><h2>Album</h2></div>${albumGrid(al, { strip: true })}` : ''}<div id="netRes"></div></div>`;
+      netSearch(v, n, q);
       $('#allSongs')?.addEventListener('click', e => { $('#songsBox').innerHTML = listActions() + songList(so); e.target.remove(); $('#res .hbest-wrap').classList.add('open'); });
     } catch (e) { $('#res').innerHTML = `<p class="sub">${esc(e.message)}</p>`; }
   };
   q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 260); });
   q.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(t); run(); } });
   run();
+}
+/* ---- rete: le librerie dei server collegati, e degli amici degli amici (server/federazione.py) ---- */
+// con "Questo telefono" in uso la rete passa dal server di backup (dlSrv), come i download
+const netOk = () => !!(dlSrv()?.session && dlSrv().me?.caps?.includes('federazione'));
+// un brano di un altro server come brano della coda: suona e si copia tramite il mio server (streamUrl, coverUrl)
+function netTrack(x, nodes) {
+  const own = x.path[x.path.length - 1], o = nodes[own] || {};
+  return { id: 'rete:' + own + ':' + x.id, title: x.title || 'Senza titolo', artist: x.artist || 'Artista sconosciuto', album: x.album || '',
+    duration: x.duration || 0, track: x.track, year: x.year, genre: x.genre, suffix: x.suffix, serverId: dlSrv()?.id,
+    coverArt: x.cover ? `rete|${x.path.join(',')}|${x.id}` : undefined,
+    fed: { id: x.id, r: x.path.join(','), node: o.name || 'Server', owner: o.owner || '', via: x.path.slice(0, -1).map(p => nodes[p]?.name || '…'), off: !!x.offline } };
+}
+// "su Casa di Marco · via Lucia": di chi è il brano e da chi passa
+const netSrc = f => `su ${esc(f.node)}${f.owner ? ` di ${esc(f.owner)}` : ''}${f.via.length ? ` · via ${f.via.map(esc).join(', ')}` : ''}${f.off ? ' · ora non raggiungibile' : ''}`;
+async function netCopy(tracks) {
+  if (!access().download) return toast('La copia nella tua libreria richiede il permesso di download.');
+  let ok = 0;
+  for (const t of tracks) { try { await dlApi('/api/rete/copia', { method: 'POST', body: JSON.stringify({ id: t.fed.id, r: t.fed.r, title: `${t.artist} - ${t.title}` }) }); ok++; } catch (e) { toast(e.message); } }
+  if (ok) toast(ok === 1 ? 'In copia: arriva nella tua libreria fra poco (Scarica → coda).' : `${ok} brani in copia: arrivano nella tua libreria fra poco.`);
+}
+async function netSearch(v, n, q) {
+  const box = $('#netRes'); if (!box || !netOk()) return;
+  box.innerHTML = `<div class="hsec"><h2>Nella rete</h2></div><p class="sub">Cerco nelle librerie collegate…</p>`;
+  let r; try { r = await dlApi('/api/rete/cerca?q=' + encodeURIComponent(v)); } catch { box.innerHTML = ''; return; }
+  if (q.value.trim() !== v || stale(n) || !box.isConnected) return;
+  const libs = Object.keys(r.nodes).length;
+  const songs = r.songs.map(x => netTrack(x, r.nodes)), albums = r.albums.map(a => ({ ...a, tr: a.tracks.map(x => netTrack({ ...x, path: a.path, offline: a.offline }, r.nodes)) }));
+  if (!songs.length && !albums.length) { box.innerHTML = libs ? `<div class="hsec"><h2>Nella rete</h2></div><p class="sub">Niente ${libs === 1 ? 'nella libreria collegata' : `nelle ${libs} librerie collegate`}.</p>` : ''; return; }
+  const row = (t, i) => `<div class="song" data-net="${i}" role="button" tabindex="0"><span class="n">${i + 1}</span><span class="thumb">${imgTag(t.coverArt, 84, t.serverId)}</span>
+    <span class="t"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small><small class="netsrc">${ic('globe')}${netSrc(t.fed)}</small></span>
+    <span class="d">${fmt(t.duration)}</span><span class="acts"><button class="icon-btn" data-netcopy="${i}" aria-label="Copia nella mia libreria" title="Copia nella mia libreria">${ic('down')}</button>
+    <button class="icon-btn" data-netmore="${i}" aria-label="Altre azioni">${ic('more')}</button></span></div>`;
+  box.innerHTML = `<div class="hsec"><h2>Nella rete</h2><small class="netms">${libs} ${libs === 1 ? 'libreria' : 'librerie'}</small></div>
+    ${albums.map((a, k) => `<div class="list-item netalb"><span class="pic">${imgTag(a.tr[0]?.coverArt, 100, S.active)}</span>
+      <span class="grow"><b>${esc(a.album)}</b><small>${esc(a.albumArtist)} · ${a.tr.length} ${a.tr.length === 1 ? 'brano' : 'brani'}</small><small class="netsrc">${ic('globe')}${netSrc(a.tr[0].fed)}</small></span>
+      <button class="icon-btn" data-albplay="${k}" aria-label="Ascolta ${esc(a.album)}">${ic('play')}</button><button class="btn sm" data-albcopy="${k}">${ic('down')} Copia</button></div>`).join('')}
+    ${songs.length ? `<div class="songs tracklist noalb netsongs">${songs.map(row).join('')}</div>` : ''}`;
+  box.onclick = e => {
+    const b = e.target.closest('[data-netcopy],[data-netmore],[data-albplay],[data-albcopy],[data-net]'); if (!b) return;
+    e.stopPropagation(); if (q.value.trim().length >= 2) recentQ.add(q.value);
+    const d = b.dataset;
+    if (d.netcopy) netCopy([songs[+d.netcopy]]);
+    else if (d.netmore) songMenu(songs[+d.netmore]);
+    else if (d.albplay) setQueue(albums[+d.albplay].tr, 0);
+    else if (d.albcopy) netCopy(albums[+d.albcopy].tr);
+    else setQueue(songs, +d.net);
+  };
+}
+// la mappa: io, i server collegati e, sotto ciascuno, quelli che si vedono passando da lui
+async function vRete() {
+  if (!srv()) return noServer();
+  const n = Scene.nav;
+  view.innerHTML = `<h1>Rete</h1><p class="sub">Le librerie collegate a questo server e quelle degli amici degli amici. Da Cerca trovi i loro brani sotto "Nella rete": li ascolti subito e li copi nella tua libreria.</p><div id="netMap"><div class="sk-page">${SK.row.repeat(3)}</div></div>`;
+  if (!netOk()) { $('#netMap').innerHTML = '<div class="empty"><h3>Rete non disponibile</h3><p>Questo server non ha ancora le librerie collegate: serve una versione più nuova di Armony.</p></div>'; return; }
+  const m = await dlApi('/api/rete/mappa');
+  if (stale(n)) return;
+  const num = x => `${x.songs || 0} ${x.songs === 1 ? 'brano' : 'brani'} · ${x.albums || 0} album`;
+  const dot = x => `<span class="netdot${x.online === false ? ' off' : ''}" role="img" aria-label="${x.online === false ? 'non raggiungibile' : 'in linea'}"></span>`;
+  const name = id => m.nodes.find(x => x.id === id)?.name || m.far.find(x => x.id === id)?.name || '…';
+  const nodeHtml = (x, via) => `<li><div class="netnode"><span class="netav" style="--th:${tileColor(x.name || '?')}">${esc((x.name || '?').trim().charAt(0).toUpperCase())}</span>
+      <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${num(x)}${via ? ` · via ${esc(via)}` : ''}</small></span>${dot(x)}</div>${sub(x.path || [x.id])}</li>`;
+  const sub = path => { const k = m.far.filter(x => x.path.length === path.length + 1 && path.every((p, i) => x.path[i] === p)); return k.length ? `<ul>${k.map(x => nodeHtml(x, x.path.slice(0, -1).map(name).join(', '))).join('')}</ul>` : ''; };
+  const tot = [m.me, ...m.nodes, ...m.far].reduce((a, x) => a + (x.songs || 0), 0);
+  $('#netMap').innerHTML = `<ul class="nettree"><li><div class="netnode me"><span class="netav">${ic('home')}</span>
+      <span class="grow"><b>${esc(m.me.name)}${m.me.owner ? ` <small>di ${esc(m.me.owner)}</small>` : ''}</b><small>Questo server · ${num(m.me)}</small></span></div>
+    ${m.nodes.length ? `<ul>${m.nodes.map(x => nodeHtml(x)).join('')}</ul>` : ''}</li></ul>
+    ${m.nodes.length ? `<p class="small" style="color:var(--muted);margin-top:var(--s4)">${m.nodes.length + m.far.length + 1} librerie, ${tot} brani in tutto. Si vedono fino a ${m.hops} ${m.hops === 1 ? 'passaggio' : 'passaggi'} di distanza; gli amici degli amici compaiono solo se il loro server lo permette.</p>`
+      : `<div class="empty" style="margin-top:var(--s4)"><h3>Nessun server collegato</h3><p>${access().admin ? 'Collega la libreria di un amico in Impostazioni → Librerie collegate.' : 'L\'amministratore di questo server può collegarlo alle librerie degli amici.'}</p>${access().admin ? '<a class="btn primary" href="#/impostazioni">Impostazioni</a>' : ''}</div>`}`;
 }
 async function vPlaylists() {
   if (!srv()) return noServer();
@@ -1368,7 +1445,7 @@ const Engine = {
     const a = this.el, t = currentTrack(); if (!t) return;
     if (this.scrobbled !== key(t) + '@' + S.index && a.currentTime > Math.min(240, (t.duration || 60) / 2)) {
       this.scrobbled = key(t) + '@' + S.index;
-      if (srv(t.serverId)) api('scrobble', { id: t.id, submission: true }, srv(t.serverId)).catch(() => {});
+      if (srv(t.serverId) && !t.fed) api('scrobble', { id: t.id, submission: true }, srv(t.serverId)).catch(() => {});
       Stats.add(t);
     }
     if (Math.floor(a.currentTime) % 5 === 0) store.set('pos', a.currentTime);
@@ -1436,7 +1513,7 @@ async function playIndex(i, o = {}) {
 function trackChanged(t) {
   updateNowPlaying();
   $$('.song').forEach(el => { const x = S.lastList[+el.dataset.i]; el.classList.toggle('now', !!x && !!t && key(x) === key(t)); });
-  if (t && srv(t.serverId) && Jam.role !== 'guest') api('scrobble', { id: t.id, submission: false }, srv(t.serverId)).catch(() => {});
+  if (t && srv(t.serverId) && !t.fed && Jam.role !== 'guest') api('scrobble', { id: t.id, submission: false }, srv(t.serverId)).catch(() => {});
   QSync.schedule(); emit('track', t);
   if (location.hash.startsWith('#/ora')) vNow();
   else if (location.hash.startsWith('#/coda')) vQueue();
@@ -2458,7 +2535,12 @@ function coverPicker(s, ids, album, q) {
 }
 function songMenu(t, ctx = {}) {
   const d = $('#dlg'), phoneT = !!srv(t.serverId)?.local; d.className = 'sheet';
-  const items = [
+  const items = t.fed ? [
+    ['nextup', 'Riproduci dopo', () => { S.queue.splice(S.index + 1, 0, t); persistQueue(); toast('Verrà riprodotto dopo il brano attuale.'); }],
+    ['plus', 'Aggiungi alla coda', () => { S.queue.push(t); persistQueue(); toast('Aggiunto alla coda.'); }],
+    ['down', 'Copia nella mia libreria', () => netCopy([t])],
+    ['offline', 'Salva per l\'offline', () => Offline.save([t])]
+  ] : [
     ['nextup', 'Riproduci dopo', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.splice(S.index + 1, 0, t); persistQueue(); toast('Verrà riprodotto dopo il brano attuale.'); }],
     ['plus', 'Aggiungi alla coda', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.push(t); persistQueue(); toast('Aggiunto alla coda.'); }],
     Jam.role ? ['jam', Jam.role === 'host' ? 'Aggiungi alla coda della Jam' : 'Proponi alla Jam', () => Jam.suggest(t)] : null,
@@ -2475,7 +2557,7 @@ function songMenu(t, ctx = {}) {
     canEdit(t.serverId) ? ['pen', 'Modifica informazioni', () => editTrack(t)] : null,
     canDelete(t.serverId) ? ['trash', 'Elimina dal server', () => deleteTracks([t], t.title), 'danger'] : null
   ].filter(Boolean);
-  d.innerHTML = `<div class="head"><span class="pic">${imgTag(t.coverArt, 100, t.serverId)}</span><span style="min-width:0"><b style="display:block">${esc(t.title)}</b><small style="color:var(--muted)">${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small></span></div>
+  d.innerHTML = `<div class="head"><span class="pic">${imgTag(t.coverArt, 100, t.serverId)}</span><span style="min-width:0"><b style="display:block">${esc(t.title)}</b><small style="color:var(--muted)">${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}${t.fed ? '<br>' + netSrc(t.fed) : ''}</small></span></div>
     ${items.map(([i, l, , cls], n) => `<button class="mi${cls ? ' ' + cls : ''}" data-n="${n}">${ic(i)}${l}</button>`).join('')}`;
   d.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { d.close(); items[+b.dataset.n][2](); });
   d.onclose = () => { d.className = ''; d.onclose = null; };
@@ -2539,6 +2621,7 @@ function vSettings() {
   </div>`)}
 
   ${access().admin && srv()?.session ? grp('utenti', 'Utenti', 'permessi caricamento download disconnetti amministratore', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div><h3 style="margin-top:var(--s5)">Registrazione</h3><div id="regBox"><p class="sub">Caricamento…</p></div>') : ''}
+  ${access().admin && netOk() ? grp('rete', 'Librerie collegate', 'federazione rete server amici collegare invito codice sicurezza', '<p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare subito o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>') : ''}
   ${window.ARMONY_APP ? grp('app', 'App Android', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div>') : ''}
   ${access().admin ? grp('aggiornamenti', 'Aggiornamenti', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>') : ''}
 
@@ -2565,7 +2648,7 @@ function vSettings() {
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
   refreshSpazio();
-  if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); }
+  if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); }
   if (window.ARMONY_APP) AppUpdate.paint();
   Local.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
@@ -2682,6 +2765,66 @@ function inviteSheet(code) {
     if (await copyText(link)) toast('Link copiato.');
   };
   d.showModal(); qrInto($('#regQr'), link).catch(() => {});
+}
+/* ================= librerie collegate (federazione, solo amministratori) ================= */
+const FED_STATE = { attesa: ['aspetta che accetti', ''], richiesta: ['vuole collegarsi', 'acc'], chiuso: ['chiuso dall\'altro server', 'err'] };
+// l'indirizzo con cui gli altri server raggiungono questo: quello pubblico del server, se c'è
+const fedBase = () => absUrl(srv()?.shareBase || srv()?.url || location.origin);
+async function refreshFed() {
+  const box = $('#fedBox'); if (!box) return;
+  let f; try { f = await dlApi('/api/fed'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  const st = x => x.state === 'attivo' ? (x.online ? ['in linea', 'ok'] : ['non raggiungibile', 'err']) : FED_STATE[x.state] || [x.state, ''];
+  const hopsTxt = { 1: 'Solo i server collegati', 2: 'Anche gli amici degli amici', 3: 'Fino a tre passaggi' };
+  box.innerHTML = `${f.ready ? '' : '<div class="panel" style="margin-bottom:var(--s3)"><p style="margin:0">Per mostrare la tua libreria agli altri server serve l\'amministratore di Navidrome: inseriscilo in Utenti → Registrazione.</p></div>'}
+    <div class="panel stack">
+      <p style="margin:0">Questo server è <b>${esc(f.me.nome)}</b>: ${f.me.songs} brani, ${f.me.albums} album. Impronta <code>${esc(f.me.short)}</code></p>
+      <div class="grid2"><label class="f">Proprietario<input type="text" id="fedOwner" value="${esc(f.settings.owner)}" placeholder="Il tuo nome" maxlength="60"></label>
+        <label class="f">Indirizzo per gli altri server<input type="url" id="fedUrl" value="${esc(f.settings.url)}" placeholder="${esc(fedBase())}" autocapitalize="none" autocomplete="off"></label></div>
+      <label class="check"><input type="checkbox" id="fedTrans" ${f.settings.transitive ? 'checked' : ''}><span>Visibile agli amici degli amici<small>Chi è collegato a un tuo collegato trova e ascolta la tua libreria passando da lui. Spento: solo i server che colleghi tu.</small></span></label>
+      <label class="f">Dove cercare<select id="fedHops">${[1, 2, 3].map(h => `<option value="${h}" ${f.settings.hops === h ? 'selected' : ''}>${hopsTxt[h]}</option>`).join('')}</select></label>
+    </div>
+    <div class="row" style="margin:var(--s4) 0 var(--s2)"><button class="btn primary" data-act="fedinv">${ic('plus')} Crea un invito</button><button class="btn" data-act="fedjoin">Incolla un invito</button></div>
+    ${f.nodes.length ? f.nodes.map(x => { const [l, c] = st(x); return `<div class="list-item fednode">
+      <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${esc(x.url)}${x.state === 'attivo' ? ` · ${x.songs} brani, ${x.albums} album` : ''}${x.app ? ' · Armony ' + esc(x.app) : ''}${x.synced ? ' · aggiornato ' + new Date(x.synced * 1000).toLocaleString() : ''}</small>
+        ${x.error ? `<small style="display:block;color:var(--danger)">${esc(x.error)}</small>` : ''}<small style="display:block">Codice di sicurezza <span class="safety">${esc(x.safety)}</span></small></span>
+      <span class="tag ${c}">${esc(l)}</span>
+      ${x.state === 'richiesta' ? `<button class="btn sm primary" data-act="fedok" data-id="${esc(x.id)}" data-name="${esc(x.name)}" data-safety="${esc(x.safety)}">Accetta</button>` : ''}
+      ${x.state === 'attivo' ? `<button class="icon-btn" data-act="fedsync" data-id="${esc(x.id)}" aria-label="Aggiorna ora" title="Aggiorna ora">${ic('repeat')}</button>` : ''}
+      <button class="icon-btn" data-act="fedrm" data-id="${esc(x.id)}" data-name="${esc(x.name)}" aria-label="${x.state === 'richiesta' ? 'Rifiuta' : 'Scollega'}">${ic('trash')}</button></div>`; }).join('')
+      : '<div class="empty">Nessun server collegato. Crea un invito e mandalo a un amico che ha Armony, oppure incolla il suo.</div>'}`;
+  const save = async body => { try { await dlApi('/api/fed/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('Salvato.'); } catch (e) { toast(e.message); refreshFed(); } };
+  $('#fedOwner').onchange = e => save({ owner: e.target.value.trim() });
+  $('#fedUrl').onchange = e => save({ url: e.target.value.trim() });
+  $('#fedTrans').onchange = e => save({ transitive: e.target.checked });
+  $('#fedHops').onchange = e => save({ hops: +e.target.value });
+}
+function fedInviteSheet(code) {
+  const d = $('#dlg2'); d.className = '';
+  d.innerHTML = `<h3>Invito per un altro server</h3><p class="sub" style="margin-bottom:var(--s3)">Mandalo all'amministratore dell'altro server: lo incolla in Librerie collegate → Incolla un invito. Vale una volta sola, per 24 ore. Poi qui compare la sua richiesta da accettare.</p>
+    <div class="code" style="font-size:.78rem;word-break:break-all">${esc(code)}</div><div id="fedQr" style="margin:var(--s3) 0"></div>
+    <div class="row"><button class="btn primary" id="fedCopy">${ic('share')} ${navigator.share ? 'Condividi' : 'Copia'}</button><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
+  $('#fedCopy').onclick = async () => {
+    if (navigator.share) { try { await navigator.share({ title: 'Armony', text: code }); return; } catch {} }
+    if (await copyText(code)) toast('Invito copiato.');
+  };
+  d.showModal(); qrInto($('#fedQr'), code).catch(() => {});
+}
+function fedJoinSheet() {
+  const d = $('#dlg2'); d.className = '';
+  d.innerHTML = `<h3>Incolla un invito</h3><p class="sub" style="margin-bottom:var(--s3)">Il codice che ti ha mandato l'amministratore dell'altro server (inizia con ARF1).</p>
+    <label class="f">Invito<textarea id="fedCode" rows="4" autocapitalize="none" autocomplete="off" spellcheck="false"></textarea></label>
+    <div class="row" style="margin-top:var(--s3)"><button class="btn primary" id="fedGo">Collega</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div>`;
+  $('#fedGo').onclick = async () => {
+    const code = $('#fedCode').value.trim(); if (!code) return;
+    $('#fedGo').disabled = true;
+    try {
+      const x = await dlApi('/api/fed/join', { method: 'POST', body: JSON.stringify({ code, url: fedBase() }) });
+      d.innerHTML = `<h3>Richiesta mandata a ${esc(x.name)}</h3><p class="sub" style="margin-bottom:var(--s3)">Quando l'amministratore di ${esc(x.name)} accetta, le vostre librerie si vedono in Rete e in Cerca. Confronta con lui il codice di sicurezza: se è uguale sui due schermi, nessuno si è messo in mezzo.</p>
+        <p class="safety" style="margin:0 0 var(--s4)">${esc(x.safety)}</p><div class="row"><button class="btn primary" onclick="this.closest('dialog').close()">Fatto</button></div>`;
+      refreshFed();
+    } catch (e) { toast(e.message); $('#fedGo').disabled = false; }
+  };
+  d.showModal();
 }
 async function refreshUsers() {
   const box = $('#usrBox'); if (!box) return;
@@ -3003,6 +3146,14 @@ view.addEventListener('click', async e => {
       case 'reginv': { const r = await dlApi('/api/register/invites', { method: 'POST' }); refreshReg(); inviteSheet(r.code); break; }
       case 'regshow': inviteSheet(el.dataset.code); break;
       case 'regrevoke': if (confirm(`Revocare l'invito ${fmtCode(el.dataset.code)}?`)) { await dlApi('/api/register/invites/' + encodeURIComponent(el.dataset.code), { method: 'DELETE' }); refreshReg(); } break;
+      case 'fedinv': { const r = await dlApi('/api/fed/invites', { method: 'POST', body: JSON.stringify({ url: fedBase() }) }); fedInviteSheet(r.code); refreshFed(); break; }
+      case 'fedjoin': fedJoinSheet(); break;
+      case 'fedok': if (confirm(`Collegare ${el.dataset.name}?
+
+Codice di sicurezza: ${el.dataset.safety}
+Deve essere uguale a quello che vede l'altro amministratore.`)) { await dlApi(`/api/fed/nodes/${el.dataset.id}/accept`, { method: 'POST' }); toast('Collegato: la sua libreria arriva fra pochi secondi.'); setTimeout(refreshFed, 2500); refreshFed(); } break;
+      case 'fedsync': await dlApi(`/api/fed/nodes/${el.dataset.id}/refresh`, { method: 'POST' }); refreshFed(); toast('Aggiornato.'); break;
+      case 'fedrm': if (confirm(`Scollegare ${el.dataset.name}? Non vedrete più le vostre librerie; i brani già copiati restano.`)) { await dlApi(`/api/fed/nodes/${el.dataset.id}`, { method: 'DELETE' }); refreshFed(); } break;
       case 'usrrevoke': if (confirm(`Disconnettere ${el.dataset.user} da tutti i dispositivi? Dovrà rifare l'accesso.`)) { await dlApi(`/api/users/${encodeURIComponent(el.dataset.user)}/sessions`, { method: 'DELETE' }); refreshUsers(); } break;
       case 'exportset': {
         const withPw = confirm('Includere le credenziali nel file?\nOK = sì (conservalo al sicuro), Annulla = no');
@@ -3519,5 +3670,5 @@ async function boot() {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz)/.test(location.hash)) route(); });
+  syncSessions().then(async () => { Live.connect(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete)/.test(location.hash)) route(); });
 }

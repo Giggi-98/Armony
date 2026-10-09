@@ -188,6 +188,28 @@ label.check small{display:block;color:var(--muted)}
 .song.ghost .n,.song.ghost .t,.song.ghost .d{opacity:.5}
 .song.ghost .acts{display:flex;align-items:center}
 .gaps-note{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s2) var(--s3);margin:0 0 var(--s3);color:var(--muted);font-size:.92rem}
+/* rete: brani dei server collegati (Cerca) e mappa delle librerie (Rete) */
+.song .t small.netsrc,.list-item small.netsrc{display:block;font-size:.8rem;color:var(--accent-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.netsrc svg{width:12px;height:12px;vertical-align:-1px;margin-right:4px}
+.hsec .netms{color:var(--muted);font-size:var(--fs-small)}
+.netalb{cursor:default}
+.netalb .grow small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.netsongs .song{min-height:64px}
+.nettree,.nettree ul{list-style:none;margin:0;padding:0}
+.nettree ul{margin-left:21px;padding-left:var(--s3);border-left:2px solid var(--line)}
+.netnode{display:flex;align-items:center;gap:var(--s3);padding:var(--s3);margin:var(--s2) 0;background:var(--surface);border-radius:var(--r-l)}
+.netnode .grow{flex:1;min-width:0}
+.netnode b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.netnode b small{font-weight:500;color:var(--muted)}
+.netnode .grow>small{display:block;color:var(--muted);font-size:var(--fs-small)}
+.netav{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--th,var(--surface2));color:#fff;font:800 1.1rem var(--display)}
+.netnode.me .netav{background:var(--accent);color:var(--on-accent)}
+.netav svg{width:22px;height:22px}
+.netdot{width:10px;height:10px;border-radius:50%;background:var(--sage);flex:none}
+.netdot.off{background:var(--muted);opacity:.5}
+.fednode{cursor:default;flex-wrap:wrap}
+.list-item.fednode .grow{flex:1 1 16rem}
+.fednode .grow>small{display:block}
 .badge-off{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sage);margin-right:6px;vertical-align:middle}
 .list-item{display:flex;align-items:center;gap:var(--s3);min-height:64px;padding:8px;border-bottom:1px solid var(--line);cursor:pointer;transition:background var(--t-tap) ease}
 .list-item .grow{flex:1;min-width:0}
