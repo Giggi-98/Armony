@@ -282,7 +282,8 @@ label.check small{display:block;color:var(--muted)}
 #sidePl a.on{background:var(--surface2)}
 #sidePl a.on b{color:var(--accent-text)}
 #sidePl a.on .pic{background:var(--surface)}
-#sidePl .pic{width:40px;height:40px;flex:none;border-radius:4px;overflow:hidden;background:var(--surface2)}
+#sidePl .pic{width:40px;height:40px;flex:none;border-radius:4px;overflow:hidden;background:var(--surface2);display:grid;place-items:center;color:var(--muted)}
+#sidePl .pic svg{width:20px;height:20px}
 #sidePl .pic img{width:100%;height:100%;object-fit:cover}
 #sidePl .grow{min-width:0}
 #sidePl b{display:block;font-weight:600;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -364,6 +365,8 @@ label.check small{display:block;color:var(--muted)}
 .hsearch:focus-within{border-color:var(--accent);box-shadow:var(--shadow-art),0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 .hsearch svg{width:22px;height:22px;color:var(--muted);flex:none}
 .hsearch input[type=search],.hsearch input[type=search]:focus{flex:1;min-width:0;border:0;border-radius:0;background:none;outline:0;box-shadow:none;color:var(--ink);font:600 16px var(--body);height:100%;padding:0}
+.hsearch input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none;width:20px;height:20px;cursor:pointer;background:var(--muted);
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E") center/18px no-repeat}
 @media (min-width:861px){.hsearch{position:static;max-width:560px;height:56px}.hsearch input[type=search]{font-size:1.05rem}}
 .hrecent{display:flex;flex-wrap:wrap;gap:var(--s2)}
 .hrq{display:inline-flex;align-items:center;border-radius:99px;background:var(--surface);border:1px solid var(--line);max-width:100%}
@@ -421,6 +424,7 @@ label.check small{display:block;color:var(--muted)}
   background:linear-gradient(to bottom,var(--ph),transparent);transition:--ph .6s ease}
 .phero-art{width:232px;aspect-ratio:1;flex:none;border-radius:var(--r-s);overflow:hidden;background:var(--surface2);box-shadow:var(--shadow-float);display:grid;place-items:center;color:var(--muted)}
 .phero-art img{width:100%;height:100%;object-fit:cover}
+.phero-art>svg{width:38%;height:38%}
 .phero.round .phero-art{border-radius:50%}
 .phero-art.tile{background:radial-gradient(120% 100% at 100% 100%,rgb(0 0 0 / .28),transparent 62%),var(--tile);color:#fff;place-items:end start;padding:var(--s4)}
 .phero-art.tile b{font:800 2.4rem/1 var(--display);letter-spacing:-.03em;overflow-wrap:anywhere}

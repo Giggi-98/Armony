@@ -384,16 +384,6 @@ function albumGrid(albums, opts = {}) {
       <small>${esc(a.artist || '')}${a.year ? ' · ' + a.year : ''}</small>
     </div>`).join('')}</div>`;
 }
-// frecce delle strisce di copertine: solo con il mouse (su telefono si scorre col dito, lo nasconde il CSS)
-function wireStrips(root = view) {
-  root.querySelectorAll('.strip-wrap').forEach(w => {
-    const st = w.querySelector('.strip'), [prev, next] = w.querySelectorAll('.strip-nav');
-    const sync = () => { prev.hidden = st.scrollLeft < 4; next.hidden = st.scrollLeft + st.clientWidth >= st.scrollWidth - 4; };
-    const go = dir => st.scrollBy({ left: dir * st.clientWidth * .9, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-    prev.onclick = () => go(-1); next.onclick = () => go(1);
-    st.addEventListener('scroll', sync, { passive: true }); new ResizeObserver(sync).observe(st); sync();
-  });
-}
 // elenco di brani (.tracklist): su schermo largo a colonne con intestazione (#, titolo, album, durata),
 // su telefono miniatura, titolo e artista. Le righe restano .song: albumGaps vi inserisce le tracce mancanti
 function songList(tracks, opts = {}) {
@@ -443,10 +433,6 @@ function vInvite(code) {
 }
 
 /* ================= L: intestazioni di pagina, barra azioni, schede artista, riquadri colorati ================= */
-// tavolozza deterministica dei riquadri (generi, decenni): lo stesso nome ha sempre lo stesso colore
-const TILE_COLORS = ['#e8115b', '#1e3264', '#8d67ab', '#e13300', '#148a08', '#509bf5', '#b06239', '#27856a', '#dc148c', '#0d73ec', '#ba5d07', '#477d95', '#7358ff', '#8c1932', '#5f8109'];
-const tileColor = s => TILE_COLORS[[...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TILE_COLORS.length];
-// ph: coverArt da cui prendere il colore della fascia (per i riquadri colorati basta tile)
 function lPhero({ kind, title, art = '', round = false, meta = '', tile = '', ph }) {
   const url = ph ? coverUrl(ph, 300) : '';
   if (url) Glow.colors(url).then(c => { const el = $('#view .phero'); if (el && Glow.usable(c)) el.style.setProperty('--ph', Glow.tone(c.c1, .55, c.neutral)); });
@@ -485,7 +471,7 @@ function lArtistCard(a) {
   return `<button class="lcard round" data-act="artist" data-id="${esc(a.id)}"><div class="lcover">${img || ic('artist')}</div><b>${esc(a.name)}</b><small>Artista</small></button>`;
 }
 function lPlCard(p) {
-  return `<button class="lcard" data-act="openpl" data-id="${esc(p.id)}"><div class="lcover">${imgTag(p.coverArt, 300)}</div><b>${esc(p.name)}</b><small>${p.owner ? esc(p.owner) + ' · ' : ''}${p.songCount} ${p.songCount === 1 ? 'brano' : 'brani'}</small></button>`;
+  return `<button class="lcard" data-act="openpl" data-id="${esc(p.id)}"><div class="lcover">${p.songCount ? imgTag(p.coverArt, 300) : ic('list')}</div><b>${esc(p.name)}</b><small>${p.owner ? esc(p.owner) + ' · ' : ''}${p.songCount} ${p.songCount === 1 ? 'brano' : 'brani'}</small></button>`;
 }
 // tempo reale: mentre una playlist o un album sono aperti, i brani nuovi entrano al loro posto e quelli tolti escono,
 // senza ridisegnare la pagina (ogni 20 s, e subito all'evento 'libreria' di Bus)
@@ -507,7 +493,7 @@ function lMerge(songs, opts) {
   const old = S.lastList, keep = new Map();
   box.querySelectorAll(':scope > .song:not(.ghost)').forEach(el => { const id = old[+el.dataset.i]?.id; (keep.get(id) || keep.set(id, []).get(id)).push(el); });
   const tmp = document.createElement('div'); tmp.innerHTML = songList(songs, opts);  // aggiorna anche S.lastList
-  const fresh = [...tmp.querySelector('.songs').children];
+  const fresh = [...tmp.querySelectorAll('.songs > .song')];  // senza l'intestazione .th
   box.querySelectorAll(':scope > .song.ghost').forEach(el => el.remove());
   fresh.forEach((nu, i) => {
     let el = keep.get(songs[i].id)?.shift();
@@ -520,9 +506,9 @@ function lMerge(songs, opts) {
 
 /* ================= viste: libreria ================= */
 // ---- Home e Cerca: accesso rapido, mix, scaffali; Sfoglia con riquadri colorati ----
-// tavolozza dei riquadri: colori saturi che reggono testo bianco, scelti per nome (lo stesso nome ha sempre lo stesso colore)
+// tavolozza dei riquadri (Cerca, generi, decenni): colori saturi che reggono testo bianco, scelti per nome (lo stesso nome ha sempre lo stesso colore)
 const TILE_HUES = ['#d1345b', '#2d46b9', '#8d4fc2', '#c2560a', '#16825d', '#2f7fd6', '#c93b1d', '#3f7f98', '#a0522d', '#5b3fd1', '#b8457f', '#1f8a8a', '#7a3fa0', '#b07a12', '#386641', '#c0392b'];
-const tileHue = name => TILE_HUES[[...String(name)].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % TILE_HUES.length];
+const tileColor = name => TILE_HUES[[...String(name)].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % TILE_HUES.length];
 // titolo di sezione con "Mostra tutto" verso la libreria con l'ordinamento giusto
 const secHead = (title, sort) => `<div class="hsec"><h2>${title}</h2>${sort ? `<button class="hsec-more" data-act="showall" data-sort="${sort}">Mostra tutto</button>` : ''}</div>`;
 async function vHome() {
@@ -564,7 +550,6 @@ async function vHome() {
     ${secHead('Aggiunti di recente', 'newest')}${albumGrid(L(nw), { strip: true })}
     ${L(freq).length ? secHead('I più ascoltati', 'frequent') + albumGrid(L(freq), { strip: true }) : ''}
     ${secHead('Da riscoprire', 'random')}${albumGrid(L(rnd), { strip: true })}`;
-  wireStrips();
   QSync.check().then(q => {
     if (!q || !$('#resume')) return;
     $('#resume').innerHTML = `<div class="hbanner">${q.current.coverArt ? `<span class="hb-art">${imgTag(q.current.coverArt, 96, q.current.serverId)}</span>` : ''}
@@ -632,7 +617,6 @@ async function vArtist(id) {
     `<h2>Discografia</h2>${albumGrid(albums, { strip: true })}` +
     (sim.length ? `<h2>Artisti simili</h2><div class="lcards shelfish">${sim.map(lArtistCard).join('')}</div>` : '') +
     (bio ? `<h2>Informazioni</h2><p class="lbio">${esc(bio.slice(0, 700))}${bio.length > 700 ? '…' : ''}</p>` : '');
-  wireStrips();
   const more = $('#lTopMore');
   if (more) more.onclick = () => { const t = $('#lTop'); t.classList.toggle('all'); more.textContent = t.classList.contains('all') ? 'Mostra meno' : 'Mostra altri'; };
 }
@@ -718,7 +702,6 @@ async function vGenre(name) {
   view.innerHTML = lPhero({ kind: 'Genere', title: name, tile: tileColor(name), art: `<b>${esc(name)}</b>`, meta: `${so.length} brani${al.length ? ' · ' + al.length + ' album' : ''}` }) +
     lActionBar({ more: [{ act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' }] }) +
     (al.length ? `<h2>Album</h2>${albumGrid(al, { strip: true })}` : '') + `<h2>Brani</h2>${songList(so)}`;
-  wireStrips();
 }
 
 async function vDecade(y) {
@@ -747,7 +730,7 @@ async function vSearch() {
   const q = $('#q'); q.value = sessionStorage.getItem('armony:q') || '';
   if (!NATIVE && matchMedia('(pointer:fine)').matches) q.focus();
   const L1 = r => arr(r?.albumList2?.album)[0];
-  const tile = (label, attrs, k) => `<a class="htile" ${attrs} data-k="${esc(k)}" style="--th:${tileHue(label)}" ${attrs.startsWith('href') ? '' : 'role="link" tabindex="0"'}><b>${esc(label)}</b><span class="ht-art"></span></a>`;
+  const tile = (label, attrs, k) => `<a class="htile" ${attrs} data-k="${esc(k)}" style="--th:${tileColor(label)}" ${attrs.startsWith('href') ? '' : 'role="link" tabindex="0"'}><b>${esc(label)}</b><span class="ht-art"></span></a>`;
   // aprire o ascoltare un risultato salva la ricerca fra le recenti
   $('#res').addEventListener('click', e => {
     if (q.value.trim().length >= 2 && e.target.closest('[data-act="album"],[data-act="artist"],[data-act="play"],[data-act="playalb"],[data-act="artistall"]')) recentQ.add(q.value);
@@ -799,7 +782,7 @@ async function vSearch() {
         </div>
         ${ar.length ? `<div class="hsec"><h2>Artisti</h2></div><div class="hgrid shelf">${ar.map(lArtistCard).join('')}</div>` : ''}
         ${al.length ? `<div class="hsec"><h2>Album</h2></div>${albumGrid(al, { strip: true })}` : ''}</div>`;
-      wireStrips($('#res'));
+     
       $('#allSongs')?.addEventListener('click', e => { $('#songsBox').innerHTML = listActions() + songList(so); e.target.remove(); $('#res .hbest-wrap').classList.add('open'); });
     } catch (e) { $('#res').innerHTML = `<p class="sub">${esc(e.message)}</p>`; }
   };
@@ -828,7 +811,7 @@ async function vPlaylist(id) {
   const count = q => { const k = arr(q.entry).length; return `${k} ${k === 1 ? 'brano' : 'brani'}, ${fmtLong(q.duration || 0)}`; };
   const empty = { empty: 'Playlist vuota. Aggiungi brani dal menu ⋯ accanto a ogni canzone.' };
   Glow.show(coverUrl(p.coverArt, 300), 'album');
-  view.innerHTML = lPhero({ kind: p.public ? 'Playlist condivisa' : 'Playlist', title: p.name, ph: p.coverArt, art: imgTag(p.coverArt, 500),
+  view.innerHTML = lPhero({ kind: p.public ? 'Playlist condivisa' : 'Playlist', title: p.name, ph: p.coverArt, art: p.songCount ? imgTag(p.coverArt, 500) : ic('list'),
       meta: `${p.comment ? `<span class="phero-desc">${esc(p.comment)}</span>` : ''}${p.owner ? `<b>${esc(p.owner)}</b> · ` : ''}<span id="lCount">${count(p)}</span>` }) +
     lActionBar({ more: [
       { act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' },
@@ -855,7 +838,6 @@ async function vStarred() {
     `<div id="lList">${songList(songs, { empty: 'Tocca il cuore accanto a un brano per ritrovarlo qui.' })}</div>` +
     (al.length ? `<h2>Album</h2>${albumGrid(al, { strip: true })}` : '') +
     (ar.length ? `<h2>Artisti</h2><div class="lcards shelfish">${ar.map(lArtistCard).join('')}</div>` : '');
-  wireStrips();
 }
 
 function vQueue() {
@@ -3115,7 +3097,7 @@ async function sidePlaylists() {
   let pls = []; try { if (srv()) pls = arr((await api('getPlaylists')).playlists?.playlist); } catch {}
   const cur = (location.hash.match(/^#\/playlist\/(.+)/) || [])[1];
   box.innerHTML = pls.length ? `<h3>Le tue playlist</h3>${pls.map(p => `<a href="#/playlist/${encodeURIComponent(p.id)}" data-pl="${esc(p.id)}"${cur && decodeURIComponent(cur) === p.id ? ' class="on"' : ''}>
-    <span class="pic">${imgTag(p.coverArt, 80)}</span><span class="grow"><b>${esc(p.name)}</b><small>Playlist · ${esc(p.owner || srv()?.user || '')}</small></span></a>`).join('')}` : '';
+    <span class="pic">${p.songCount ? imgTag(p.coverArt, 80) : ic('list')}</span><span class="grow"><b>${esc(p.name)}</b><small>Playlist · ${esc(p.owner || srv()?.user || '')}</small></span></a>`).join('')}` : '';
 }
 async function boot() {
   $('#nav').innerHTML = NAV.map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
