@@ -10,6 +10,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ArmonyMediaPlugin.class);
         registerPlugin(ArmonyUpdatePlugin.class);
         registerPlugin(ArmonyInsetsPlugin.class);
+        registerPlugin(ArmonyLibraryPlugin.class);
         super.onCreate(savedInstanceState);
+        // audio e copertine della musica del telefono all'indirizzo dell'app (/_armony_/…), il resto come prima
+        bridge.setWebViewClient(new ArmonyLibraryPlugin.Web(bridge));
     }
 }

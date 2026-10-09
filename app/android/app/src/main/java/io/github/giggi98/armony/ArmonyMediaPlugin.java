@@ -151,7 +151,7 @@ public class ArmonyMediaPlugin extends Plugin {
             artUrl = url;
             ArmonyMediaService.art = null;
             if (!url.isEmpty()) net.execute(() -> {
-                Bitmap b = load(url);
+                Bitmap b = url.contains("/_armony_/cover/") ? ArmonyLibraryPlugin.coverBitmap(getContext(), url) : load(url);
                 getActivity().runOnUiThread(() -> {
                     if (!url.equals(artUrl)) return;  // nel frattempo è cambiato brano
                     ArmonyMediaService.art = b;
