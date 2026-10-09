@@ -476,13 +476,17 @@ label.check small{display:block;color:var(--muted)}
    (stesse misure di "Artista" e della riga dei dettagli); un tocco apre la biografia intera. Altrimenti restano in fondo */
 .ph-aside{display:none}
 @media (min-width:1200px){
-  .ph-aside{display:block;flex:0 1 340px;min-width:240px;margin-left:auto;align-self:flex-end;padding:0;border:0;background:none;color:inherit;text-align:left;font:inherit;cursor:pointer}
+  .phero:has(.ph-aside) .phero-txt{flex:1 1 0;min-width:0}
+  /* con le informazioni accanto il titolo si adatta alla colonna e va a capo solo fra le parole */
+  .phero:has(.ph-aside) .phero-title{font-size:clamp(2.6rem,4.4vw,5.2rem);overflow-wrap:normal;word-break:normal;hyphens:manual}
+  .ph-aside{display:block;flex:0 0 40%;min-width:0;margin-left:var(--s6);align-self:flex-end;padding:0;border:0;background:none;color:inherit;text-align:left;font:inherit;cursor:pointer}
   .ph-aside .phero-kind{display:block;margin-bottom:var(--s2)}
-  .ph-aside .lbio{margin:0;max-width:none;color:var(--muted);font-size:.92rem;line-height:1.55;max-height:calc(1.55em * 4);overflow:hidden;
+  .ph-aside .lbio{margin:0;color:var(--muted);font-size:.92rem;line-height:1.55;max-width:72ch;max-height:calc(1.55em * 4);overflow:hidden;
     -webkit-mask:linear-gradient(#000 55%,transparent);mask:linear-gradient(#000 55%,transparent);transition:color var(--t-tap) ease}
   .ph-aside:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:var(--r-s)}
   .bio-bottom{display:none}
 }
+@media (min-width:1600px){.ph-aside{flex-basis:46%;margin-left:var(--s7)}}
 @media (hover:hover) and (pointer:fine){.ph-aside:hover .lbio{color:var(--ink)}}
 /* biografia intera: lettura comoda, non un muro di testo */
 dialog.bio{width:min(640px,92vw)}
