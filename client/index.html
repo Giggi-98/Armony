@@ -1019,6 +1019,79 @@ dialog.sheet .pcard .pic{width:56px;height:56px;border-radius:var(--r-s)}
   @keyframes pfade{from{opacity:0}}
 }
 /* === fine P === */
+/* === R: Jam Radio (radio.js) === */
+/* righe delle stazioni: niente schede, come le righe della libreria; copertina del brano in onda, nome, ascoltatori */
+.rhead{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--s3) var(--s5);flex-wrap:wrap}
+.rhead .sub{margin-bottom:0}
+.rlist{display:flex;flex-direction:column}
+.rrow{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0;border-bottom:1px solid var(--line)}
+.rrow:last-child{border-bottom:0}
+.rgo{flex:1;min-width:0;display:flex;align-items:center;gap:var(--s3);padding:var(--s1);margin:calc(-1 * var(--s1));border:0;background:none;color:inherit;text-align:left;cursor:pointer;border-radius:var(--r-s);font:inherit}
+.rgo .grow{flex:1;min-width:0}
+.rgo b{display:block;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rgo small{display:block;color:var(--muted);font-size:var(--fs-small);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rgo .rnow{color:var(--ink)}
+.rnow span{color:var(--accent-text);font-weight:700;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;margin-right:4px}
+.rart{position:relative;width:56px;height:56px;border-radius:var(--r-s);overflow:hidden;background:var(--surface2);flex:none;box-shadow:var(--shadow-art)}
+.rart img{width:100%;height:100%;object-fit:cover}
+/* "in diretta": le barre dell'equalizzatore su un bollino, in basso a sinistra della copertina */
+.rlive{position:absolute;left:4px;bottom:4px;display:grid;place-items:center;width:20px;height:20px;border-radius:6px;background:rgb(10 11 26 / .72)}
+.rlive .peq{margin:0;--accent-text:#f4a63c}
+.rrow.off .rart{opacity:.5;box-shadow:none}
+.rrow.tuned .rgo b{color:var(--accent-text)}
+.rwho{display:flex;align-items:center;flex:none}
+.rwho .pav{box-shadow:0 0 0 2px var(--bg)}
+.rwho .pav+.pav{margin-left:-7px}
+.rmore{background:var(--surface2);color:var(--ink);font-size:.62rem}
+.rrow .pbar,.hradio .pbar{max-width:260px}
+.rempty{color:var(--muted);padding:var(--s2) 0;margin:0}
+/* Home: una riga, come le storie e i banner */
+.hradio-box{margin-bottom:var(--s3)}
+.hradio{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s3) var(--s2) var(--s2);border-radius:var(--r-m);background:var(--surface);border:1px solid var(--line)}
+.hradio .rart{width:48px;height:48px;box-shadow:none}
+.hradio .rgo small{color:var(--muted)}
+.rtag,.rgo .rtag{display:inline;font-size:.68rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-text);margin-right:6px}
+/* lettore: "Radio · nome", chi ascolta; niente comandi che una radio non ha */
+.pill.radio{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--ink);max-width:260px}
+.pill.radio>span:not(.rav){min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pill.radio b{font-weight:800;letter-spacing:.04em;text-transform:uppercase;font-size:.68rem;color:var(--accent-text)}
+.rdot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
+.rdot.on{background:var(--danger);animation:rpulse 1.6s ease-in-out infinite}
+@keyframes rpulse{50%{opacity:.35}}
+.rav{display:inline-flex}
+.rav .pav{box-shadow:0 0 0 1.5px var(--accent-soft)}
+.rav .pav+.pav{margin-left:-5px}
+#player[data-radio] #bShuf,#player[data-radio] #bRep{visibility:hidden}
+#player[data-radio] #bPrev,#player[data-radio] #bNext{opacity:.3}
+#player[data-radio] #seek{pointer-events:none}
+#player[data-radio] #seek::-webkit-slider-thumb{opacity:0}
+#player[data-radio] #seek::-moz-range-thumb{opacity:0}
+/* fogli: la stazione e "Crea una radio" */
+dialog.sheet .rlisten{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);padding:var(--s1) 14px var(--s3)}
+dialog.sheet .rlisten>span{display:flex;align-items:center;gap:var(--s2);min-width:0}
+dialog.sheet .rlisten b{font-weight:600;font-size:.92rem}
+dialog.sheet .rlisten small{color:var(--muted);font-size:.78rem}
+dialog.sheet .pcard small:first-child{color:var(--accent-text);font-weight:700;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase}
+dialog.sheet .head .icon-btn{margin:-6px 0 -6px -6px}
+.rnew .rname{padding:var(--s2) 14px var(--s1)}
+.rnew .rfind{padding:0 14px var(--s2)}
+.rnew .rpic{width:40px;height:40px;border-radius:var(--r-s);overflow:hidden;background:var(--surface2);flex:none}
+.rnew .rpic img{width:100%;height:100%;object-fit:cover}
+.rnew #rPick{min-height:30vh}
+@media (hover:hover) and (pointer:fine){
+  .rgo:hover b{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+  .pill.radio:hover{background:color-mix(in srgb,var(--accent) 30%,var(--accent-soft))}
+}
+@media (max-width:520px){
+  .rrow .rwho{display:none}
+  .rrow .btn{font-size:0;gap:0;padding:0;width:var(--hit);min-height:var(--hit)}
+  .rrow .btn svg{width:20px;height:20px}
+  .rrow .btn:not(:has(svg)){font-size:.86rem;width:auto;padding:0 13px}
+  .hradio .rwho{display:none}
+  .pill.radio{max-width:200px}
+}
+@media (prefers-reduced-motion:reduce){.rdot.on{animation:none}}
+/* === fine R === */
 </style>
 </head>
 <body>
@@ -1052,6 +1125,7 @@ dialog.sheet .pcard .pic{width:56px;height:56px;border-radius:var(--r-s)}
   <div class="extra">
     <button class="pill live" id="livePill" hidden aria-haspopup="dialog"></button>
     <button class="pill" id="jamPill" hidden></button>
+    <button class="pill radio" id="radioPill" hidden aria-haspopup="dialog"></button>
     <button class="pill" id="sleepPill" hidden></button>
     <button class="pill desk-only" id="qBadge" title="Qualità di ascolto"></button>
     <button class="icon-btn mobile-only" id="bQm" aria-label="Qualità"></button>
@@ -1069,6 +1143,7 @@ dialog.sheet .pcard .pic{width:56px;height:56px;border-radius:var(--r-s)}
 <script type="module">import a from './vendor/auto-animate.min.js'; window.autoAnimate = a;</script>
 <script src="armony.js"></script>
 <script src="jam.js"></script>
+<script src="radio.js"></script>
 <script src="telefono.js"></script>
 <script>boot();</script>
 </body>

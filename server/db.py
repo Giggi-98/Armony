@@ -53,6 +53,12 @@ MIGRATIONS = [
     CREATE INDEX fed_catalog_alb ON fed_catalog(node, alb);
     CREATE TABLE fed_hash (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime REAL NOT NULL, sha TEXT NOT NULL);
     """,
+    # 6: Jam Radio. La stazione vive sul server: elenco dei brani con le durate e l'istante d'inizio, da cui
+    # chiunque calcola cosa è in onda; paused = secondi trascorsi quando è stata fermata (NULL = in onda)
+    """
+    CREATE TABLE radio (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner TEXT NOT NULL, source TEXT NOT NULL,
+                        created REAL NOT NULL, start REAL NOT NULL, seed INTEGER NOT NULL, paused REAL, tracks TEXT NOT NULL);
+    """,
 ]
 
 _local = threading.local()

@@ -347,7 +347,7 @@ const NAV = [
   ['statistiche', 'Statistiche', 'stats'], ['scarica', 'Scarica', 'down'], ['impostazioni', 'Impostazioni', 'gear']
 ];
 const view = $('#view');
-const ROUTE_PARENT = { album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria' };
+const ROUTE_PARENT = { album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria', radio: 'jam' };
 // su telefono: quattro sezioni nella barra in basso, le altre nel foglio "Altro"
 const TABS = ['home', 'cerca', 'libreria', 'jam'];
 const MORE = [...NAV.map(n => n[0]).filter(h => !TABS.includes(h)), 'tasti'];
@@ -364,7 +364,7 @@ async function route() {
   const fn = {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete
+    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav; Scene.hash = location.hash; Scene.r = r;
   const run = async () => {
@@ -569,7 +569,7 @@ async function vHome() {
   const mix = (act, title, sub, icon, hue, extra = '') => `<button class="hmix" data-act="${act}" ${extra} style="--h1:${hue}">
     <span class="hmix-art">${ic(icon)}<b>${title}</b></span><span class="hmix-t"><b>${title}</b><small>${sub}</small></span></button>`;
   view.innerHTML = `<div class="stories" id="presStories" data-pres hidden></div><h1 class="hhello">${hello}${P.nick || s.user ? ', ' + esc(P.nick || s.user) : ''}</h1>
-    <div id="resume"></div><div id="friendsStrip"></div>
+    <div class="hradio-box" id="radioRow" hidden></div><div id="resume"></div><div id="friendsStrip"></div>
     ${quick.length ? `<div class="quick">${quick.map(a => `<div class="qk" data-act="album" data-id="${esc(a.id)}" role="link" tabindex="0">
       <span class="qk-art">${imgTag(a.coverArt, 160)}</span><b>${esc(a.name)}</b>
       <button class="qk-play" data-act="playalb" data-id="${esc(a.id)}" aria-label="Riproduci ${esc(a.name)}">${ic('play', true)}</button></div>`).join('')}</div>` : ''}
@@ -585,6 +585,7 @@ async function vHome() {
     ${secHead('Aggiunti di recente', 'newest')}${albumGrid(L(nw), { strip: true })}
     ${L(freq).length ? secHead('I più ascoltati', 'frequent') + albumGrid(L(freq), { strip: true }) : ''}
     ${secHead('Da riscoprire', 'random')}${albumGrid(L(rnd), { strip: true })}`;
+  if (Radio.ok()) { window.autoAnimate?.($('#radioRow')); Radio.paintAll(); if (!Live.es) Radio.load(); }
   QSync.check().then(q => {
     if (!q || !$('#resume')) return;
     $('#resume').innerHTML = `<div class="hbanner">${q.current.coverArt ? `<span class="hb-art">${imgTag(q.current.coverArt, 96, q.current.serverId)}</span>` : ''}
@@ -1450,7 +1451,7 @@ const Engine = {
       if (!this.el.getAttribute('src')) return;
       const off = !navigator.onLine;
       toast(off ? 'Sei offline e questo brano non è salvato sul dispositivo.' : 'Impossibile riprodurre questo brano, passo al successivo.');
-      if (Jam.role !== 'guest') setTimeout(() => ctlNext(true), 1500);
+      if (Jam.role !== 'guest' && !Radio.st) setTimeout(() => ctlNext(true), 1500);
       return;
     }
     if (ev === 'timeupdate') { this.tick(); emit('time'); }
@@ -1466,6 +1467,7 @@ const Engine = {
       if (srv(t.serverId) && !t.fed) api('scrobble', { id: t.id, submission: true }, srv(t.serverId)).catch(() => {});
       Stats.add(t);
     }
+    if (Radio.st) return;  // la radio la manda avanti radio.js, secondo l'orario del server
     if (Math.floor(a.currentTime) % 5 === 0) store.set('pos', a.currentTime);
     if (Jam.role === 'guest') return;
     const rem = a.duration - a.currentTime; if (!isFinite(rem)) return;
@@ -1487,7 +1489,7 @@ const Engine = {
     setTimeout(() => { if (this.cur !== old) this.decks[old].pause(); this.fading = false; }, d * 1000 + 150);
   },
   ended() {
-    if (Jam.role === 'guest') return;
+    if (Jam.role === 'guest' || Radio.st) return;
     if (Sleep.eot) { Sleep.clear(); toast('Fine brano: buonanotte.'); paintButtons(); return; }
     if (S.repeat === 'one') { this.el.currentTime = 0; this.el.play(); return; }
     const n = this.nextIndex();
@@ -1500,11 +1502,12 @@ const Engine = {
 };
 
 /* ================= riproduzione ================= */
-function currentTrack() { return Jam.role === 'guest' ? Jam.track : Live.remote() ? Live.track() : S.queue[S.index]; }
+// quattro casi: ospite della Jam, Jam Radio (radio.js: posizione e durata dall'orario della stazione), telecomando, qui
+function currentTrack() { return Jam.role === 'guest' ? Jam.track : Radio.st ? Radio.track : Live.remote() ? Live.track() : S.queue[S.index]; }
 const broadcastGuest = () => Jam.role === 'guest' && Jam.mode === 'broadcast';
 function isPlaying() { return broadcastGuest() ? Jam.playing : Live.remote() ? Live.playing() : !Engine.el.paused; }
-function playPos() { return broadcastGuest() ? Jam.estPos() : Live.remote() ? Live.pos() : Engine.time(); }
-function playDur() { return broadcastGuest() ? (Jam.track?.duration || 0) : Live.remote() ? Live.dur() : Engine.duration(); }
+function playPos() { return broadcastGuest() ? Jam.estPos() : Radio.st ? Radio.pos() : Live.remote() ? Live.pos() : Engine.time(); }
+function playDur() { return broadcastGuest() ? (Jam.track?.duration || 0) : Radio.st ? Radio.dur() : Live.remote() ? Live.dur() : Engine.duration(); }
 function persistQueue() {
   store.set('queue', S.queue.slice(0, 3000)); store.set('index', S.index);
   clearTimeout(persistQueue.t); persistQueue.t = setTimeout(() => Live.publish(), 300);  // gli altri dispositivi vedono la stessa coda
@@ -1520,6 +1523,7 @@ function setQueue(tracks, start = 0, shuffle = false) {
 async function playIndex(i, o = {}) {
   if (Jam.role === 'guest') return Jam.guestControl('jump', i);
   if (i < 0 || i >= S.queue.length) return;
+  if (Radio.st) await Radio.leave(true);  // suonare la coda vuol dire uscire dalla radio
   S.index = i; persistQueue();
   const t = S.queue[i];
   if (!srv(t.serverId) && !Offline.has(t)) { toast('Il server di questo brano non è più configurato.'); return; }
@@ -1538,24 +1542,29 @@ function trackChanged(t) {
 }
 function ctlToggle() {
   if (Jam.role === 'guest') return Jam.guestControl(isPlaying() ? 'pause' : 'play');
+  if (Radio.st) return Radio.on ? Radio.pause() : Radio.resume();
   if (Live.remote()) return Live.cmd('toggle');
   const a = Engine.el;
   if (!a.getAttribute('src')) { if (S.queue.length) playIndex(Math.max(0, S.index)); return; }
   Engine.graph(); a.paused ? a.play().catch(() => {}) : a.pause();
 }
+const radioNo = () => toast('È una radio: va avanti da sola. Per scegliere tu, esci dalla radio.');
 function ctlNext(auto) {
   if (Jam.role === 'guest') return Jam.guestControl('next');
+  if (Radio.st) return auto ? undefined : radioNo();
   if (Live.remote()) return auto ? undefined : Live.cmd('next');
   const n = S.index < S.queue.length - 1 ? S.index + 1 : (S.repeat === 'all' ? 0 : null);
   if (n != null) playIndex(n); else if (auto) Engine.el.pause();
 }
 function ctlPrev() {
   if (Jam.role === 'guest') return Jam.guestControl('prev');
+  if (Radio.st) return radioNo();
   if (Live.remote()) return Live.cmd('prev');
   if (Engine.time() > 4 || S.index <= 0) ctlSeek(0); else playIndex(S.index - 1);
 }
 function ctlSeek(sec) {
   if (Jam.role === 'guest') return Jam.guestControl('seek', sec);
+  if (Radio.st) { paintTime(); return radioNo(); }
   if (Live.remote()) return Live.cmd('seek', Math.max(0, sec));
   try { Engine.el.currentTime = Math.max(0, sec); } catch {}
   emit('seek');
@@ -1678,7 +1687,7 @@ Bus.addEventListener('time', paintTime);
 /* ================= coda sincronizzata tra dispositivi ================= */
 const QSync = {
   t: null,
-  schedule() { if (!P.syncQueue || Jam.role === 'guest') return; clearTimeout(this.t); this.t = setTimeout(() => this.push(), 4000); },
+  schedule() { if (!P.syncQueue || Jam.role === 'guest' || Radio.st) return; clearTimeout(this.t); this.t = setTimeout(() => this.push(), 4000); },
   async push() {
     const cur = S.queue[S.index]; if (!cur || !srv(cur.serverId)) return;
     const ids = S.queue.filter(x => x.serverId === cur.serverId).slice(0, 1000).map(x => x.id);
@@ -1832,7 +1841,7 @@ async function vNow() {
         <button class="btn sm" data-act="sleep">${ic('moon')} Timer</button>
         <button class="btn sm" data-act="speed">${ic('speed')} ${P.speed}×</button>
         <button class="btn sm" data-act="eq">${ic('sliders')} Equalizzatore</button>
-        ${Jam.role ? `<a class="btn sm" href="#/jam">${ic('jam')} Jam</a>` : ''}
+        ${Jam.role ? `<a class="btn sm" href="#/jam">${ic('jam')} Jam</a>` : ''}${Radio.st ? `<a class="btn sm" href="#/radio">${ic('radio')} ${esc(Radio.st.name)}</a>` : ''}
       </div>
     </div>
     <div><div class="tabs">${[['lyr', 'Testi'], ['next', 'Prossimi'], ['info', 'Dettagli']].map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div><div id="nowPane"></div></div></div>`;
@@ -1880,10 +1889,10 @@ async function vNow() {
     if (currentTrack() !== t || !$('#nowPane')) return;
     if (!lyr || lyr.instrumental) {
       // senza testo, al suo posto i prossimi brani: niente mezzo schermo vuoto
-      const up = Jam.role === 'guest' ? Jam.queue.slice(0, 12) : S.queue.slice(S.index + 1, S.index + 13);
+      const up = Jam.role === 'guest' ? Jam.queue.slice(0, 12) : Radio.st ? Radio.next() : S.queue.slice(S.index + 1, S.index + 13);
       pane.innerHTML = `<p class="sub">${lyr ? 'Brano strumentale.' : `Nessun testo per questo brano.${P.lyricsOnline ? '' : ' Attiva la ricerca online dei testi nelle impostazioni.'}`}</p>
         ${up.length ? `<h2 style="margin-top:8px">Prossimi</h2>${songList(up)}` : ''}`;
-      if (up.length && Jam.role !== 'guest') { S.lastList = up; pane.querySelectorAll('.song').forEach(el => el.dataset.act = 'qplayoff'); }
+      if (up.length && Jam.role !== 'guest' && !Radio.st) { S.lastList = up; pane.querySelectorAll('.song').forEach(el => el.dataset.act = 'qplayoff'); }
     }
     else {
       const off = store.get('lyrOff:' + key(t), 0);
@@ -1896,9 +1905,9 @@ async function vNow() {
     }
   } else if (tab === 'next') {
     const remote = Live.remote();
-    const up = Jam.role === 'guest' ? Jam.queue.slice(0, 25) : remote ? arr(Live.st()?.next).map(localize).filter(Boolean) : S.queue.slice(S.index + 1, S.index + 26);
+    const up = Jam.role === 'guest' ? Jam.queue.slice(0, 25) : Radio.st ? Radio.next() : remote ? arr(Live.st()?.next).map(localize).filter(Boolean) : S.queue.slice(S.index + 1, S.index + 26);
     pane.innerHTML = up.length ? songList(up) : '<div class="empty">Non c\'è altro in coda.</div>';
-    if (Jam.role !== 'guest') S.lastList = up, pane.querySelectorAll('.song').forEach(el => el.dataset.act = remote ? 'qremote' : 'qplayoff');
+    if (Jam.role !== 'guest' && !Radio.st) S.lastList = up, pane.querySelectorAll('.song').forEach(el => el.dataset.act = remote ? 'qremote' : 'qplayoff');
   } else {
     const s = srv(t.serverId);
     let raw = null; try { raw = s && (await api('getSong', { id: t.id }, s)).song; } catch {}
@@ -2422,6 +2431,12 @@ async function shareItem(id, name, sid = S.active) {
     if (navigator.share) { try { await navigator.share({ title: name, text: `Ascolta "${name}" su Armony`, url }); return; } catch {} }
     await copyText(url); toast('Link copiato. Funziona per 30 giorni, anche per chi non ha un account.');
   } catch (e) { toast(e.message.includes('sharing') || e.message.includes('70') ? 'Le condivisioni non sono attive sul server (ND_ENABLESHARING).' : e.message); }
+}
+// brani simili all'artista; se il server non ne conosce, tutti i suoi album
+async function artistRadio(id) {
+  let songs = []; try { songs = arr((await api('getSimilarSongs2', { id, count: 80 })).similarSongs2?.song); } catch {}
+  if (!songs.length) { const a = (await api('getArtist', { id })).artist; const albums = await Promise.all(arr(a.album).map(al => api('getAlbum', { id: al.id }))); songs = albums.flatMap(r => arr(r.album.song)); }
+  return songs;
 }
 async function radioFrom(t) {
   toast('Preparo la radio…');
@@ -3150,7 +3165,8 @@ view.addEventListener('click', async e => {
         const albums = await Promise.all(arr(a.album).map(al => api('getAlbum', { id: al.id })));
         setQueue(albums.flatMap(r => arr(r.album.song).map(x => norm(x))), 0, S.shuffle); break;
       }
-      case 'artistradio': { let songs = []; try { songs = arr((await api('getSimilarSongs2', { id, count: 80 })).similarSongs2?.song); } catch {} if (!songs.length) { const a = (await api('getArtist', { id })).artist; const albums = await Promise.all(arr(a.album).map(al => api('getAlbum', { id: al.id }))); songs = albums.flatMap(r => arr(r.album.song)); } setQueue(songs.map(x => norm(x)), 0, true); break; }
+      case 'artistradio': setQueue((await artistRadio(id)).map(x => norm(x)), 0, true); break;
+      case 'rnew': Radio.create(); break;
       case 'qup': if (i > 0) { [S.queue[i - 1], S.queue[i]] = [S.queue[i], S.queue[i - 1]]; if (S.index === i) S.index--; else if (S.index === i - 1) S.index++; persistQueue(); vQueue(); } break;
       case 'qdn': if (i < S.queue.length - 1) { [S.queue[i + 1], S.queue[i]] = [S.queue[i], S.queue[i + 1]]; if (S.index === i) S.index++; else if (S.index === i + 1) S.index--; persistQueue(); vQueue(); } break;
       case 'qrm':
@@ -3491,7 +3507,7 @@ const Live = {
   on() { const s = srv(); return P.live !== false && !!s?.session && !!s.me?.caps?.includes('live'); },
   st() { return this.target ? this.states.get(this.target) || null : null; },
   // telecomando: c'è un dispositivo di destinazione collegato e qui non sta suonando niente
-  remote() { return !Jam.role && !!this.target && this.devices.has(this.target) && Engine.el.paused; },
+  remote() { return !Jam.role && !Radio.st && !!this.target && this.devices.has(this.target) && Engine.el.paused; },
   track() { const s = this.st(); return s?.track ? localize(s.track) : null; },
   playing() { return !!this.st()?.playing; },
   pos() { const s = this.st(); if (!s) return 0; const p = (s.position || 0) + (s.playing ? (Date.now() - s.recvAt) / 1000 * (s.rate || 1) : 0); return s.duration ? Math.min(p, s.duration) : p; },
@@ -3533,8 +3549,9 @@ const Live = {
     if (m.type === 'ping') return;
     if (m.type === 'kicked') return this.stop();  // un'altra scheda di questo dispositivo ha preso il canale
     if (m.type === 'presence' || m.type === 'activity') return Presence.recv(m);  // gli altri utenti del server
+    if (m.type === 'radio') return Radio.recv(m);  // stazioni e ascoltatori della Jam Radio
     if (m.type === 'hello') {
-      Presence.hello(m);
+      Presence.hello(m); Radio.hello(m);
       this.devices = new Map(arr(m.devices).map(d => [d.device, d.name]));
       this.states = new Map(arr(m.states).map(s => [s.device, { ...s, recvAt: now }]));
       const p = arr(m.states).find(s => s.playing && !s.solo);
@@ -3550,8 +3567,9 @@ const Live = {
       const s = { ...m.state, recvAt: now }; this.states.set(s.device, s); this.devices.set(s.device, s.name);
       if (s.solo && this.target === s.device) this.target = null;  // si è sganciato: non è più la nostra uscita
       if (s.playing && !s.solo && !P.solo && !Jam.role) {
-        // un solo dispositivo suona: chi comincia ferma gli altri
-        if (!Engine.el.paused) { Engine.el.pause(); toast(`La musica è passata su ${s.name}.`); }
+        // un solo dispositivo suona: chi comincia ferma gli altri (anche la radio)
+        if (Radio.st) { if (Radio.on) toast(`La musica è passata su ${s.name}.`); Radio.leave(true); }
+        else if (!Engine.el.paused) { Engine.el.pause(); toast(`La musica è passata su ${s.name}.`); }
         this.target = s.device;
       }
     } else if (m.type === 'cmd') return this.exec(m);
@@ -3567,6 +3585,7 @@ const Live = {
       return;
     }
     if (m.cmd === 'handoff') { if (v?.to && v.to !== S.device) this.give(v.to); return; }
+    if (Radio.st) return ({ play: () => Radio.resume(), pause: () => Radio.pause(), toggle: ctlToggle })[m.cmd]?.();  // radio: solo play e pausa
     if (this.remote() || !S.queue[S.index]) return;  // i comandi valgono solo per chi suona
     ({ play: () => Engine.el.paused && ctlToggle(), pause: () => !Engine.el.paused && ctlToggle(), toggle: ctlToggle,
       next: () => ctlNext(false), prev: ctlPrev, skipto: () => typeof v === 'number' && S.queue[S.index + 1 + v] && playIndex(S.index + 1 + v), seek: () => typeof v === 'number' && ctlSeek(v), shuffle: ctlShuffle, repeat: ctlRepeat })[m.cmd]?.();
@@ -3579,6 +3598,7 @@ const Live = {
   pack(q, i, pos) { const from = Math.max(0, i - 50); return { queue: q.slice(from, from + 1000).map(wire), index: i - from, position: pos }; },
   // la coda di questo dispositivo va a un altro, che riparte dallo stesso punto; qui si diventa telecomando
   async give(to) {
+    if (Radio.st) await Radio.leave(true);  // si passa la coda, non la radio
     if (!S.queue[S.index]) return;
     const v = this.pack(S.queue, Math.max(0, S.index), Engine.time());
     Engine.el.pause(); this.publish(); this.target = P.solo ? null : to; this.paint();
@@ -3614,11 +3634,11 @@ const Live = {
   },
   publish() {
     if (!this.es || !this.on() || Jam.role === 'guest') return;
-    const t = S.queue[S.index]; if (!t) return;
+    const t = Radio.st ? Radio.track : S.queue[S.index]; if (!t) return;
     if (this.remote() && !this.sent?.playing) return;  // telecomando: niente da dire, salvo la pausa appena fatta
-    const up = S.queue.slice(S.index + 1, S.index + 21);
-    const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: Engine.time(), duration: Engine.duration(), rate: P.speed, shuffle: S.shuffle, repeat: S.repeat, track: wire(t),
-      next: up.map(wire), left: Math.max(0, S.queue.length - S.index - 1) };
+    const rd = Radio.st, up = rd ? Radio.next() : S.queue.slice(S.index + 1, S.index + 21);
+    const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: rd ? Radio.pos() : Engine.time(), duration: playDur(), rate: rd ? 1 : P.speed, shuffle: S.shuffle, repeat: S.repeat, track: wire(t),
+      next: up.map(wire), left: rd ? up.length : Math.max(0, S.queue.length - S.index - 1), radio: rd ? { id: rd.id, name: rd.name, r: Radio.path(rd) } : null };
     now.sig = up.map(x => x.id).join() + '|' + now.left;  // solo per accorgersi che la coda è cambiata
     if (now.playing && this.target) { this.target = null; this.pill(); }
     const s = this.sent, exp = s ? s.position + (s.playing ? (Date.now() - s.at) / 1000 * s.rate : 0) : 0;
@@ -3746,6 +3766,7 @@ const Presence = {
   },
   playingCount() { return this.people().filter(e => e.playing).length; },
   listen(e) {
+    if (e.radio?.id) return Radio.tune(Radio.find((e.radio.r ? e.radio.r + '/' : '') + e.radio.id) || { id: e.radio.id, name: e.radio.name, on: true, path: e.radio.r ? e.radio.r.split(',') : [] });
     const t = this.track(e); if (!t?.id) return;
     // dallo stesso punto, se suona qui; come telecomando o in una Jam si parte dall'inizio
     if (Jam.role || Live.remote()) return setQueue([t], 0);
@@ -3757,6 +3778,7 @@ const Presence = {
     const l = a.link || {};
     if (l.playlist) location.hash = '#/playlist/' + encodeURIComponent(l.playlist);
     else if (l.amici) location.hash = '#/amici';
+    else if (l.radio) location.hash = '#/radio';
     else if (l.album) {
       // l'album appena scaricato o caricato si cerca per nome: l'id lo decide Navidrome quando lo vede
       let r = []; try { r = arr((await api('search3', { query: l.album, albumCount: 10, artistCount: 0, songCount: 0 })).searchResult3?.album); } catch {}
@@ -3767,9 +3789,9 @@ const Presence = {
   sheet(k) {
     const e = this.map.get(k); if (!e) return;
     const t = this.track(e), d = $('#dlg'); d.className = 'sheet';
-    d.innerHTML = `<div class="head">${pavatar(e, 'l')}<span class="grow" style="min-width:0"><b style="display:block">${esc(pname(e))}</b><small style="color:var(--muted)">${e.playing ? 'Sta ascoltando' : 'In pausa'}${e.devName ? ' · ' + esc(e.devName) : ''}</small></span></div>
+    d.innerHTML = `<div class="head">${pavatar(e, 'l')}<span class="grow" style="min-width:0"><b style="display:block">${esc(pname(e))}</b><small style="color:var(--muted)">${e.playing ? 'Sta ascoltando' : 'In pausa'}${e.radio ? ` la radio «${esc(e.radio.name)}»` : e.devName ? ' · ' + esc(e.devName) : ''}</small></span></div>
       <div class="pcard" data-pk="${esc(k)}"><span class="pic">${imgTag(t.coverArt, 120, t.serverId)}</span><span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small><span class="pbar"><i></i></span></span></div>
-      <button class="mi" data-x="listen">${ic('headphones')}Ascolta anche tu</button>
+      <button class="mi" data-x="listen">${ic('headphones')}${e.radio ? 'Sintonizzati anche tu' : 'Ascolta anche tu'}</button>
       ${t.albumId ? `<button class="mi" data-x="album">${ic('album')}<span class="grow" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Apri l'album «${esc(t.album || t.title)}»</span></button>` : ''}
       ${t.artistId ? `<button class="mi" data-x="artist">${ic('artist')}Vai a ${esc(t.artist)}</button>` : ''}`;
     d.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
@@ -3791,7 +3813,7 @@ const Presence = {
       side.hidden = !ppl.length;
       if (ppl.length && !side.firstElementChild) side.innerHTML = '<h3>In ascolto ora</h3><div class="plist"></div>', window.autoAnimate?.(side.lastChild);
       if (ppl.length) keyed(side.lastChild, ppl.map(e => { const t = this.track(e); return { k: pkey(e), cls: 'prow' + (e.playing ? '' : ' paused'), html:
-        `<button class="pgo" data-pact="open">${pavatar(e)}<span class="grow"><b>${esc(pname(e))}${peq(e.playing)}</b><small>${e.playing ? '' : 'In pausa · '}${esc(t.title)} · ${esc(t.artist)}</small></span></button>
+        `<button class="pgo" data-pact="open">${pavatar(e)}<span class="grow"><b>${esc(pname(e))}${peq(e.playing)}</b><small>${e.playing ? '' : 'In pausa · '}${e.radio ? `Radio «${esc(e.radio.name)}» · ` : ''}${esc(t.title)} · ${esc(t.artist)}</small></span></button>
         <button class="icon-btn" data-pact="listen" aria-label="Ascolta anche tu" title="Ascolta anche tu">${ic('headphones')}</button>`, attrs: { 'data-pk': pkey(e) } }; }));
     }
     // puntino su Amici: nella barra laterale e, sul telefono, su "Altro" (Amici sta lì)
@@ -3814,12 +3836,12 @@ const Presence = {
     const now = $('#presNow'), feed = $('#presFeed');
     [now, feed].forEach(b => { if (b) b._aa ||= window.autoAnimate?.(b) || 1; });
     if (now) keyed(now, ppl.length ? ppl.map(e => { const t = this.track(e); return { k: pkey(e), cls: 'pnow-row' + (e.playing ? '' : ' paused'), attrs: { 'data-pk': pkey(e) }, html:
-      `<button class="pgo" data-pact="open">${pavatar(e, 'm')}<span class="grow"><b>${esc(pname(e))}${peq(e.playing)}<small> · ${e.playing ? '' : 'in pausa · '}${esc(e.devName || '')}</small></b>
+      `<button class="pgo" data-pact="open">${pavatar(e, 'm')}<span class="grow"><b>${esc(pname(e))}${peq(e.playing)}<small> · ${e.playing ? '' : 'in pausa · '}${e.radio ? `ascolta la radio «${esc(e.radio.name)}»` : esc(e.devName || '')}</small></b>
         <span class="ptrack"><span class="pic">${imgTag(t.coverArt, 80, t.serverId)}</span><span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small></span></span><span class="pbar"><i></i></span></span></button>
       <button class="btn sm" data-pact="listen">${ic('headphones')} Ascolta</button>` }; })
       : [{ k: 'vuoto', cls: 'empty', html: 'Nessuno sta ascoltando in questo momento.' }]);
     if (feed) keyed(feed, this.acts.length ? this.acts.map(a => ({ k: a.id, cls: 'pact' + (a.link ? ' go' : ''), attrs: a.link ? { 'data-pact': 'act', role: 'link', tabindex: '0' } : {}, html:
-      `${pavatar(a, 's')}<span class="grow"><span><b>${esc(a.user === srv()?.user ? 'Tu' : a.name || a.user)}</b> ${esc(a.text)}</span><small data-at="${Math.round(a.at * 1000 + this.skew)}"></small></span>${ic({ download: 'down', upload: 'up', playlist: 'list', jam: 'jam' }[a.kind] || 'friends')}` }))
+      `${pavatar(a, 's')}<span class="grow"><span><b>${esc(a.user === srv()?.user ? 'Tu' : a.name || a.user)}</b> ${esc(a.text)}</span><small data-at="${Math.round(a.at * 1000 + this.skew)}"></small></span>${ic({ download: 'down', upload: 'up', playlist: 'list', jam: 'jam', radio: 'radio' }[a.kind] || 'friends')}` }))
       : [{ k: 'vuoto', cls: 'empty', html: 'Ancora niente. Qui compaiono download, caricamenti, playlist condivise e Jam degli amici.' }]);
     // segni sui contenuti: chi ascolta proprio questo brano, album o artista
     const sid = S.active, here = playing.map(e => [e, this.track(e)]).filter(([, t]) => t.serverId === sid);
@@ -3870,9 +3892,11 @@ function wirePlayer() {
   $('#sleepPill').onclick = sleepDialog; $('#jamPill').onclick = () => location.hash = '#/jam';
   $('#bShuf').onclick = () => {
     if (Jam.role === 'guest') return toast('Durante una Jam l\'ordine lo decide l\'host.');
+    if (Radio.st) return radioNo();
     Live.remote() ? Live.cmd('shuffle') : ctlShuffle();
   };
-  $('#bRep').onclick = () => Live.remote() ? Live.cmd('repeat') : ctlRepeat();
+  $('#bRep').onclick = () => Radio.st ? radioNo() : Live.remote() ? Live.cmd('repeat') : ctlRepeat();
+  $('#radioPill').onclick = () => Radio.st && Radio.sheet(Radio.st);
   $('#vol').value = P.volume * 100;
   $('#vol').oninput = e => { P.volume = e.target.value / 100; savePrefs(); Engine.applyVolume(); rangeFill(e.target); };
   $('#seek').oninput = () => { seeking = true; $('#tCur').textContent = fmt($('#seek').value / 1000 * playDur()); rangeFill($('#seek')); };
@@ -3946,5 +3970,5 @@ async function boot() {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete)/.test(location.hash)) route(); });
+  syncSessions().then(async () => { Live.connect(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
 }

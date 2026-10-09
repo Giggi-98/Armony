@@ -36,6 +36,9 @@ Armony - server di supporto.
   /fed/hello, /fed/v1/*  federazione fra server (federazione.py): richieste firmate Ed25519 dai nodi collegati
   /api/fed/*            collegamenti fra server, solo amministratori (federazione.py)
   /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download"
+  /api/radio/*          Jam Radio (radio.py): stazioni che girano sul server, a orario; ci si sintonizza.
+                        /api/rete/radio/* quelle dei server collegati, /fed/v1/radio* e /fed/v1/ora fra i nodi;
+                        ascoltatori e stazioni in tempo reale sul canale /api/live ({"type": "radio"})
 """
 import collections
 import hashlib
@@ -64,6 +67,7 @@ from yt_dlp.postprocessor.metadataparser import MetadataParserPP
 import db
 import federazione
 import metadati
+import radio
 
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
 VIDEO_DIR = os.environ.get("VIDEO_DIR", "/videos")
@@ -89,9 +93,9 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "app", "indirizzo"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "app", "indirizzo", "radio"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
-RULES = (("/api/update", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/update", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -745,7 +749,7 @@ lconns = {}    # utente -> {id connessione: {"device", "name", "q"}}
 lstates = {}   # utente -> {dispositivo: ultimo stato}
 llock = threading.Lock()
 LIVE_BEAT_MAX = 120  # secondi senza battito prima di dare per sparito un dispositivo (Android in sottofondo batte anche 1/min)
-LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat", "next", "left")
+LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat", "next", "left", "radio")
 
 
 def live_put(user, msg, only=None, skip=None):
@@ -794,7 +798,7 @@ def live_stream():
     with alock:
         recent = [act_pub(a) for a in acts]
     hello = json.dumps({**hello, "presence": pres_all(), "activity": [a for a in recent if pres_who(a["user"])[0]],
-                        "share": pres_who(u)[0], "now": time.time()})
+                        "share": pres_who(u)[0], "now": time.time(), "radio": radio.all_summaries()})
     if not old or hb:  # dopo un fantasma "join" dice agli altri di dimenticare lo stato vecchio
         live_put(u, {"type": "join", "device": dev, "name": name}, skip=dev)
 
@@ -820,6 +824,7 @@ def live_stream():
             if gone:
                 live_put(u, {"type": "gone", "device": dev})
                 pres_gone(u, dev)
+                radio.device_gone(u, dev)
 
     return Response(stream_with_context(gen()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -904,11 +909,13 @@ def pres_entry(u, st, now=None):
     # la posizione è portata ad "adesso": chi riceve non deve conoscere l'orologio del server
     now = now or time.time()
     t = st["track"] if isinstance(st.get("track"), dict) else {}
+    rd = st["radio"] if isinstance(st.get("radio"), dict) else None  # sta ascoltando una Jam Radio
     rate = st.get("rate") if isinstance(st.get("rate"), (int, float)) else 1
     pos = (st.get("position") if isinstance(st.get("position"), (int, float)) else 0) + ((now - st["at"]) * rate if st.get("playing") else 0)
     return {"user": u, "name": pres_who(u)[1], "device": st["device"], "devName": st.get("name"), "playing": bool(st.get("playing")),
             "position": round(pos, 1), "duration": st.get("duration") or t.get("duration") or 0, "rate": rate,
-            "track": {k: t[k] for k in PRES_TRACK if k in t}, "since": round(now - st["at"])}
+            "track": {k: t[k] for k in PRES_TRACK if k in t}, "since": round(now - st["at"]),
+            "radio": {k: str(rd[k])[:200] for k in ("id", "name", "r") if rd.get(k)} if rd else None}
 
 
 def pres_all():
@@ -1808,6 +1815,7 @@ def delete_video(p):
 
 # federazione fra server: rotte /fed e /api/fed, /api/rete (usano da qui http, credenziali Navidrome, lavori)
 federazione.init(app, sys.modules[__name__])
+radio.init(app, sys.modules[__name__])
 
 
 # ------------------------------------------------------------------ client
@@ -1833,6 +1841,7 @@ if __name__ == "__main__":
     resume_jobs()
     threading.Thread(target=gc_rooms, daemon=True).start()
     federazione.start()
+    radio.start()
     if MULTICAST:
         threading.Thread(target=mcast_sender, daemon=True).start()
         threading.Thread(target=mcast_listener, daemon=True).start()

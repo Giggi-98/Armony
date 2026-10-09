@@ -324,3 +324,32 @@ ma viene dopo. La ricondivisione dei *file* resta esclusa.
   calcolare lo SHA-256 (come per eliminare e modificare i brani).
 - "Collega" dalla scoperta LAN, offerte parziali, abbonamenti, giri pianificati
   e doppioni per hash prima della copia: non ancora.
+
+## 15. Jam Radio fra server collegati (2026-10-09)
+
+Le stazioni della Jam Radio (`server/radio.py`) vivono sul server che le ha
+create: elenco dei brani con le durate e istante d'inizio, salvati in SQLite
+(tabella `radio`). Cosa è in onda si calcola dal tempo di quel server. Per la
+rete si aggiungono solo rotte: `proto` resta 1.
+
+- `POST /fed/v1/radio` (firmata, corpo `{rid, ttl, ms, skip}` come
+  `/fed/v1/vicini`): le stazioni **in onda** del nodo, più quelle dei suoi
+  vicini se restano salti. Stessa visibilità della mappa: un nodo inoltra solo
+  verso i vicini che permettono di essere visti dagli amici degli amici, e
+  solo per nodi collegati a lui. Ogni stazione porta `path` e `node` (nome e
+  proprietario del server che la trasmette).
+- `GET /fed/v1/radio/<id>?via=…`: brano in onda e i tre successivi, con gli
+  istanti d'inizio; `POST /fed/v1/radio/<id>/ascolta?via=…` `{key, name,
+  user, server, on}` entra o esce dal conteggio degli ascoltatori (il server di
+  chi ascolta lo ripete ogni minuto; senza conferma si esce dopo 150 s). Chi
+  ha spento "mostra agli altri cosa ascolto" arriva senza nome: conta, ma non
+  compare.
+- `GET /fed/v1/ora`: l'ora del nodo. Ogni nodo stima lo scarto col vicino
+  (tre campioni, vale quello con l'andata e ritorno più breve, rifatto ogni
+  due minuti) e porta gli istanti ricevuti sul proprio orologio prima di
+  passarli avanti: a catena, ogni salto corregge il suo pezzo. Il client si
+  allinea poi col proprio server (`/api/jam/ora`, come la Jam).
+- L'audio passa da `/api/rete/stream` come per gli altri brani della rete, quindi
+  si sentono solo i brani del catalogo (`musica/`): un brano copiato in
+  `federati/` dentro una stazione non viene ricondiviso, e chi ascolta da un
+  altro server ha silenzio fino al brano dopo.
