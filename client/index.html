@@ -114,8 +114,24 @@ textarea,select[multiple]{padding:10px 14px}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 textarea{resize:vertical;min-height:84px}
 label.f{display:flex;flex-direction:column;gap:6px;font-size:.86rem;color:var(--muted);font-weight:600}
-label.check{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
-label.check input{margin-top:5px;accent-color:var(--accent)}
+/* opzioni on/off: interruttore a destra, testo a sinistra (il markup resta input + span) */
+label.check{display:flex;flex-direction:row-reverse;justify-content:space-between;gap:var(--s4);align-items:center;cursor:pointer;min-height:var(--hit);padding:var(--s1) 0}
+label.check>span{flex:1;min-width:0}
+label.check input{appearance:none;-webkit-appearance:none;flex:none;position:relative;width:44px;height:24px;margin:0;border-radius:99px;background:var(--surface2);box-shadow:inset 0 0 0 1px var(--line);cursor:pointer;transition:background var(--t-tap) var(--ease-out),box-shadow var(--t-tap) ease}
+label.check input::before{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--muted);box-shadow:0 1px 3px rgb(0 0 0 / .3);transition:transform var(--t-tap) var(--ease-out),background var(--t-tap) ease}
+label.check input:checked{background:var(--accent);box-shadow:none}
+label.check input:checked::before{transform:translateX(20px);background:var(--on-accent)}
+label.check input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+label.check input:disabled{opacity:.45;cursor:not-allowed}
+/* scelte multiple (permessi degli utenti): casella vera, a sinistra del testo */
+label.check.box{flex-direction:row;justify-content:flex-start;gap:var(--s2);min-height:36px}
+label.check.box>span{flex:0 1 auto}
+label.check.box input{width:20px;height:20px;border-radius:6px;background:var(--bg);box-shadow:inset 0 0 0 2px var(--line)}
+label.check.box input::before{display:none}
+label.check.box input:checked{background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center/14px no-repeat}
+@media (prefers-reduced-motion:reduce){label.check input,label.check input::before{transition:none}}
+/* select con la freccia disegnata */
+select:not([multiple]){appearance:none;-webkit-appearance:none;padding-right:38px;cursor:pointer;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") right 12px center/16px no-repeat}
 label.check small{display:block;color:var(--muted)}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--s3) var(--s4)}
 .grid2>*,.stack>*{min-width:0}
@@ -123,8 +139,8 @@ label.check small{display:block;color:var(--muted)}
 .seg{display:inline-flex;background:var(--surface2);border-radius:999px;padding:3px;gap:2px;flex-wrap:wrap}
 .seg label{padding:0 14px;min-height:calc(var(--hit) - 6px);display:inline-flex;align-items:center;border-radius:999px;cursor:pointer;font-weight:600;font-size:.92rem;color:var(--muted);transition:background var(--t-tap) ease,color var(--t-tap) ease}
 .seg input{position:absolute;opacity:0;pointer-events:none}
-.seg label:has(input:checked){background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgb(0 0 0 / .18)}
-.seg label:has(input:focus-visible){outline:2px solid var(--accent)}
+.seg label:has(input:checked){background:var(--ink);color:var(--bg);box-shadow:0 1px 3px rgb(0 0 0 / .18)}
+.seg label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
 .seg label>span{display:inline-flex;align-items:center;gap:6px}
 .seg svg{width:16px;height:16px;flex:none}
 .stack>.seg{justify-self:start;max-width:100%}
@@ -208,6 +224,55 @@ label.check small{display:block;color:var(--muted)}
 .tag.acc{background:var(--accent-soft);color:var(--ink)}
 .banner{display:flex;gap:var(--s3) var(--s4);align-items:center;background:var(--accent-soft);border-radius:var(--r-l);padding:var(--s4) var(--s5);margin-bottom:var(--s4);flex-wrap:wrap}
 .banner .grow{flex:1;min-width:200px}
+
+/* === C: moduli e pagine di servizio === */
+/* "Altre opzioni" e simili: freccia disegnata al posto del triangolo del sistema */
+details:not(.sgroup)>summary{list-style:none;display:inline-flex;align-items:center;gap:6px;min-height:var(--hit);font-weight:600}
+details:not(.sgroup)>summary::-webkit-details-marker{display:none}
+details:not(.sgroup)>summary::before{content:"";width:8px;height:8px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(-45deg);transition:transform var(--t-tap) var(--ease-out);margin-right:4px}
+details:not(.sgroup)[open]>summary::before{transform:rotate(45deg)}
+/* impostazioni: gli interruttori sono righe separate da una linea sottile */
+.stack>label.check+label.check{border-top:1px solid var(--line);padding-top:var(--s3);margin-top:calc(-1 * var(--s1))}
+label.check small{font-size:.86rem;margin-top:2px;line-height:1.4}
+/* pagine di servizio: testo a misura d'occhio, due colonne dove c'è spazio */
+.svc{display:grid;gap:var(--s5);align-items:start}
+.svc>*{min-width:0}
+.svc-side>.row.between:first-child h2{margin-top:0}
+#jobs .list-item,#vids .list-item{border-radius:var(--r-m)}
+.jamgrid .panel h3,.svc .panel h3{margin-top:0}
+.reacts button{min-width:44px;min-height:44px;transition:transform var(--t-tap) var(--ease-out)}
+.reacts button:active{transform:scale(.9)}
+.peer:last-child{border-bottom:0}
+@media (min-width:1280px){
+  .svc{grid-template-columns:minmax(0,680px) minmax(0,1fr);gap:var(--s6)}
+  .svc-side{position:sticky;top:var(--s4)}
+  .svc-side>.row.between:first-child{margin-top:0}
+  .jamgrid{gap:var(--s6)}
+}
+@media (min-width:1700px){.jamgrid{grid-template-columns:minmax(0,1.4fr) minmax(360px,1fr)}}
+/* dialoghi: titolo, spazi e pulsanti in fondo come un unico modulo */
+dialog h3{margin:0 0 var(--s3);font-size:1.2rem}
+dialog:not(.sheet)>.row:last-child{justify-content:flex-end;margin-top:var(--s5);gap:var(--s2)}
+dialog .stack{gap:var(--s4)}
+/* apertura: scala da 0.96 sul desktop, foglio dal basso sul telefono; chiusura uguale al contrario */
+dialog{opacity:0;transform:scale(.96);transition:opacity 200ms var(--ease-out),transform 220ms var(--ease-out),display 220ms allow-discrete,overlay 220ms allow-discrete}
+dialog[open]{opacity:1;transform:none}
+@starting-style{dialog[open]{opacity:0;transform:scale(.96)}}
+dialog::backdrop{opacity:0;transition:opacity 200ms ease,display 220ms allow-discrete,overlay 220ms allow-discrete}
+dialog[open]::backdrop{opacity:1}
+@starting-style{dialog[open]::backdrop{opacity:0}}
+@media (max-width:860px){
+  dialog.sheet{transform:translateY(100%);opacity:1;transition:transform 280ms var(--ease-out),display 280ms allow-discrete,overlay 280ms allow-discrete}
+  dialog.sheet[open]{transform:none}
+  @starting-style{dialog.sheet[open]{transform:translateY(100%)}}
+  .svc{gap:var(--s4)}
+}
+@media (prefers-reduced-motion:reduce){
+  dialog,dialog.sheet{transform:none!important;transition:opacity 150ms ease,display 150ms allow-discrete,overlay 150ms allow-discrete}
+  @starting-style{dialog[open],dialog.sheet[open]{transform:none}}
+  details:not(.sgroup)>summary::before{transition:none}
+}
+/* === fine C === */
 
 /* in riproduzione */
 .now:not(.song){display:grid;grid-template-columns:minmax(260px,420px) minmax(0,1fr);gap:clamp(20px,4vw,56px);align-items:start}
@@ -416,7 +481,7 @@ aside{view-transition-name:side}
   .icon-btn:hover{background:var(--surface2);color:var(--ink)}
   .song:hover,.list-item:hover{background:var(--surface2)}
   .tabs a:hover,.tabs button:hover{color:var(--ink)}
-  .seg label:hover{color:var(--ink)}
+  .seg label:not(:has(input:checked)):hover{color:var(--ink)}
   .strip-nav:hover{border-color:var(--muted)}
   input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.2)}
   ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:99px;border:2px solid var(--bg)}::-webkit-scrollbar-track{background:transparent}

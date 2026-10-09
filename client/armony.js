@@ -1548,6 +1548,7 @@ async function vDownload(sub = '') {
   if (S.dl.url && !access().download) { view.innerHTML = `<h1>Scarica</h1>${tabs}<div class="empty">I download non sono abilitati per il tuo utente. Chiedilo a chi gestisce il server.</div>`; return; }
   view.innerHTML = `<h1>Scarica</h1><p class="sub">Da YouTube, SoundCloud, Bandcamp, Vimeo e centinaia di altri siti. L'audio entra nella libreria, i video restano qui sotto.</p>
   ${tabs}
+  <div class="svc"><div class="svc-main">
   <div class="panel">
     ${t === 'link' ? `<label class="f">Link, uno per riga<textarea id="dUrl" placeholder="https://www.youtube.com/watch?v=..."></textarea></label>`
       : `<div class="row" style="flex-wrap:nowrap"><input type="search" id="ySearch" placeholder="Artista e titolo" value="${esc(q0)}"><select id="ySrc" style="width:auto"><option value="yt">YouTube</option><option value="sc">SoundCloud</option></select><button class="btn primary" id="yGo">${ic('search')}</button></div>`}
@@ -1564,9 +1565,10 @@ async function vDownload(sub = '') {
     ${t === 'link' ? `<div class="row" style="margin-top:14px"><button class="btn primary" id="dGo">${ic('down')} Scarica</button></div>` : ''}
   </div>
   ${t === 'cerca' ? '<div id="yRes"></div>' : ''}
+  </div><div class="svc-side">
   <div class="row between"><h2>Download</h2><button class="btn sm" data-act="clearjobs">Rimuovi conclusi</button></div>
   <div id="jobs"><p class="sub">Caricamento…</p></div>
-  <h2>Video</h2><div id="vids"></div>`;
+  <h2>Video</h2><div id="vids"></div></div></div>`;
   const setOpts = () => {
     const m = $('[name=mode]:checked').value;
     $('#dFmt').innerHTML = m === 'audio' ? '<option value="mp3">MP3</option><option value="m4a">M4A (AAC)</option><option value="opus">Opus</option><option value="flac">FLAC</option>' : '<option value="mp4">MP4</option>';
@@ -2259,9 +2261,9 @@ async function refreshUsers() {
   let list; try { list = await dlApi('/api/users'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
   box.innerHTML = list.length ? list.map(u => `<div class="list-item" style="cursor:default;flex-wrap:wrap">
     <span class="grow"><b>${esc(u.user)}</b><small>${u.admin ? 'amministratore' : 'utente'}${u.seen ? ', ultimo accesso ' + new Date(u.seen * 1000).toLocaleDateString() : ''}</small></span>
-    <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="upload" ${u.upload || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Caricamento</span></label>
-    <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="download" ${u.download || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Download</span></label>
-    <label class="check" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="delete" ${u.delete || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Modifica ed eliminazione</span></label>
+    <label class="check box" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="upload" ${u.upload || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Caricamento</span></label>
+    <label class="check box" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="download" ${u.download || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Download</span></label>
+    <label class="check box" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="delete" ${u.delete || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Modifica ed eliminazione</span></label>
     ${u.sessions ? `<button class="btn sm" data-act="usrrevoke" data-user="${esc(u.user)}">Disconnetti</button>` : ''}</div>`).join('')
     : '<div class="empty">Nessun utente ha ancora fatto accesso da Armony.</div>';
   box.querySelectorAll('[data-usr]').forEach(el => el.onchange = async () => {
