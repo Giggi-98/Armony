@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-09 — Coda dei download raggruppata: gruppo deciso dal server, forma vecchia intatta
+
+**Contesto:** un'importazione Spotify può mettere in coda migliaia di brani; la coda li mostrava uno per uno e `/api/jobs` restituisce solo gli ultimi 200, quindi il client non poteva calcolare un avanzamento complessivo.
+**Scelta:** `/api/import` dà a tutti i brani della stessa richiesta un `batch` e un'etichetta (album o playlist); `GET /api/jobs?grouped=1` (capacità `jobgroups`) restituisce i gruppi già contati sul server (totale, finiti, errori, avanzamento, fino a 3 brani in corso e 50 errori) più i download singoli. Senza parametro la risposta resta quella di prima.
+**Alternative scartate:** raggruppare nel client (vede solo 200 brani); cambiare la forma di `/api/jobs` (romperebbe gli APK già installati, servirebbe alzare `API_LEVEL`).
+**Conseguenze:** "Rimuovi conclusi" toglie anche i brani finiti dai gruppi, che si accorciano.
+**Da rivedere se:** si aggiunge la possibilità di fermare o riprendere un gruppo intero.
+
 ## 2026-10-09 — Dal vivo: battito e ping al posto del commento SSE, e niente musica mandata ai fantasmi
 
 **Contesto:** una connessione mezza morta (app uccisa, cambio rete, schermo spento) restava "aperta" per sempre: il commento SSE non arriva al codice del client e il server non si accorge di un TCP mezzo aperto. In più, aprendo il PC subito dopo aver chiuso male il telefono mentre suonava, il PC diventava telecomando del telefono morto e la coda finiva lì.

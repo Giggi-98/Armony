@@ -434,10 +434,14 @@ function vInvite(code) {
 }
 
 /* ================= L: intestazioni di pagina, barra azioni, schede artista, riquadri colorati ================= */
+// percorso dentro l'app: il tasto ← delle intestazioni torna alla pagina di prima, o alla libreria se si è entrati da un link
+const navStack = [location.hash];
+addEventListener('hashchange', () => { if (navStack.at(-2) === location.hash) navStack.pop(); else navStack.push(location.hash); if (navStack.length > 50) navStack.shift(); });
+function goBack() { if (navStack.length > 1) history.back(); else location.hash = '#/libreria'; }
 function lPhero({ kind, title, art = '', round = false, meta = '', tile = '', ph }) {
   const url = ph ? coverUrl(ph, 300) : '';
   if (url) Glow.colors(url).then(c => { const el = $('#view .phero'); if (el && Glow.usable(c)) el.style.setProperty('--ph', Glow.tone(c.c1, .55, c.neutral)); });
-  return `<header class="phero${round ? ' round' : ''}"${tile.startsWith('#') ? ` style="--ph:${tile}"` : ''}><div class="phero-art${tile ? ' tile' : ''}"${tile ? ` style="--tile:${tile}"` : ''}>${art}</div>
+  return `<header class="phero${round ? ' round' : ''}"${tile.startsWith('#') ? ` style="--ph:${tile}"` : ''}><button class="ph-back" data-act="goback" aria-label="Indietro" title="Indietro">${ic('chevl')}</button><div class="phero-art${tile ? ' tile' : ''}"${tile ? ` style="--tile:${tile}"` : ''}>${art}</div>
     <div class="phero-txt"><span class="phero-kind">${kind}</span><h1 class="phero-title">${esc(title)}</h1>${meta ? `<p class="phero-meta">${meta}</p>` : ''}</div></header>`;
 }
 // barra azioni: play grande, poi icone; il resto nel foglio "⋯" (lMore)
@@ -786,7 +790,7 @@ function gapButtons(box, miss, alb) {
   const send = async ks => {
     const tracks = ks.map(k => { const t = miss[k]; return { title: t.title, artists: t.artists, ...alb, duration: t.duration, track: t.track, disc: t.disc, isrc: t.isrc }; });
     try {
-      const r = await dlApi('/api/import', { method: 'POST', body: JSON.stringify({ tracks, folder: store.get('impDir', 'Spotify') }) });
+      const r = await dlApi('/api/import', { method: 'POST', body: JSON.stringify({ tracks, folder: store.get('impDir', 'Spotify'), label: alb.album }) });
       ks.forEach(k => { const b = box.querySelector(`[data-gap="${k}"]`); if (b) b.outerHTML = '<span class="tag">in coda</span>'; });
       if (!box.querySelector('[data-gap]')) $('#gapsAll')?.remove();
       toast(r.added ? `${r.added} ${r.added === 1 ? 'traccia in coda' : 'tracce in coda'}: arrivano nell'album appena scaricate.` : 'Già in coda.');
@@ -1700,7 +1704,7 @@ async function vNow() {
       <div class="bigdisc ${isPlaying() ? 'spin' : ''}" id="bigdisc"><canvas id="viz" width="640" height="640"></canvas>
         <div class="rec">${t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 600, t.serverId))}" alt="">` : '<div class="lbl"></div>'}</div></div>
       <h1 style="margin-top:18px">${esc(t.title)}</h1>
-      <p class="sub">${t.artistId ? `<a href="#/artista/${encodeURIComponent(t.artistId)}">${esc(t.artist)}</a>` : esc(t.artist)}${t.album ? ` · ${t.albumId ? `<a href="#/album/${encodeURIComponent(t.albumId)}">${esc(t.album)}</a>` : esc(t.album)}` : ''}</p>
+      <p class="sub now-meta">${t.artistId ? `<a href="#/artista/${encodeURIComponent(t.artistId)}">${esc(t.artist)}</a>` : esc(t.artist)}${t.album ? ` · ${t.albumId ? `<a href="#/album/${encodeURIComponent(t.albumId)}">${esc(t.album)}</a>` : esc(t.album)}` : ''}</p>
       <div class="row now-acts">
         <button class="btn sm" data-act="nowmore">${ic('more')} Azioni</button>
         <button class="btn sm" data-act="sleep">${ic('moon')} Timer</button>
@@ -1949,11 +1953,27 @@ async function vDownload(sub = '') {
   }
   refreshJobs(); refreshVideos(); viewInterval(refreshJobs, 2000);
 }
+// un gruppo (importazione, album): una riga con l'avanzamento complessivo, i brani in corso e gli errori a richiesta
+const jobGroup = gr => {
+  const fin = gr.done + gr.errors >= gr.total, n = x => x.toLocaleString('it-IT');
+  return `<div class="panel jgroup" style="padding:14px">
+    <div class="row between" style="flex-wrap:nowrap"><b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(gr.label)}</b>
+    <span class="tag ${fin ? gr.errors ? 'err' : 'ok' : ''}">${fin ? gr.errors ? 'completato con errori' : 'completato' : Math.floor(gr.progress) + '%'}</span></div>
+    <small style="color:var(--muted)">${n(gr.done)} di ${n(gr.total)} brani scaricati${gr.errors ? ` · <span style="color:var(--danger)">${n(gr.errors)} non trovati</span>` : ''}${fin ? '' : ` · ${n(gr.total - gr.done - gr.errors)} da fare`}</small>
+    ${fin ? '' : `<div class="bar"><i style="width:${gr.progress}%"></i></div>`}
+    ${gr.running.map(r => `<div class="jnow">${ic('down')}<span>${esc(r.title || '')}</span><em>${Math.round(r.progress)}%</em></div>`).join('')}
+    ${gr.failed.length ? `<details class="jerr"><summary>Vedi i non trovati</summary>${gr.failed.map(f => `<div><b>${esc(f.title || '')}</b><small>${esc(f.error || '')}</small></div>`).join('')}${gr.errors > gr.failed.length ? `<small>…e altri ${n(gr.errors - gr.failed.length)}</small>` : ''}</details>` : ''}
+  </div>`;
+};
+const groupDone = new Map();  // gruppo → brani finiti all'ultimo controllo, per chiedere la scansione quando cresce
 async function refreshJobs() {
   const box = $('#jobs');
   try {
-    const jobs = await dlApi('/api/jobs');
-    if (box) box.innerHTML = jobs.length ? jobs.map(j => {
+    const grouped = !!srv()?.me?.caps?.includes('jobgroups');
+    const res = await dlApi('/api/jobs' + (grouped ? '?grouped=1' : '')), jobs = grouped ? res.jobs : res, groups = grouped ? res.groups : [];
+    let grew = false;
+    for (const gr of groups) { if (groupDone.has(gr.id) && gr.done > groupDone.get(gr.id)) grew = true; groupDone.set(gr.id, gr.done); }
+    if (box) box.innerHTML = groups.map(jobGroup).join('') + (jobs.length ? jobs.map(j => {
       const done = j.status.startsWith('completato'), err = j.status === 'errore';
       return `<div class="panel" style="padding:14px">
         <div class="row between" style="flex-wrap:nowrap"><b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.title || j.url)}</b>
@@ -1961,8 +1981,8 @@ async function refreshJobs() {
         <small style="color:var(--muted)">${j.mode === 'audio' ? 'Audio ' + esc(j.format.toUpperCase()) : 'Video'}, ${esc(j.quality === 'best' ? 'qualità massima' : j.quality)}</small>
         ${err ? `<p style="color:var(--danger);margin:6px 0 0;font-size:.88rem">${esc(j.error)}</p>` : done ? '' : `<div class="bar"><i style="width:${j.progress || 0}%"></i></div>`}
       </div>`;
-    }).join('') : '<div class="empty">Nessun download.</div>';
-    let audioDone = false, changed = false;
+    }).join('') : groups.length ? '' : '<div class="empty">Nessun download.</div>');
+    let audioDone = grew, changed = false;
     for (const j of jobs) if (j.status.startsWith('completato') && !scanned.has(j.id)) { scanned.add(j.id); changed = true; if (j.mode === 'audio') audioDone = true; else refreshVideos(); }
     if (changed) store.set('scanned', [...scanned].slice(-400));
     if (audioDone) {
@@ -2188,7 +2208,8 @@ async function importPlaylist() {
     <div class="row">${nMiss && canDl ? `<button class="btn primary" id="getMissing">Scarica i ${nMiss} mancanti</button>` : ''}<button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
   if (nMiss && canDl) $('#getMissing').onclick = async () => {
     try {
-      const r = await dlApi('/api/import', { method: 'POST', body: JSON.stringify({ tracks: [...missing.values()], folder: store.get('impDir', 'Spotify') }) });
+      const label = `Spotify: ${lists.length === 1 ? report[0]?.title || 'playlist' : lists.length + ' playlist'}`;
+      const r = await dlApi('/api/import', { method: 'POST', body: JSON.stringify({ tracks: [...missing.values()], folder: store.get('impDir', 'Spotify'), label }) });
       // in attesa: solo ciò che serve a riconoscerli quando arrivano in libreria
       const slim = it => ({ title: it.title, artist: it.artist, artists: it.artists, album: it.album, duration: it.duration, isrc: it.isrc });
       const pend = store.get('pending', []);
@@ -2455,6 +2476,8 @@ function vSettings() {
   <div class="row" style="margin-top:12px"><button class="btn primary" data-act="addsrv">${ic('plus')} Aggiungi server</button><button class="btn" data-act="lanscan">${ic('wifi')} Cerca sulla rete</button></div>
   <div id="lanRes"></div>`)}
 
+  ${grp('spazio', 'Spazio', 'memoria disco spazio occupato libero gb archiviazione', '<div class="panel stack" id="spazioBox"><p class="sub">Calcolo…</p></div>')}
+
   ${grp('ascolto', 'Ascolto', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
     <div class="grid2">
       <label class="f">Qualità<select data-p="quality">${opt(qOpts, P.quality)}</select></label>
@@ -2510,6 +2533,7 @@ function vSettings() {
   });
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
+  refreshSpazio();
   if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); }
   if (window.ARMONY_APP) AppUpdate.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
@@ -2533,6 +2557,33 @@ function settingsFilter(raw) {
   });
   const none = $('#setNone'); none.hidden = !q || shown > 0;
   if (q && !shown) none.innerHTML = `Nessuna impostazione contiene «${esc(raw.trim())}». Prova con una parola più corta, come «qualità» o «tema».`;
+}
+/* ================= spazio: disco del server in uso e memoria di questo dispositivo ================= */
+// barra a segmenti: [{ v: byte, l: etichetta, c: colore }], il resto della barra è il libero
+function spazioBar(total, parts, free) {
+  const pc = v => Math.max(0, Math.min(100, v / total * 100)).toFixed(2) + '%';
+  return `<div class="sbar" role="img" aria-label="${esc(parts.map(p => `${p.l} ${bytes(p.v)}`).join(', '))}, liberi ${bytes(free)}">${parts.map(p => `<i style="width:${pc(p.v)};background:${p.c}"></i>`).join('')}</div>
+    <div class="slegend">${parts.map(p => `<span><i style="background:${p.c}"></i>${esc(p.l)} <b>${bytes(p.v)}</b></span>`).join('')}<span><i class="free"></i>Liberi <b>${bytes(free)}</b></span></div>`;
+}
+async function refreshSpazio() {
+  const box = $('#spazioBox'); if (!box) return;
+  const s = srv(), here = NATIVE ? 'Questo telefono' : 'Questo browser';
+  let srvHtml = '';
+  if (s?.session && s.me?.caps?.includes('spazio')) {
+    try {
+      const d = await srvApi(s, '/api/spazio'), m = d.music?.bytes || 0, v = d.videos?.bytes || 0;
+      srvHtml = `<div><h3>Server ${esc(s.name)}</h3><p class="sub">${bytes(d.used)} occupati su ${bytes(d.total)}${d.music ? ` · ${d.music.files} file di musica` : ''}${d.counting && !d.music ? ' · sto contando la musica…' : ''}</p>
+        ${spazioBar(d.total, [{ v: m, l: 'Musica', c: 'var(--accent)' }, { v: v, l: 'Video', c: 'var(--sage)' }, { v: Math.max(0, d.used - m - v), l: 'Altro', c: 'var(--muted)' }], d.free)}</div>`;
+      if (d.counting && !d.music) setTimeout(refreshSpazio, 4000);
+    } catch { srvHtml = `<div><h3>Server ${esc(s.name)}</h3><p class="sub">Il server non risponde.</p></div>`; }
+  } else if (s) srvHtml = `<div><h3>Server ${esc(s.name)}</h3><p class="sub">Questo server non dice quanto spazio ha${s.session ? ' (va aggiornato)' : ''}.</p></div>`;
+  let devHtml = '';
+  try {
+    const e = await navigator.storage.estimate(), off = (await DB.all('offline').catch(() => [])).reduce((n, r) => n + (r.size || 0), 0);
+    devHtml = `<div><h3>${here}</h3><p class="sub">Armony usa ${bytes(e.usage)} di ${bytes(e.quota)} concessi${NATIVE ? ' dal telefono' : ' dal browser'}.</p>
+      ${spazioBar(e.quota, [{ v: Math.min(off, e.usage), l: 'Brani offline', c: 'var(--accent)' }, { v: Math.max(0, e.usage - off), l: 'Copertine e dati', c: 'var(--muted)' }], Math.max(0, e.quota - e.usage))}</div>`;
+  } catch { devHtml = `<div><h3>${here}</h3><p class="sub">Questo browser non dice quanto spazio usa.</p></div>`; }
+  if ($('#spazioBox') === box) box.innerHTML = srvHtml + devHtml;
 }
 /* ================= aggiornamenti dell'app (dal server Armony, verso i tag GitHub) ================= */
 async function refreshUpdate(force) {
@@ -2797,6 +2848,7 @@ view.addEventListener('click', async e => {
       case 'playalb': { const r = (await api('getAlbum', { id })).album; setQueue(arr(r.song).map(x => norm(x)), 0); break; }
       case 'showall': sessionStorage.setItem('armony:asort', { newest: 'newest', frequent: 'frequent', random: 'random', starred: 'starred' }[el.dataset.sort] || 'newest'); location.hash = '#/libreria/album'; break;
       case 'lmore': lMore(); break;
+      case 'goback': goBack(); break;
       case 'artist': location.hash = '#/artista/' + encodeURIComponent(id); break;
       case 'dzartist': location.hash = '#/artista-dz/' + encodeURIComponent(id); break;
       case 'dzalbum': location.hash = '#/album-dz/' + encodeURIComponent(id); break;
@@ -3138,6 +3190,8 @@ const Phone = {
   output(o) {
     const was = this.out; this.out = o && o.kind !== 'speaker' ? o : null;
     if (this.out && this.ready && (!was || was.name !== this.out.name)) toast(this.out.kind === 'bluetooth' ? `Cuffie collegate: ${this.short()}` : `${this.label()}: la musica esce da lì.`, 2600);
+    // cuffie staccate mentre suona qui: pausa, come ogni lettore (non deve partire dall'altoparlante)
+    if (was && !this.out && !Engine.el.paused) { ctlToggle(); toast('Cuffie scollegate: musica in pausa.', 2600); }
     Live.pill();
   },
   short() { return this.out?.name || (this.out?.kind === 'usb' ? 'USB' : 'Cuffie'); },
@@ -3292,7 +3346,7 @@ const Live = {
     const hp = !remote && Phone.out;  // cuffie di questo telefono (solo app)
     pill.hidden = !this.devices.size && !hp;
     pill.classList.toggle('on', remote);
-    pill.innerHTML = `${ic(hp ? 'headphones' : 'speaker')}<span>${esc(remote ? this.devices.get(this.target) || '…' : (P.solo ? 'Per conto suo' : 'Qui') + (hp ? ' · ' + Phone.short() : ''))}</span>`;
+    pill.innerHTML = `${ic(hp ? 'headphones' : 'speaker')}<span>${esc(remote ? this.devices.get(this.target) || '…' : P.solo ? 'Per conto suo' : 'Qui')}${hp ? ` · <b class="hp">${esc(Phone.short())}</b>` : ''}</span>`;
     pill.setAttribute('aria-label', remote ? `In riproduzione su ${this.devices.get(this.target)}: scegli dove suona` : 'Dove suona');
   },
   paint() {
@@ -3306,10 +3360,16 @@ const Live = {
     const d = $('#dlg'); d.className = 'sheet';
     const here = !this.remote(), mine = { track: S.queue[S.index] && wire(S.queue[S.index]), playing: !Engine.el.paused, solo: P.solo };
     const row = (id, name, st, cur) => `<button class="mi${cur ? ' on' : ''}" data-dev="${esc(id)}">${ic(id === S.device ? (NATIVE || /Android|iPhone|Mobile/.test(navigator.userAgent) ? 'phone' : 'laptop') : 'speaker')}
-      <span class="grow"><b>${esc(name)}${id === S.device ? ' · questo' : ''}</b><small>${id === S.device && Phone.out ? esc(Phone.label()) + ' · ' : ''}${st?.track ? `${st.playing ? 'Suona' : 'In pausa'}: ${esc(st.track.title)}` : 'Pronto'}${st?.solo ? ' · per conto suo' : ''}</small></span>${cur ? ic('check') : ''}</button>`;
+      <span class="grow"><b>${esc(name)}${id === S.device ? ' · questo' : ''}</b><small>${id === S.device && Phone.out ? `<b class="hp">${esc(Phone.label())}</b> · ` : ''}${st?.track ? `${st.playing ? 'Suona' : 'In pausa'}: ${esc(st.track.title)}` : 'Pronto'}${st?.solo ? ' · per conto suo' : ''}</small></span>${cur ? ic('check') : ''}</button>`;
     d.innerHTML = `<div class="head"><span style="min-width:0"><b style="display:block">Dove suona</b><small style="color:var(--muted)">La musica si sposta sul dispositivo che scegli, dallo stesso punto.</small></span></div>
       ${row(S.device, this.name(), mine, here)}${[...this.devices].map(([id, n]) => row(id, n, this.states.get(id), !here && this.target === id)).join('')}
-      <label class="check" style="padding:12px 14px 6px;border-top:1px solid var(--line);margin-top:6px"><input type="checkbox" id="liveSolo" ${P.solo ? 'checked' : ''}><span>Questo dispositivo suona per conto suo<small>Sganciato: non si ferma quando suona un altro tuo dispositivo e non lo ferma. Potete ascoltare cose diverse insieme.</small></span></label>`;
+      <label class="check" style="padding:12px 14px 6px;border-top:1px solid var(--line);margin-top:6px"><input type="checkbox" id="liveSolo" ${P.solo ? 'checked' : ''}><span>Questo dispositivo suona per conto suo<small>Sganciato: non si ferma quando suona un altro tuo dispositivo e non lo ferma. Potete ascoltare cose diverse insieme.</small></span></label>
+      <button class="mi" id="liveResync">${ic('repeat')}<span class="grow"><b>Risincronizza</b><small>Ricollega subito questo dispositivo agli altri</small></span></button>`;
+    $('#liveResync').onclick = () => {
+      d.close(); this.wake(true);
+      // il canale si riapre in un attimo: lo dice l'elenco dei dispositivi che torna pieno
+      setTimeout(() => toast(this.es?.readyState === EventSource.OPEN ? 'Ricollegato.' : 'Il server non risponde: riprovo da solo.'), 2500);
+    };
     d.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => { d.close(); this.choose(b.dataset.dev); });
     $('#liveSolo').onchange = e => {
       P.solo = e.target.checked; savePrefs(); this.sent = null;

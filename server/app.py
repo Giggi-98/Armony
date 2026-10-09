@@ -20,10 +20,12 @@ Armony - server di supporto.
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
   /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi;
                         /api/live/beat è il battito dei client con hb=1 (capacità "livehb")
-  /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download")
+  /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download");
+                        /api/jobs?grouped=1 riunisce i brani di un'importazione in un gruppo con l'avanzamento
   /api/discografia      tutta la discografia di un artista e un suo album, da Deezer (permesso "download")
   /api/import           brani da Spotify (Exportify): metadati completati, ricerca per durata, tag e cartelle per album
   /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
+  /api/spazio           disco del server: totale, occupato, libero, peso di musica e video
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
                         aggiornamento la esegue l'host (deploy/armony-update.sh), non il container
 """
@@ -76,11 +78,11 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
-         ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"),
+         ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
 SESSION_DAYS = 180
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,48}$")
@@ -1034,6 +1036,42 @@ def health():
     return jsonify(ok=True, name=NAME, ytdlp=yt_dlp.version.__version__, version=VERSION, api=API_LEVEL)
 
 
+# ------------------------------------------------------------------ spazio su disco
+# contare i file di una libreria grande costa: si conta in un thread, al massimo ogni 10 minuti
+spazio_cache = {"at": 0, "dati": None, "busy": False}
+
+
+def cartella(path):
+    n = tot = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                tot += os.path.getsize(os.path.join(root, f))
+                n += 1
+            except OSError:
+                pass
+    return {"bytes": tot, "files": n}
+
+
+def conta_spazio():
+    try:
+        spazio_cache["dati"] = {"music": cartella(MUSIC_DIR), "videos": cartella(VIDEO_DIR)}
+        spazio_cache["at"] = time.time()
+    finally:
+        spazio_cache["busy"] = False
+
+
+@app.get("/api/spazio")
+def spazio():
+    d = shutil.disk_usage(MUSIC_DIR)
+    if time.time() - spazio_cache["at"] > 600 and not spazio_cache["busy"]:
+        spazio_cache["busy"] = True
+        threading.Thread(target=conta_spazio, daemon=True).start()
+    c = spazio_cache["dati"] or {}
+    return jsonify(total=d.total, used=d.used, free=d.free, music=c.get("music"), videos=c.get("videos"),
+                   at=spazio_cache["at"] or None, counting=spazio_cache["busy"])
+
+
 # ------------------------------------------------------------------ caricamento dal client
 UPLOAD_AUDIO = {"mp3", "flac", "m4a", "aac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wma", "wv", "ape"}
 UPLOAD_COVER = {"cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.jpeg", "folder.png"}
@@ -1398,6 +1436,9 @@ def import_tracks():
     with jlock:
         seen = {key(x["track"]) for x in jobs.values() if x.get("track") and x["status"] != "errore"}
     added = []
+    # più brani insieme sono un gruppo: la coda li mostra come una riga con l'avanzamento complessivo
+    batch = uuid.uuid4().hex[:10] if len(tracks) > 1 else None
+    label = str(d.get("label") or "Importazione")[:120]
     for t in tracks:
         k = key(t)
         if k in seen:
@@ -1405,7 +1446,7 @@ def import_tracks():
         seen.add(k)
         jid = uuid.uuid4().hex[:10]
         j = dict(url="", mode="audio", format=fmt, quality="best", playlist=False, folder=d.get("folder") or "Scaricati",
-                 sponsorblock=False, meta={}, track=t)
+                 sponsorblock=False, meta={}, track=t, **({"batch": batch, "label": label} if batch else {}))
         with jlock:
             jobs[jid] = dict(j, id=jid, status="in coda", progress=0, title=f"{', '.join(t['artists'])} - {t['title']}",
                              created=time.time(), updated=time.time(), by=g.who["user"])
@@ -1418,7 +1459,35 @@ def import_tracks():
 @app.get("/api/jobs")
 def list_jobs():
     with jlock:
-        return jsonify(sorted(jobs.values(), key=lambda x: x["created"], reverse=True)[:200])
+        all_ = sorted(jobs.values(), key=lambda x: x["created"], reverse=True)
+    if request.args.get("grouped") != "1":
+        return jsonify(all_[:200])  # forma di prima, per i client vecchi
+    # raggruppata (capacità "jobgroups"): un'importazione di migliaia di brani è una riga sola
+    groups, single = {}, []
+    for x in all_:
+        b = x.get("batch")
+        if not b:
+            single.append(x)
+            continue
+        gr = groups.setdefault(b, {"id": b, "label": x.get("label") or "Importazione", "total": 0, "done": 0, "errors": 0,
+                                   "running": [], "failed": [], "created": x["created"], "updated": 0, "partial": 0.0})
+        gr["total"] += 1
+        gr["created"] = min(gr["created"], x["created"])
+        gr["updated"] = max(gr["updated"], x.get("updated") or 0)
+        if x["status"] == "errore":
+            gr["errors"] += 1
+            if len(gr["failed"]) < 50:
+                gr["failed"].append({"title": x.get("title"), "error": x.get("error")})
+        elif x["status"] in DONE:
+            gr["done"] += 1
+        elif x["status"] != "in coda":
+            gr["partial"] += (x.get("progress") or 0) / 100
+            if len(gr["running"]) < 3:
+                gr["running"].append({"title": x.get("title"), "progress": x.get("progress") or 0, "status": x["status"]})
+    out = sorted(groups.values(), key=lambda gr: gr["created"], reverse=True)
+    for gr in out:
+        gr["progress"] = round((gr["done"] + gr["errors"] + gr.pop("partial")) / gr["total"] * 100, 1)
+    return jsonify(groups=out, jobs=single[:200])
 
 
 @app.delete("/api/jobs")
