@@ -303,7 +303,7 @@ const Local = {
         <div id="bkLive"></div>`}` : ''}`;
     box.querySelector('#phOn').onchange = e => e.target.checked ? this.enable(false) : this.disable();
     box.querySelector('[data-ph]')?.addEventListener('click', e => e.currentTarget.dataset.ph === 'perm' ? this.enable(false) : this.act('scan'));
-    if (!t) return;
+    if (!on || !t) return;  // con la musica del telefono spenta i comandi del backup non ci sono
     box.querySelector('#bkSrv')?.addEventListener('change', e => { store.set('phoneBkSrv', e.target.value); this.paint(); });
     box.querySelector('#bkAuto').onchange = e => { store.set('phoneBkAuto', e.target.checked); if (e.target.checked) this.auto(true); };
     box.querySelector('#bkWifi').onchange = e => store.set('phoneBkWifi', e.target.checked);
