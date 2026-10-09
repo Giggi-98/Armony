@@ -3208,7 +3208,7 @@ const Live = {
       // anche dopo un fantasma: è una sessione nuova, lo stato vecchio non vale più
       this.devices.set(m.device, m.name); this.states.delete(m.device);
     } else if (m.type === 'gone') {
-      const name = this.devices.get(m.device); this.devices.delete(m.device); this.states.delete(m.device);
+      const name = this.devices.get(m.device); (this.gone ||= {})[m.device] = name; this.devices.delete(m.device); this.states.delete(m.device);
       if (this.target === m.device) { this.target = null; toast(`${name || 'Il dispositivo'} si è scollegato.`); }
     } else if (m.type === 'state') {
       const s = { ...m.state, recvAt: now }; this.states.set(s.device, s); this.devices.set(s.device, s.name);
@@ -3260,8 +3260,20 @@ const Live = {
       else if (cmd === 'repeat') st.repeat = { off: 'all', all: 'one', one: 'off' }[st.repeat || 'off'];
       this.paint();
     }
+    const sentAt = Date.now();
     try { await srvApi(s, '/api/live/cmd', { method: 'POST', body: JSON.stringify({ to, cmd, value, from: S.device }) }); }
-    catch { toast(`${this.devices.get(to) || 'Il dispositivo'} non risponde.`); }
+    catch { toast(`${this.devices.get(to) || 'Il dispositivo'} non risponde.`); return; }
+    // un dispositivo chiuso male può sembrare ancora collegato per qualche secondo: se non risponde, la musica resta qui
+    if (['transfer', 'play', 'toggle'].includes(cmd)) setTimeout(() => this.check(to, sentAt, cmd === 'transfer' ? value : null), 5000);
+  },
+  check(to, sentAt, v) {
+    // ha risposto, l'uscita è passata a un altro dispositivo, o qui suona già qualcosa
+    if ((this.states.get(to)?.recvAt || 0) > sentAt || (this.target && this.target !== to) || !Engine.el.paused) return;
+    if (!this.target && !v) return;  // sparito mentre lo comandavamo: lo dice già "si è scollegato"
+    const name = this.devices.get(to) || this.gone?.[to] || 'Il dispositivo';
+    this.devices.delete(to); this.states.delete(to); this.target = null;
+    toast(`${name} non risponde: suono qui.`);
+    if (v) this.exec({ cmd: 'transfer', value: v }); else this.paint();
   },
   publish() {
     if (!this.es || !this.on() || Jam.role === 'guest') return;
