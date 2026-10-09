@@ -883,7 +883,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   .panel{padding:var(--s4)}
   .song,.song.noart{grid-template-columns:42px minmax(0,1fr) auto}
   .song.noart{grid-template-columns:minmax(0,1fr) auto}
-  .song .n,.song .d{display:none}
+  .song .n,.song.now .n,.song .d{display:none}  /* anche il brano in corso: il titolo è già in ambra, la colonna non c'è */
   .mobile-only{display:inline-grid}
   .desk-only{display:none}
   .now:not(.song),.jamgrid{grid-template-columns:minmax(0,1fr)}

@@ -663,7 +663,7 @@ lconns = {}    # utente -> {id connessione: {"device", "name", "q"}}
 lstates = {}   # utente -> {dispositivo: ultimo stato}
 llock = threading.Lock()
 LIVE_BEAT_MAX = 120  # secondi senza battito prima di dare per sparito un dispositivo (Android in sottofondo batte anche 1/min)
-LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat")
+LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat", "next", "left")
 
 
 def live_put(user, msg, only=None, skip=None):
@@ -755,7 +755,7 @@ def live_state():
         return jsonify(error="Dispositivo non valido"), 400
     st = {k: d[k] for k in LIVE_FIELDS if k in d}
     st.update(device=dev, name=str(d.get("name") or "Dispositivo")[:40], at=time.time())
-    if len(json.dumps(st)) > 8000:
+    if len(json.dumps(st)) > 48000:  # con i prossimi 20 brani della coda
         return jsonify(error="Stato troppo grande"), 400
     with llock:
         lstates.setdefault(u, {})[dev] = st
@@ -767,8 +767,8 @@ def live_state():
 def live_cmd():
     u, d = user_or_400(), request.get_json(silent=True) or {}
     to, cmd = str(d.get("to") or ""), str(d.get("cmd") or "")
-    # transfer: "suona questa coda da qui"; handoff: "passa la tua coda a quel dispositivo"
-    if cmd not in ("play", "pause", "toggle", "next", "prev", "seek", "shuffle", "repeat", "transfer", "handoff"):
+    # transfer: "suona questa coda da qui"; handoff: "passa la tua coda a quel dispositivo"; skipto: "suona l'n-esimo dei prossimi"
+    if cmd not in ("play", "pause", "toggle", "next", "prev", "seek", "shuffle", "repeat", "transfer", "handoff", "skipto"):
         return jsonify(error="Comando non valido"), 400
     with llock:
         present = any(c["device"] == to for c in lconns.get(u, {}).values())

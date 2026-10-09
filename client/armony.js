@@ -949,6 +949,15 @@ async function vStarred() {
 }
 
 function vQueue() {
+  if (Live.remote()) {
+    const st = Live.st() || {}, up = arr(st.next).map(localize).filter(Boolean), cur = Live.track();
+    view.innerHTML = `<h1>Coda</h1><p class="sub">Su ${esc(Live.devices.get(Live.target) || 'un altro dispositivo')}: ${st.left || 0} brani dopo questo. Tocca un brano per suonarlo lì.</p>
+      ${cur ? songList([cur], { empty: '' }) : ''}<h2>Prossimi</h2>${songList(up, { empty: 'Non c\'è altro in coda.' })}`;
+    const lists = view.querySelectorAll('.songs');
+    if (cur) lists[0]?.querySelectorAll('.song').forEach(el => el.removeAttribute('data-act'));  // il brano in corso è già lì
+    lists[cur ? 1 : 0]?.querySelectorAll('.song').forEach(el => el.dataset.act = 'qremote');
+    return;
+  }
   if (Jam.role === 'guest') {
     view.innerHTML = `<h1>Coda della Jam</h1><p class="sub">La coda la gestisce l'host. Puoi proporre brani e votare dalla pagina Jam.</p><a class="btn primary" href="#/jam">Apri la Jam</a>`; return;
   }
@@ -1388,7 +1397,10 @@ const broadcastGuest = () => Jam.role === 'guest' && Jam.mode === 'broadcast';
 function isPlaying() { return broadcastGuest() ? Jam.playing : Live.remote() ? Live.playing() : !Engine.el.paused; }
 function playPos() { return broadcastGuest() ? Jam.estPos() : Live.remote() ? Live.pos() : Engine.time(); }
 function playDur() { return broadcastGuest() ? (Jam.track?.duration || 0) : Live.remote() ? Live.dur() : Engine.duration(); }
-function persistQueue() { store.set('queue', S.queue.slice(0, 3000)); store.set('index', S.index); }
+function persistQueue() {
+  store.set('queue', S.queue.slice(0, 3000)); store.set('index', S.index);
+  clearTimeout(persistQueue.t); persistQueue.t = setTimeout(() => Live.publish(), 300);  // gli altri dispositivi vedono la stessa coda
+}
 function setQueue(tracks, start = 0, shuffle = false) {
   if (Jam.role === 'guest') { tracks[start] && Jam.suggest(tracks[start]); return; }
   if (!tracks.length) return toast('Non ci sono brani da riprodurre.');
@@ -1718,6 +1730,40 @@ async function vNow() {
   Turntable.set($('#bigdisc .rec'), isPlaying(), true);  // il disco grande nasce già alla velocità del piccolo
   const pane = $('#nowPane');
   let lyr = null;
+  // disco e testi partono subito: il testo, quando arriva dalla rete, entra nel giro già in corso
+  const canvas = $('#viz'), c2 = canvas.getContext('2d');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const buf = Engine.analyser ? new Uint8Array(Engine.analyser.frequencyBinCount) : null;
+  let lastLine = -1;
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  const loop = () => {
+    if (!document.contains(canvas)) return;
+    c2.clearRect(0, 0, 640, 640);
+    const here = buf && !Live.remote() && Jam.mode !== 'broadcast' && !Engine.el.paused;
+    if (P.visualizer && !reduce && isPlaying() && (here || Live.remote() || broadcastGuest() || !buf)) {
+      if (here) Engine.analyser.getByteFrequencyData(buf);
+      const N = 96; c2.strokeStyle = accent; c2.lineWidth = 4; c2.lineCap = 'round';
+      for (let i = 0; i < N; i++) {
+        // senza audio qui: onde dolci sfasate (stessa forma, ampiezza più bassa), legate alla posizione del brano
+        const ph = playPos() * 2.2, v = here ? buf[Math.floor(Math.pow(i / N, 1.6) * buf.length * .75)] / 255
+          : .18 + .16 * Math.sin(ph + i * .37) * Math.sin(ph * .61 + i * .13) + .1 * Math.sin(ph * 1.7 + i * .9) ** 2;
+        const ang = i / N * Math.PI * 2 - Math.PI / 2, r1 = 255, r2 = r1 + 8 + v * 52;
+        c2.globalAlpha = .35 + v * .65;
+        c2.beginPath(); c2.moveTo(320 + Math.cos(ang) * r1, 320 + Math.sin(ang) * r1); c2.lineTo(320 + Math.cos(ang) * r2, 320 + Math.sin(ang) * r2); c2.stroke();
+      }
+      c2.globalAlpha = 1;
+    }
+    if (lyr?.synced && $('#lyr')) {
+      const p = playPos() + store.get('lyrOff:' + key(t), 0);
+      let idx = -1; for (let i = 0; i < lyr.lines.length; i++) { if (lyr.lines[i].t <= p) idx = i; else break; }
+      if (idx !== lastLine) {
+        lastLine = idx; const ps = $$('#lyr p'); ps.forEach((el, i) => el.classList.toggle('on', i === idx));
+        const el = ps[idx]; if (el) { const box = $('#lyr'); box.scrollTop = el.offsetTop - box.clientHeight * .35; }
+      }
+    }
+    requestAnimationFrame(loop);
+  };
+  loop();
   if (tab === 'lyr') {
     pane.innerHTML = '<p class="sub">Cerco il testo…</p>';
     lyr = await Lyrics.get(t);
@@ -1739,9 +1785,10 @@ async function vNow() {
       }
     }
   } else if (tab === 'next') {
-    const up = Jam.role === 'guest' ? Jam.queue.slice(0, 25) : S.queue.slice(S.index + 1, S.index + 26);
+    const remote = Live.remote();
+    const up = Jam.role === 'guest' ? Jam.queue.slice(0, 25) : remote ? arr(Live.st()?.next).map(localize).filter(Boolean) : S.queue.slice(S.index + 1, S.index + 26);
     pane.innerHTML = up.length ? songList(up) : '<div class="empty">Non c\'è altro in coda.</div>';
-    if (Jam.role !== 'guest') S.lastList = up, pane.querySelectorAll('.song').forEach(el => el.dataset.act = 'qplayoff');
+    if (Jam.role !== 'guest') S.lastList = up, pane.querySelectorAll('.song').forEach(el => el.dataset.act = remote ? 'qremote' : 'qplayoff');
   } else {
     const s = srv(t.serverId);
     let raw = null; try { raw = s && (await api('getSong', { id: t.id }, s)).song; } catch {}
@@ -1751,36 +1798,6 @@ async function vNow() {
       ['Ascolti', raw?.playCount ?? '—'], ['File', raw?.path || '—']];
     pane.innerHTML = `<div class="panel">${rows.map(([a, b]) => `<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:16px"><span style="color:var(--muted)">${a}</span><span style="text-align:right;word-break:break-word">${esc(b)}</span></div>`).join('')}</div>`;
   }
-  const canvas = $('#viz'), c2 = canvas.getContext('2d');
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const buf = Engine.analyser ? new Uint8Array(Engine.analyser.frequencyBinCount) : null;
-  let lastLine = -1;
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
-  const loop = () => {
-    if (!document.contains(canvas)) return;
-    c2.clearRect(0, 0, 640, 640);
-    if (P.visualizer && buf && !reduce && isPlaying() && Jam.mode !== 'broadcast') {
-      Engine.analyser.getByteFrequencyData(buf);
-      const N = 96; c2.strokeStyle = accent; c2.lineWidth = 4; c2.lineCap = 'round';
-      for (let i = 0; i < N; i++) {
-        const v = buf[Math.floor(Math.pow(i / N, 1.6) * buf.length * .75)] / 255;
-        const ang = i / N * Math.PI * 2 - Math.PI / 2, r1 = 255, r2 = r1 + 8 + v * 52;
-        c2.globalAlpha = .35 + v * .65;
-        c2.beginPath(); c2.moveTo(320 + Math.cos(ang) * r1, 320 + Math.sin(ang) * r1); c2.lineTo(320 + Math.cos(ang) * r2, 320 + Math.sin(ang) * r2); c2.stroke();
-      }
-      c2.globalAlpha = 1;
-    }
-    if (lyr?.synced && $('#lyr')) {
-      const p = playPos() + store.get('lyrOff:' + key(t), 0);
-      let idx = -1; for (let i = 0; i < lyr.lines.length; i++) { if (lyr.lines[i].t <= p) idx = i; else break; }
-      if (idx !== lastLine) {
-        lastLine = idx; const ps = $$('#lyr p'); ps.forEach((el, i) => el.classList.toggle('on', i === idx));
-        const el = ps[idx]; if (el) { const box = $('#lyr'); box.scrollTop = el.offsetTop - box.clientHeight * .35; }
-      }
-    }
-    requestAnimationFrame(loop);
-  };
-  loop();
 }
 
 /* ================= offline (vista) ================= */
@@ -2849,6 +2866,7 @@ view.addEventListener('click', async e => {
       case 'showall': sessionStorage.setItem('armony:asort', { newest: 'newest', frequent: 'frequent', random: 'random', starred: 'starred' }[el.dataset.sort] || 'newest'); location.hash = '#/libreria/album'; break;
       case 'lmore': lMore(); break;
       case 'goback': goBack(); break;
+      case 'qremote': if (Live.remote()) Live.cmd('skipto', i); break;
       case 'artist': location.hash = '#/artista/' + encodeURIComponent(id); break;
       case 'dzartist': location.hash = '#/artista-dz/' + encodeURIComponent(id); break;
       case 'dzalbum': location.hash = '#/album-dz/' + encodeURIComponent(id); break;
@@ -3275,6 +3293,7 @@ const Live = {
     } else if (m.type === 'cmd') return this.exec(m);
     this.paint();
     if (this.remote() && this.track()?.id !== before && location.hash.startsWith('#/ora')) vNow();
+    if (this.remote() && m.type === 'state' && m.state.device === this.target && location.hash.startsWith('#/coda')) vQueue();
   },
   exec(m) {
     const v = m.value;
@@ -3286,7 +3305,7 @@ const Live = {
     if (m.cmd === 'handoff') { if (v?.to && v.to !== S.device) this.give(v.to); return; }
     if (this.remote() || !S.queue[S.index]) return;  // i comandi valgono solo per chi suona
     ({ play: () => Engine.el.paused && ctlToggle(), pause: () => !Engine.el.paused && ctlToggle(), toggle: ctlToggle,
-      next: () => ctlNext(false), prev: ctlPrev, seek: () => typeof v === 'number' && ctlSeek(v), shuffle: ctlShuffle, repeat: ctlRepeat })[m.cmd]?.();
+      next: () => ctlNext(false), prev: ctlPrev, skipto: () => typeof v === 'number' && S.queue[S.index + 1 + v] && playIndex(S.index + 1 + v), seek: () => typeof v === 'number' && ctlSeek(v), shuffle: ctlShuffle, repeat: ctlRepeat })[m.cmd]?.();
   },
   async play(i, pos) {
     persistQueue(); await playIndex(i, { startAt: pos });
@@ -3333,10 +3352,13 @@ const Live = {
     if (!this.es || !this.on() || Jam.role === 'guest') return;
     const t = S.queue[S.index]; if (!t) return;
     if (this.remote() && !this.sent?.playing) return;  // telecomando: niente da dire, salvo la pausa appena fatta
-    const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: Engine.time(), duration: Engine.duration(), rate: P.speed, shuffle: S.shuffle, repeat: S.repeat, track: wire(t) };
+    const up = S.queue.slice(S.index + 1, S.index + 21);
+    const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: Engine.time(), duration: Engine.duration(), rate: P.speed, shuffle: S.shuffle, repeat: S.repeat, track: wire(t),
+      next: up.map(wire), left: Math.max(0, S.queue.length - S.index - 1) };
+    now.sig = up.map(x => x.id).join() + '|' + now.left;  // solo per accorgersi che la coda è cambiata
     if (now.playing && this.target) { this.target = null; this.pill(); }
     const s = this.sent, exp = s ? s.position + (s.playing ? (Date.now() - s.at) / 1000 * s.rate : 0) : 0;
-    if (s && s.track.id === now.track.id && s.playing === now.playing && s.rate === now.rate && s.solo === now.solo && s.shuffle === now.shuffle && s.repeat === now.repeat && Math.abs(exp - now.position) < 2) return;
+    if (s && s.track.id === now.track.id && s.playing === now.playing && s.rate === now.rate && s.solo === now.solo && s.shuffle === now.shuffle && s.repeat === now.repeat && s.sig === now.sig && Math.abs(exp - now.position) < 2) return;
     this.sent = { ...now, at: Date.now() };
     srvApi(srv(), '/api/live/state', { method: 'POST', body: JSON.stringify(now) }).catch(() => {});
   },
@@ -3366,7 +3388,9 @@ const Live = {
       <label class="check" style="padding:12px 14px 6px;border-top:1px solid var(--line);margin-top:6px"><input type="checkbox" id="liveSolo" ${P.solo ? 'checked' : ''}><span>Questo dispositivo suona per conto suo<small>Sganciato: non si ferma quando suona un altro tuo dispositivo e non lo ferma. Potete ascoltare cose diverse insieme.</small></span></label>
       <button class="mi" id="liveResync">${ic('repeat')}<span class="grow"><b>Risincronizza</b><small>Ricollega subito questo dispositivo agli altri</small></span></button>`;
     $('#liveResync').onclick = () => {
-      d.close(); this.wake(true);
+      d.close();
+      if (P.solo) { P.solo = false; savePrefs(); }  // risincronizzare vuol dire tornare agganciati
+      this.sent = null; this.wake(true);
       // il canale si riapre in un attimo: lo dice l'elenco dei dispositivi che torna pieno
       setTimeout(() => toast(this.es?.readyState === EventSource.OPEN ? 'Ricollegato.' : 'Il server non risponde: riprovo da solo.'), 2500);
     };

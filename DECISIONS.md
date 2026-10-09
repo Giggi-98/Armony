@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-09 — Dispositivi agganciati: stessa coda (i prossimi 20), visualizzatore calcolato dove non c'è audio
+
+**Contesto:** il telefono che comanda il PC mostrava la sua coda e non quella del PC, e il visualizzatore restava vuoto perché legge l'audio locale; il disco partiva solo dopo la ricerca del testo.
+**Scelta:** lo stato pubblicato da chi suona contiene anche i prossimi 20 brani e quanti ne restano (`next`, `left`), ripubblicato quando la coda cambia; "Prossimi" e Coda del telecomando mostrano quelli, e toccarne uno manda il comando `skipto`. Dove l'audio non passa da qui (telecomando, ospite di una Jam in trasmissione, modalità compatibile) il visualizzatore disegna onde calcolate dalla posizione del brano. Disco e visualizzatore partono prima della ricerca del testo. Risincronizza toglie il "per conto suo".
+**Alternative scartate:** mandare tutta la coda (fino a 3000 brani per ogni cambio di stato, troppo per un canale che serve tutti i dispositivi); lo spettro vero via rete (banda continua per un effetto grafico).
+**Conseguenze:** oltre i 20 prossimi il telecomando vede solo il numero; il visualizzatore del telecomando non segue la musica vera, solo il tempo.
+**Da rivedere se:** serve modificare la coda di un altro dispositivo (togliere, spostare) dal telecomando.
+
 ## 2026-10-09 — Coda dei download raggruppata: gruppo deciso dal server, forma vecchia intatta
 
 **Contesto:** un'importazione Spotify può mettere in coda migliaia di brani; la coda li mostrava uno per uno e `/api/jobs` restituisce solo gli ultimi 200, quindi il client non poteva calcolare un avanzamento complessivo.
