@@ -13,7 +13,7 @@
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,500..800&family=Figtree:wght@400..700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,500..800&family=Figtree:wght@400..800&display=swap" rel="stylesheet">
 <style>
 :root{
   /* colori: la stanza (bg), due livelli di pannello, l'inchiostro, e l'ambra dell'etichetta del disco.
@@ -25,8 +25,10 @@
   --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;
   --r-s:8px;--r-m:12px;--r-l:16px;--r-xl:22px;
   --hit:40px;
-  --display:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
-  --body:"Figtree","Segoe UI",system-ui,-apple-system,sans-serif;
+  /* una sola famiglia per tutto (Figtree): la gerarchia la fanno peso e grandezza. Bricolage resta al marchio */
+  --brand:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
+  --body:"Figtree","Segoe UI",system-ui,-apple-system,sans-serif;--display:var(--body);
+  --fs-hero:clamp(2.6rem,6vw,5.2rem);--fs-h1:clamp(1.9rem,3.6vw,2.6rem);--fs-h2:1.45rem;--fs-card:.95rem;--fs-small:.84rem;
   /* spazi delle barre di sistema: env() nei browser e nelle WebView recenti, --safe-area-inset-* iniettate
      da Capacitor nelle WebView Android più vecchie (app/android) */
   --sat:max(env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px));
@@ -64,20 +66,20 @@ audio{display:none}
 
 .app{display:grid;grid-template-columns:var(--side-w) 1fr;min-height:100vh;min-height:100dvh;padding-bottom:calc(var(--player-h) + var(--sab))}
 aside{z-index:1;position:sticky;top:var(--sat);height:calc(100vh - var(--player-h));height:calc(100dvh - var(--player-h) - var(--sab));padding:22px 14px;display:flex;flex-direction:column;gap:16px;border-right:1px solid var(--line);overflow-y:auto}
-.brand{display:flex;align-items:center;gap:10px;padding:0 8px;font:800 1.6rem/1 var(--display);letter-spacing:-.03em;color:var(--ink);text-decoration:none}
+.brand{display:flex;align-items:center;gap:10px;padding:0 8px;font:800 1.6rem/1 var(--brand);letter-spacing:-.03em;color:var(--ink);text-decoration:none}
 .brand i{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle,var(--bg) 0 3px,var(--accent) 4px 9px,var(--ink) 10px);flex:none}
 nav{display:flex;flex-direction:column;gap:2px}
-nav a{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:var(--r-m);color:var(--muted);text-decoration:none;font-weight:500;position:relative;transition:background var(--t-tap) ease,color var(--t-tap) ease}
+nav a{display:flex;align-items:center;gap:14px;padding:10px 12px;font-size:15px;border-radius:var(--r-m);color:var(--muted);text-decoration:none;font-weight:500;position:relative;transition:background var(--t-tap) ease,color var(--t-tap) ease}
 nav a.on{background:var(--surface2);color:var(--ink);font-weight:600}
 nav a.on svg{color:var(--accent-text)}
-nav svg{width:19px;height:19px;flex:none}
+nav svg{width:22px;height:22px;flex:none}
 nav .dot{position:absolute;right:10px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
 .ctx{margin-top:auto;display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border:0;border-radius:var(--r-m);background:var(--surface2);cursor:pointer;text-align:left;font-weight:600;color:var(--ink)}
 .ctx .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ctx .pill{cursor:inherit}
 /* barra delle sezioni in basso: esiste solo su telefono (vedi media query) */
 .tabbar{display:none}
-main{padding:var(--s6) clamp(16px,4vw,48px) var(--s7);min-width:0;position:relative;z-index:1}
+main{--pad-t:var(--s6);--pad-x:clamp(16px,4vw,48px);padding:var(--pad-t) var(--pad-x) var(--s7);min-width:0;position:relative;z-index:1}
 /* la luce del disco (Glow in armony.js): luce sopra il fondo, mai una tinta piena */
 @property --g1{syntax:'<color>';inherits:false;initial-value:transparent}
 @property --g2{syntax:'<color>';inherits:false;initial-value:transparent}
@@ -87,9 +89,9 @@ main{padding:var(--s6) clamp(16px,4vw,48px) var(--s7);min-width:0;position:relat
   transition:opacity .6s ease,--g1 1.2s ease,--g2 1.2s ease}
 :root[data-glow] #glow{opacity:1}
 :root[data-glow="album"] #glow{--gx:14%;--gy:8%}
-h1{font:800 clamp(2.1rem,4.6vw,3.1rem)/1 var(--display);font-stretch:88%;letter-spacing:-.03em;margin:0 0 var(--s2);text-wrap:balance}
-h2{font:700 1.3rem/1.2 var(--display);letter-spacing:-.012em;margin:var(--s7) 0 var(--s3);text-wrap:balance}
-h3{font:700 1.08rem/1.25 var(--display);margin:0 0 var(--s2)}
+h1{font:800 var(--fs-h1)/1.05 var(--body);letter-spacing:-.03em;margin:0 0 var(--s2);text-wrap:balance}
+h2{font:700 var(--fs-h2)/1.2 var(--body);letter-spacing:-.02em;margin:var(--s7) 0 var(--s3);text-wrap:balance}
+h3{font:700 1.08rem/1.25 var(--body);letter-spacing:-.01em;margin:0 0 var(--s2)}
 .sub{color:var(--muted);margin:0 0 var(--s5);max-width:62ch}
 .small{font-size:.88rem}
 .small>svg{width:14px;height:14px;vertical-align:-2px;margin-right:3px}
@@ -102,9 +104,8 @@ h3{font:700 1.08rem/1.25 var(--display);margin:0 0 var(--s2)}
 .btn.sm{min-height:32px;padding:0 13px;font-size:.86rem;gap:6px}
 .btn svg{width:18px;height:18px;flex:none}
 .btn.sm svg{width:16px;height:16px}
-.btn,.icon-btn,.play,.chip,.ctx,.alb,.strip-nav{transition:transform var(--t-tap) var(--ease-out),background var(--t-tap) ease,color var(--t-tap) ease}
-.btn:active,.icon-btn:active,.play:active,.chip:active,.ctx:active,.strip-nav:active{transform:scale(.96)}
-.alb:active{transform:scale(.98)}
+.btn,.icon-btn,.play,.chip,.ctx{transition:transform var(--t-tap) var(--ease-out),background var(--t-tap) ease,color var(--t-tap) ease}
+.btn:active,.icon-btn:active,.play:active,.chip:active,.ctx:active{transform:scale(.96)}
 @media (pointer:coarse){:root{--hit:44px}}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .row.between{justify-content:space-between}
@@ -142,21 +143,8 @@ label.check small{display:block;color:var(--muted)}
 .icon-btn.on{color:var(--accent-text)}
 .icon-btn .mini{position:absolute;bottom:2px;right:2px;font-size:9px;font-weight:700}
 
-.albums{display:grid;grid-template-columns:repeat(auto-fill,minmax(156px,1fr));gap:var(--s5) var(--s4)}
-.albums.strip{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:150px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory}
-.albums.strip .alb{scroll-snap-align:start}
-.strip-wrap{position:relative}
-.strip-nav{position:absolute;top:75px;transform:translateY(-50%);z-index:2;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--ink);display:grid;place-items:center;cursor:pointer;box-shadow:0 4px 14px rgb(0 0 0 / .18)}
-.strip-nav svg{width:20px;height:20px}
-.strip-nav.prev{left:-12px}.strip-nav.next{right:-12px}
-.strip-nav[hidden]{display:none}
-@media (hover:none),(max-width:860px){.strip-nav{display:none}}
-.alb{cursor:pointer;background:none;border:0;padding:0;text-align:left;min-width:0;color:inherit}
 .art{aspect-ratio:1;border-radius:var(--r-m);background:var(--surface2);overflow:hidden;position:relative}
-.alb .art{margin-bottom:10px;box-shadow:var(--shadow-art)}
 .art img{width:100%;height:100%;object-fit:cover}
-.alb b{display:block;font-weight:600;font-size:.95rem;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.alb small{display:block;color:var(--muted);font-size:.84rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hero{display:flex;gap:24px;align-items:flex-end;margin-bottom:22px;flex-wrap:wrap}
 .hero .art{width:min(232px,46vw);flex:none;border-radius:var(--r-l);box-shadow:var(--shadow-float)}
 
@@ -209,6 +197,130 @@ label.check small{display:block;color:var(--muted)}
 .banner{display:flex;gap:var(--s3) var(--s4);align-items:center;background:var(--accent-soft);border-radius:var(--r-l);padding:var(--s4) var(--s5);margin-bottom:var(--s4);flex-wrap:wrap}
 .banner .grow{flex:1;min-width:200px}
 
+/* === F: fondamenta === */
+/* schede di copertine (albumGrid, artistCard): la copertina occupa la colonna, il fondo si accende al passaggio */
+.cards{--card-min:164px;display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--card-min),1fr));gap:var(--s2);margin:0 calc(-1 * var(--s3))}
+@media (min-width:1400px){.cards{--card-min:184px}}
+.card{position:relative;min-width:0;padding:var(--s3);border-radius:var(--r-s);transition:background var(--t-tap) ease}
+.card .art{border-radius:6px;box-shadow:var(--shadow-art);margin-bottom:var(--s3)}
+.card.artist .art{border-radius:50%}
+.card-go{display:block;width:100%;padding:0;border:0;background:none;color:inherit;text-align:left;cursor:pointer}
+/* tutta la scheda apre l'album; il tasto ▶ sta sopra */
+.card-go::after{content:"";position:absolute;inset:0;border-radius:inherit}
+.card-go:focus-visible{outline:none}
+.card:has(.card-go:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.card b{display:block;font-weight:700;font-size:var(--fs-card);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px;color:var(--muted);font-size:var(--fs-small);font-weight:500;line-height:1.35}
+.card-play{position:absolute;z-index:2;right:8px;bottom:8px;width:44px;height:44px;border:0;border-radius:50%;padding:0;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;
+  box-shadow:0 8px 18px -6px rgb(0 0 0 / .5);opacity:0;transform:translateY(8px);transition:opacity 200ms var(--ease-out),transform 200ms var(--ease-out)}
+.card-play svg{width:20px;height:20px;margin-left:2px}
+.card-play:focus-visible{opacity:1;transform:none}
+.card-play:active{transform:scale(.94)}
+@media (hover:none){.card-play{display:none}}
+/* scaffale: una riga sola, le schede che non ci stanno restano fuori ("Mostra tutto" porta al resto) */
+.cards.shelf{grid-template-rows:auto;grid-auto-rows:0;row-gap:0;overflow:hidden}
+.shelf-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);margin:var(--s7) 0 var(--s2)}
+.shelf-head h2{margin:0;min-width:0}
+.shelf-head a{flex:none;font-size:var(--fs-small);font-weight:700;color:var(--muted);text-decoration:none}
+
+/* elenco dei brani: righe senza linee, a colonne su schermo largo */
+.tracklist{--acts:120px;border-top:0}
+.tracklist.q{--acts:160px}
+.tracklist .song{border-bottom:0;border-radius:6px;min-height:56px}
+.tracklist .th,.tracklist .al{display:none}
+.tracklist .song .thumb{border-radius:4px}
+.tracklist .al>[data-act]{cursor:pointer}
+@media (min-width:1000px){
+  .tracklist .song,.tracklist .th{grid-template-columns:36px 44px minmax(0,1.4fr) minmax(0,1fr) 52px var(--acts)}
+  .tracklist .song.noart,.tracklist .th.noart{grid-template-columns:36px minmax(0,1.4fr) minmax(0,1fr) 52px var(--acts)}
+  .tracklist.noalb .song,.tracklist.noalb .th{grid-template-columns:36px 44px minmax(0,1fr) 52px var(--acts)}
+  .tracklist.noalb .song.noart,.tracklist.noalb .th.noart{grid-template-columns:36px minmax(0,1fr) 52px var(--acts)}
+  .tracklist .al{display:block;min-width:0;color:var(--muted);font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tracklist .th{display:grid;gap:var(--s3);align-items:center;position:sticky;top:0;z-index:3;padding:6px 8px;margin-bottom:var(--s2);background:var(--bg);border-bottom:1px solid var(--line);
+    color:var(--muted);font-size:.78rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+  .tracklist .th .tt{grid-column:span 2}
+  .tracklist .th.noart .tt{grid-column:auto}
+  .tracklist .th .d svg{width:16px;height:16px;display:block}
+  .tracklist .song .d{text-align:left}
+  .tracklist .acts{justify-content:flex-end}
+}
+/* con il mouse: azioni solo sulla riga indicata, il numero diventa ▶ */
+@media (hover:hover) and (pointer:fine){
+  .card:hover{background:var(--surface2)}
+  .card:hover .card-play{opacity:1;transform:none}
+  .card-play:hover{transform:scale(1.06)}
+  .shelf-head a:hover{color:var(--ink);text-decoration:underline}
+  .tracklist .acts .icon-btn:not(.on){opacity:0;transition:opacity var(--t-tap) ease}
+  .tracklist .song:hover .acts .icon-btn,.tracklist .song:focus-within .acts .icon-btn{opacity:1}
+  .tracklist .song:not(.now):not(.ghost):hover .n{font-size:0;display:flex;justify-content:flex-end}
+  .tracklist .song:not(.now):not(.ghost):hover .n::before{content:"";width:12px;height:13px;background:var(--ink);clip-path:polygon(0 0,100% 50%,0 100%)}
+  .tracklist .al>[data-act]:hover{color:var(--ink);text-decoration:underline}
+}
+
+/* intestazione di album, artista, playlist (phero): fascia col colore della copertina fino al fondo */
+@property --ph{syntax:'<color>';inherits:false;initial-value:transparent}
+.phero{--ph:color-mix(in srgb,var(--surface2) 70%,transparent);display:flex;align-items:flex-end;gap:var(--s5);
+  margin:calc(-1 * var(--pad-t)) calc(-1 * var(--pad-x)) var(--s5);padding:var(--s7) var(--pad-x) var(--s5);
+  background:linear-gradient(to bottom,var(--ph),transparent);transition:--ph .6s ease}
+.phero .art{width:232px;flex:none;border-radius:8px;box-shadow:var(--shadow-float)}
+.phero .art.round{border-radius:50%}
+.ph-t{flex:1;min-width:0}
+.ph-label{display:block;margin-bottom:var(--s2);font-size:.8rem;font-weight:700}
+.phero h1{font-size:var(--fs-hero);line-height:.95;letter-spacing:-.04em;margin:0 0 var(--s3);overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;padding-bottom:.06em}
+.ph-meta{margin:0;color:var(--muted);font-size:.92rem;font-weight:500}
+.ph-meta b,.ph-meta a{color:var(--ink);font-weight:700}
+/* barra delle azioni: ▶ grande in ambra, il resto icone */
+.actionbar{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2);margin:0 0 var(--s4)}
+.ab-play{width:56px;height:56px;flex:none;margin-right:var(--s2);border:0;border-radius:50%;padding:0;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;
+  box-shadow:0 10px 22px -10px color-mix(in srgb,var(--accent) 90%,transparent);transition:transform var(--t-tap) var(--ease-out),background var(--t-tap) ease}
+.ab-play svg{width:24px;height:24px;margin-left:3px}
+.ab-play:active{transform:scale(.94)}
+.actionbar .icon-btn svg{width:24px;height:24px}
+@media (hover:hover) and (pointer:fine){.ab-play:hover{transform:scale(1.04);background:color-mix(in srgb,var(--accent) 88%,#fff)}}
+
+/* barra laterale: le playlist sotto le sezioni, scorrono da sole */
+@media (min-width:1200px){:root{--side-w:260px}}
+#sidePl{flex:1 1 0;min-height:96px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;margin:0 -6px;padding:var(--s3) 6px 0;border-top:1px solid var(--line);scrollbar-width:thin}
+#sidePl:empty{display:none}
+#sidePl h3{margin:0 12px var(--s2);font-size:var(--fs-small);color:var(--muted)}
+#sidePl a{display:flex;align-items:center;gap:var(--s3);padding:6px 8px;border-radius:var(--r-s);color:var(--ink);text-decoration:none;transition:background var(--t-tap) ease}
+#sidePl a.on{background:var(--surface2)}
+#sidePl a.on b{color:var(--accent-text)}
+#sidePl a.on .pic{background:var(--surface)}
+#sidePl .pic{width:40px;height:40px;flex:none;border-radius:4px;overflow:hidden;background:var(--surface2)}
+#sidePl .pic img{width:100%;height:100%;object-fit:cover}
+#sidePl .grow{min-width:0}
+#sidePl b{display:block;font-weight:600;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sidePl small{display:block;color:var(--muted);font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (hover:hover) and (pointer:fine){#sidePl a:hover{background:var(--surface2)}}
+
+/* un elemento appena arrivato (brano scaricato, aggiunto a una playlist): compare e si accende un attimo d'ambra */
+.arrivato{animation:arrivato 1.4s var(--ease-out)}
+@keyframes arrivato{from{opacity:0;transform:translateY(6px)}20%{opacity:1;transform:none;background:color-mix(in srgb,var(--accent) 22%,transparent)}to{background:transparent}}
+
+@media (max-width:860px){
+  #sidePl{display:none}
+  .cards{--card-min:140px;margin:0 calc(-1 * var(--s2))}
+  .card{padding:var(--s2)}
+  .card .art{margin-bottom:var(--s2)}
+  /* sul telefono lo scaffale scorre col dito */
+  .cards.shelf{grid-template-columns:none;grid-template-rows:none;grid-auto-rows:auto;grid-auto-flow:column;grid-auto-columns:140px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;
+    margin-right:calc(-1 * var(--pad-x));padding-right:var(--pad-x);scroll-padding-left:var(--s2)}
+  .cards.shelf::-webkit-scrollbar{display:none}
+  .cards.shelf .card{scroll-snap-align:start}
+  .shelf-head{margin-top:var(--s6)}
+  .phero{flex-direction:column;align-items:stretch;gap:var(--s4);padding-top:var(--s5)}
+  .phero .art{width:min(62vw,280px);align-self:center}
+  .phero h1{font-size:clamp(1.9rem,8vw,2.6rem);line-height:1}
+}
+@media (prefers-reduced-motion:reduce){
+  .card-play{transition:opacity 200ms linear;transform:none}
+  .arrivato{animation:none}
+  .phero{transition:none}
+}
+/* === fine F === */
+
 /* in riproduzione */
 .now:not(.song){display:grid;grid-template-columns:minmax(260px,420px) minmax(0,1fr);gap:clamp(20px,4vw,56px);align-items:start}
 .bigdisc{position:relative;width:100%;aspect-ratio:1}
@@ -239,7 +351,7 @@ label.check small{display:block;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){#glow{transition:opacity .3s ease}.wave canvas{transition:none}}
 .np .t{min-width:0}
 .np b{display:block;font-weight:700;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.np small{display:block;color:var(--muted);font-size:.86rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np small{display:block;color:var(--muted);font-size:var(--fs-small);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ctrl{display:flex;flex-direction:column;gap:2px}
 .ctrl .row{justify-content:center;gap:var(--s2);flex-wrap:nowrap}
 .play{width:50px;height:50px;border-radius:50%;border:0;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;flex:none;
@@ -391,7 +503,7 @@ aside{view-transition-name:side}
 
 /* sagome della pagina in arrivo: compaiono solo se il caricamento dura più di un attimo */
 .sk-page{animation:vt-in var(--t-move) var(--ease) .15s both}
-.sk{display:block;background:var(--surface2);border-radius:8px;animation:sk-pulse 1.1s ease-in-out infinite alternate}
+.sk{display:block;border-radius:8px;background:linear-gradient(100deg,transparent 30%,color-mix(in srgb,var(--surface) 55%,transparent) 50%,transparent 70%) var(--surface2);background-size:220% 100%;animation:sk-shine 1.5s linear infinite}
 .sk-h1{height:2.5rem;width:min(420px,70%);margin:4px 0 12px;border-radius:10px}
 .sk-h2{height:1.3rem;width:190px;margin:28px 0 14px}
 .sk-line{height:.8rem;width:72%;margin:7px 0}
@@ -399,7 +511,7 @@ aside{view-transition-name:side}
 .sk-row{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
 .sk-pill{height:38px;width:112px;border-radius:999px}
 .sk-wrap{flex:1;min-width:200px}
-@keyframes sk-pulse{from{opacity:.5}to{opacity:1}}
+@keyframes sk-shine{from{background-position:120% 0}to{background-position:-120% 0}}
 
 @media (prefers-reduced-motion:reduce){
   .btn,.icon-btn,.play,.play svg.pp path{transition:none}
@@ -417,7 +529,6 @@ aside{view-transition-name:side}
   .song:hover,.list-item:hover{background:var(--surface2)}
   .tabs a:hover,.tabs button:hover{color:var(--ink)}
   .seg label:hover{color:var(--ink)}
-  .strip-nav:hover{border-color:var(--muted)}
   input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.2)}
   ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:99px;border:2px solid var(--bg)}::-webkit-scrollbar-track{background:transparent}
 }
@@ -458,7 +569,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   .now-acts .btn{flex:none}
   .disc{width:46px;height:46px}.disc img,.disc .lbl{inset:11px;width:24px;height:24px}
   .play{width:46px;height:46px}
-  main{padding:var(--s5) var(--s4) var(--s6)}
+  main{--pad-t:var(--s5);--pad-x:var(--s4);padding:var(--pad-t) var(--pad-x) var(--s6)}
   h2{margin-top:var(--s6)}
   .panel{padding:var(--s4)}
   .song,.song.noart{grid-template-columns:42px minmax(0,1fr) auto}
@@ -480,6 +591,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   <aside>
     <a class="brand" href="#/home"><i></i>armony</a>
     <nav id="nav"></nav>
+    <div id="sidePl"></div>
     <button class="ctx" id="ctxBtn" aria-haspopup="dialog"></button>
   </aside>
   <main id="view" tabindex="-1"></main>
@@ -517,6 +629,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
 <dialog id="dlg2"></dialog>
 <input type="file" id="filePick" hidden>
 
+<script type="module">import a from './vendor/auto-animate.min.js'; window.autoAnimate = a;</script>
 <script src="armony.js"></script>
 <script src="jam.js"></script>
 <script>boot();</script>

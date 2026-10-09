@@ -40,6 +40,10 @@ function md5(str) {
 }
 const Bus = new EventTarget();
 const emit = (type, detail) => Bus.dispatchEvent(new CustomEvent(type, { detail }));
+// 'libreria' e 'playlists': le viste aperte e la barra laterale si ridisegnano da sole. Più modifiche
+// di fila (es. 200 brani alla volta in una playlist) diventano un solo avviso
+const soonT = {};
+const emitSoon = type => { clearTimeout(soonT[type]); soonT[type] = setTimeout(() => emit(type), 300); };
 let toastTimer;
 function toast(msg, ms = 3200) {
   $$('.toast').forEach(t => t.remove());
@@ -112,6 +116,7 @@ const I = {
   check: '<path d="M20 6 9 17l-5-5"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   chevl: '<path d="M15 5l-7 7 7 7"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   chevr: '<path d="M9 5l7 7-7 7"/>',
   send: '<path d="M4 12l16-8-6 16-2-7z"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
@@ -197,6 +202,9 @@ async function api(method, params, s = srv(), post = false) {
   if (!r.ok) throw new Error(`${s.name} ha risposto con errore ${r.status}.`);
   const sr = (await r.json())['subsonic-response'];
   if (sr.status !== 'ok') throw new Error(sr.error?.code === 40 ? 'Utente o password errati.' : sr.error?.message || 'Il server ha rifiutato la richiesta.');
+  if (/^(create|update|delete)Playlist$/.test(method)) { emitSoon('playlists'); emitSoon('libreria'); }
+  // Navidrome scansiona in differita: un avviso dopo pochi secondi e uno di sicurezza dopo 15
+  if (method === 'startScan') { setTimeout(() => emit('libreria'), 4000); setTimeout(() => emit('libreria'), 15000); }
   return sr;
 }
 const norm = (x, sid = S.active) => ({
@@ -288,16 +296,16 @@ const Scene = {
 // ogni vista ricorda il proprio numero (const n = Scene.nav) e lo controlla dopo ogni attesa
 const stale = n => n !== Scene.nav;
 const SK = {
-  card: '<div class="alb"><div class="art sk"></div><i class="sk sk-line"></i><i class="sk sk-line short"></i></div>',
+  card: '<div class="card"><div class="art sk"></div><i class="sk sk-line"></i><i class="sk sk-line short"></i></div>',
   row: '<div class="list-item"><span class="pic sk"></span><span class="grow"><i class="sk sk-line"></i><i class="sk sk-line short"></i></span></div>',
   pills: n => `<div class="sk-row">${'<i class="sk sk-pill"></i>'.repeat(n)}</div>`
 };
 // sagome della pagina che arriva, al posto della scritta "Caricamento…"
 function skeleton(r, id) {
   const h = '<i class="sk sk-h1"></i><i class="sk sk-line short"></i>', rows = n => SK.row.repeat(n);
-  const body = r === 'home' ? h + SK.pills(4) + '<i class="sk sk-h2"></i><div class="albums strip">' + SK.card.repeat(8) + '</div><i class="sk sk-h2"></i>' + SK.pills(6)
-    : r === 'album' || r === 'artista' ? `<div class="hero"><div class="art sk"${r === 'artista' ? ' style="border-radius:50%"' : ''}></div><div class="sk-wrap">${h}</div></div>` + rows(8)
-    : r === 'genere' || r === 'decennio' || (r === 'libreria' && id === 'album') ? h + '<div class="albums" style="margin-top:18px">' + SK.card.repeat(12) + '</div>'
+  const body = r === 'home' ? h + SK.pills(4) + '<i class="sk sk-h2"></i><div class="cards shelf">' + SK.card.repeat(8) + '</div><i class="sk sk-h2"></i>' + SK.pills(6)
+    : r === 'album' || r === 'artista' ? `<div class="phero"><div class="art sk"${r === 'artista' ? ' style="border-radius:50%"' : ''}></div><div class="sk-wrap">${h}</div></div>` + rows(8)
+    : r === 'genere' || r === 'decennio' || (r === 'libreria' && id === 'album') ? h + '<div class="cards" style="margin-top:18px">' + SK.card.repeat(12) + '</div>'
     : r === 'ora' || r === 'cerca' || r === 'impostazioni' || r === 'scarica' || r === 'jam' || r === 'tasti' ? ''
     : h + '<div style="margin-top:18px">' + rows(8) + '</div>';
   return `<div class="sk-page" aria-busy="true" aria-label="Caricamento">${body}</div>`;
@@ -339,6 +347,7 @@ async function route() {
   const id = rest.join('/');
   $$('#nav a, #tabs a').forEach(a => { const on = a.dataset.r === r || ROUTE_PARENT[r] === a.dataset.r; a.classList.toggle('on', on); on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'); });
   $('#tabMore')?.classList.toggle('on', MORE.includes(ROUTE_PARENT[r] || r));
+  $$('#sidePl a').forEach(a => a.classList.toggle('on', r === 'playlist' && a.dataset.pl === id));
   const fn = {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
@@ -363,15 +372,56 @@ async function route() {
 }
 
 /* ================= componenti ================= */
+// griglia di copertine. opts.strip: una sola riga (su telefono scorre col dito); opts.title: titolo della
+// sezione, con accanto "Mostra tutto" se c'è opts.more (un indirizzo #/…); opts.sid: server delle copertine
 function albumGrid(albums, opts = {}) {
-  if (!albums.length) return `<div class="empty">${opts.empty || 'Nessun album.'}</div>`;
-  const grid = `<div class="albums ${opts.strip ? 'strip' : ''}">${albums.map(a => `
-    <button class="alb" data-act="album" data-id="${esc(a.id)}">
-      <div class="art">${imgTag(a.coverArt, 300, opts.sid)}</div>
-      <b>${esc(a.name || a.title)}</b><small>${esc(a.artist || '')}${a.year ? ' (' + a.year + ')' : ''}</small>
-    </button>`).join('')}</div>`;
-  if (!opts.strip) return grid;
-  return `<div class="strip-wrap"><button class="strip-nav prev" aria-label="Album precedenti" hidden>${ic('chevl')}</button>${grid}<button class="strip-nav next" aria-label="Altri album" hidden>${ic('chevr')}</button></div>`;
+  const head = opts.title ? `<div class="shelf-head"><h2>${esc(opts.title)}</h2>${opts.more ? `<a href="${esc(opts.more)}">Mostra tutto</a>` : ''}</div>` : '';
+  if (!albums.length) return head + `<div class="empty">${opts.empty || 'Nessun album.'}</div>`;
+  return head + `<div class="cards${opts.strip ? ' shelf' : ''}">${albums.map(a => `
+    <div class="card">
+      <div class="art">${imgTag(a.coverArt, 300, opts.sid)}<button class="card-play" data-act="playalbum" data-id="${esc(a.id)}"${opts.sid ? ` data-sid="${esc(opts.sid)}"` : ''} aria-label="Riproduci ${esc(a.name || a.title)}">${ic('play')}</button></div>
+      <button class="card-go" data-act="album" data-id="${esc(a.id)}"><b>${esc(a.name || a.title)}</b></button>
+      <small>${esc(a.artist || '')}${a.year ? ' · ' + a.year : ''}</small>
+    </div>`).join('')}</div>`;
+}
+// scheda tonda di un artista, per le griglie .cards: artistCard({ id, name, coverArt })
+const artistCard = a => `<div class="card artist">
+    <div class="art">${imgTag(a.coverArt, 300)}</div>
+    <button class="card-go" data-act="artist" data-id="${esc(a.id)}"><b>${esc(a.name)}</b></button><small>Artista</small></div>`;
+// intestazione di album, artista, playlist: fascia col colore della copertina, copertina grande, etichetta
+// ("Album", "Playlist"…), titolo grande, riga di dettagli.
+// phero({ label, title, cover, coverArt, round, meta }): cover è HTML della copertina (se manca, l'immagine di
+// coverArt); coverArt dà anche il colore della fascia; round per gli artisti; meta è HTML già sicuro (usa esc)
+function phero({ label = '', title = '', cover, coverArt, round, meta = '' }) {
+  const url = coverArt ? coverUrl(coverArt, 300) : '';
+  // la fascia nasce neutra e si tinge appena la copertina è letta
+  if (url) Glow.colors(url).then(c => { const el = $('#view .phero'); if (el && Glow.usable(c)) el.style.setProperty('--ph', Glow.tone(c.c1, .55, c.neutral)); });
+  return `<header class="phero"><div class="art${round ? ' round' : ''}">${cover ?? imgTag(coverArt, 600)}</div>
+    <div class="ph-t">${label ? `<span class="ph-label">${esc(label)}</span>` : ''}<h1>${esc(title)}</h1>${meta ? `<p class="ph-meta">${meta}</p>` : ''}</div></header>`;
+}
+// barra delle azioni sotto l'intestazione: ogni valore è il data-act del tasto, falso per toglierlo.
+// actionBar({ play: 'playall', shuffle: 'shuffleall', star: { act, id, on }, offline: 'offlineall', add: 'addalltopl',
+//   extra: [{ icon, label, act, id, danger }] })  — extra finisce nel menu ⋯ e passa dal delegatore come un clic
+function actionBar({ play = 'playall', shuffle = 'shuffleall', star, offline = 'offlineall', add = 'addalltopl', extra = [] } = {}) {
+  actionMore = extra;
+  const b = (act, icon, label, on, more = '') => `<button class="icon-btn${on ? ' on' : ''}" data-act="${esc(act)}" aria-label="${label}" title="${label}"${more}>${ic(icon, on)}</button>`;
+  return `<div class="actionbar">${play ? `<button class="ab-play" data-act="${esc(play)}" aria-label="Riproduci">${ic('play')}</button>` : ''}${
+    shuffle ? b(shuffle, 'shuffle', 'Riproduci in ordine casuale', false) : ''}${
+    star ? b(star.act, 'heart', star.on ? 'Togli dai preferiti' : 'Aggiungi ai preferiti', star.on, ` data-id="${esc(star.id || '')}" data-on="${star.on ? 1 : 0}"`) : ''}${
+    offline ? b(offline, 'offline', 'Salva offline', false) : ''}${
+    add ? b(add, 'addlist', 'Aggiungi a una playlist', false) : ''}${
+    extra.length ? b('abmore', 'more', 'Altre azioni', false) : ''}</div>`;
+}
+let actionMore = [];
+function actionMenu(items) {
+  const d = $('#dlg'); d.className = 'sheet';
+  d.innerHTML = items.map((x, n) => `<button class="mi${x.danger ? ' danger' : ''}" data-n="${n}">${ic(x.icon)}${esc(x.label)}</button>`).join('');
+  d.querySelectorAll('[data-n]').forEach(b => b.onclick = () => {
+    d.close(); const x = items[+b.dataset.n], t = document.createElement('button');
+    t.hidden = true; t.dataset.act = x.act; if (x.id != null) t.dataset.id = x.id; view.append(t); t.click(); t.remove();
+  });
+  d.onclose = () => { d.className = ''; d.onclose = null; };
+  closeOutside(d); d.showModal();
 }
 // frecce delle strisce di copertine: solo con il mouse (su telefono si scorre col dito, lo nasconde il CSS)
 function wireStrips(root = view) {
@@ -383,16 +433,20 @@ function wireStrips(root = view) {
     st.addEventListener('scroll', sync, { passive: true }); new ResizeObserver(sync).observe(st); sync();
   });
 }
+// elenco di brani (.tracklist): su schermo largo a colonne con intestazione (#, titolo, album, durata),
+// su telefono miniatura, titolo e artista. Le righe restano .song: albumGaps vi inserisce le tracce mancanti
 function songList(tracks, opts = {}) {
   S.lastList = tracks;
   if (!tracks.length) return `<div class="empty">${opts.empty || 'Nessun brano.'}</div>`;
   const cur = currentTrack();
-  const art = opts.art !== false;
-  return `<div class="songs">${tracks.map((t, i) => `
+  const art = opts.art !== false, alb = opts.showAlbum !== false;
+  return `<div class="songs tracklist${alb ? '' : ' noalb'}${opts.queue ? ' q' : ''}">
+    <div class="th${art ? '' : ' noart'}" aria-hidden="true"><span class="n">#</span><span class="tt">Titolo</span>${alb ? '<span class="al">Album</span>' : ''}<span class="d">${ic('clock')}</span><span></span></div>${tracks.map((t, i) => `
     <div class="song ${art ? '' : 'noart'} ${cur && key(cur) === key(t) ? 'now' : ''}" data-act="${opts.queue ? 'qplay' : 'play'}" data-i="${i}">
       <span class="n">${opts.queue ? i + 1 : (opts.numbers ? (t.track || i + 1) : i + 1)}</span>
       <span class="thumb">${art ? imgTag(t.coverArt, 84, t.serverId) : ''}</span>
-      <span class="t"><b>${Offline.has(t) ? '<span class="badge-off" title="Disponibile offline"></span>' : ''}${esc(t.title)}</b><small>${esc(t.artist)}${opts.showAlbum !== false && t.album ? ' · ' + esc(t.album) : ''}</small></span>
+      <span class="t"><b>${Offline.has(t) ? '<span class="badge-off" title="Disponibile offline"></span>' : ''}${esc(t.title)}</b><small>${esc(t.artist)}</small></span>
+      ${alb ? `<span class="al">${t.album ? `<span${t.albumId ? ` data-act="album" data-id="${esc(t.albumId)}"` : ''}>${esc(t.album)}</span>` : ''}</span>` : ''}
       <span class="d">${fmt(t.duration)}</span>
       <span class="acts">
         ${opts.queue ? `
@@ -2361,7 +2415,7 @@ function serverDialog(s, preset = {}) {
   d.showModal();
   checkReg();
 }
-function persistServers() { store.set('servers', S.servers); store.set('active', S.active); fillSelectors(); }
+function persistServers() { store.set('servers', S.servers); store.set('active', S.active); fillSelectors(); sidePlaylists(); }
 function fillSelectors() {
   const name = srv()?.name || 'Nessun server', q = QUALITIES[P.quality].short;
   $('#ctxBtn').innerHTML = `<span class="grow">${esc(name)}</span><span class="pill">${esc(q)}</span>`;
@@ -2434,6 +2488,8 @@ view.addEventListener('click', async e => {
       case 'album': location.hash = '#/album/' + encodeURIComponent(id); break;
       case 'artist': location.hash = '#/artista/' + encodeURIComponent(id); break;
       case 'openpl': location.hash = '#/playlist/' + encodeURIComponent(id); break;
+      case 'playalbum': { const sid = el.dataset.sid || S.active, a = (await api('getAlbum', { id }, srv(sid))).album; setQueue(arr(a.song).map(x => norm(x, sid)), 0); break; }
+      case 'abmore': actionMenu(actionMore); break;
       case 'play': setQueue(list, i); break;
       case 'play1': setQueue([list[i]], 0); break;
       case 'qplay': playIndex(i); break;
@@ -2918,8 +2974,18 @@ function wirePlayer() {
   });
   Bus.addEventListener('track', fillSelectors);
 }
+// barra laterale su schermo largo: le playlist del server attivo, sempre a portata.
+// Si ridisegna da sola quando una playlist nasce, cambia o sparisce ('playlists')
+async function sidePlaylists() {
+  const box = $('#sidePl'); if (!box) return;
+  let pls = []; try { if (srv()) pls = arr((await api('getPlaylists')).playlists?.playlist); } catch {}
+  const cur = (location.hash.match(/^#\/playlist\/(.+)/) || [])[1];
+  box.innerHTML = pls.length ? `<h3>Le tue playlist</h3>${pls.map(p => `<a href="#/playlist/${encodeURIComponent(p.id)}" data-pl="${esc(p.id)}"${cur && decodeURIComponent(cur) === p.id ? ' class="on"' : ''}>
+    <span class="pic">${imgTag(p.coverArt, 80)}</span><span class="grow"><b>${esc(p.name)}</b><small>Playlist · ${esc(p.owner || srv()?.user || '')}</small></span></a>`).join('')}` : '';
+}
 async function boot() {
   $('#nav').innerHTML = NAV.map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
+  Bus.addEventListener('playlists', sidePlaylists); sidePlaylists();
   $('#tabs').innerHTML = NAV.filter(([h]) => TABS.includes(h)).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span>${l}</span></a>`).join('')
     + `<button type="button" id="tabMore" aria-haspopup="dialog">${ic('more')}<span>Altro</span></button>`;
   $('#tabMore').onclick = moreSheet;
