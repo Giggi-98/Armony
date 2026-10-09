@@ -20,6 +20,7 @@ Armony - server di supporto.
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
   /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download")
+  /api/discografia      tutta la discografia di un artista e un suo album, da Deezer (permesso "download")
   /api/import           brani da Spotify (Exportify): metadati completati, ricerca per durata, tag e cartelle per album
   /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
@@ -74,10 +75,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete", "scaletta", "register", "edit"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete", "scaletta", "register", "edit", "discografia"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
-         ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
+         ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
 SESSION_DAYS = 180
@@ -964,6 +965,34 @@ def album_scaletta():
         s = None
     if not s or not s["tracks"]:
         return jsonify(error="Scaletta dell'album non trovata"), 404
+    return jsonify(s)
+
+
+@app.get("/api/discografia")
+def discografia():
+    """Album, EP, singoli e raccolte di un artista secondo Deezer (?artist=nome oppure ?id=id Deezer),
+    più gli artisti simili: la pagina artista mostra anche ciò che non è in libreria."""
+    nome, dzid = (request.args.get("artist") or "").strip()[:200], request.args.get("id") or ""
+    if not nome and not dzid.isdigit():
+        return jsonify(error="Manca l'artista"), 400
+    try:
+        d = metadati.discografia(nome, int(dzid) if dzid.isdigit() else None)
+    except Exception:  # noqa: BLE001 — Deezer irraggiungibile: per la pagina è come "non trovato"
+        d = None
+    if not d:
+        return jsonify(error="Artista non trovato su Deezer"), 404
+    return jsonify(d)
+
+
+@app.get("/api/discografia/album/<int:dzid>")
+def discografia_album(dzid):
+    """Un album di Deezer con la sua scaletta, per la pagina di un album che non è in libreria."""
+    try:
+        s = metadati.album_deezer(dzid)
+    except Exception:  # noqa: BLE001
+        s = None
+    if not s or not s["tracks"]:
+        return jsonify(error="Album non trovato su Deezer"), 404
     return jsonify(s)
 
 

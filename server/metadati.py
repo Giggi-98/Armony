@@ -137,6 +137,10 @@ def scaletta(artista, album, anno=None):
             best, chiave = d, k
     if not best:
         return None
+    return _scaletta(best, artista, album)
+
+
+def _scaletta(best, artista="", album=""):
     tracce = (deezer("album/%s/tracks?limit=300" % best["id"]) or {}).get("data") or []
     albumartist = (best.get("artist") or {}).get("name") or artista
     return {
@@ -147,6 +151,48 @@ def scaletta(artista, album, anno=None):
                     "disc": t.get("disk_number") or 1, "isrc": (t.get("isrc") or "").upper()}
                    for i, t in enumerate(tracce)],
     }
+
+
+def _artista(a):
+    return {"id": a["id"], "name": a.get("name") or "", "picture": a.get("picture_big") or a.get("picture_medium") or ""}
+
+
+def discografia(nome=None, dzid=None):
+    """Tutta la discografia di un artista secondo Deezer: album, EP, singoli e raccolte, più gli artisti
+    simili. L'artista si cerca per nome e si prende solo se il nome normalizzato coincide (fra gli
+    omonimi quello con più fan); con dzid si va diretti. None se non lo trova."""
+    if dzid:
+        a = deezer("artist/%d" % int(dzid))
+    else:
+        want = norm(nome)
+        cand = [x for x in ((deezer("search/artist?limit=25&q=" + urllib.parse.quote(nome or "")) or {}).get("data") or [])
+                if want and norm(x.get("name")) == want]
+        a = max(cand, key=lambda x: x.get("nb_fan") or 0) if cand else None
+    if not a:
+        return None
+    # le edizioni ripetute (esplicita e no, ristampe con lo stesso titolo) diventano una sola: la più ascoltata
+    uno = {}
+    for x in (deezer("artist/%s/albums?limit=300" % a["id"]) or {}).get("data") or []:
+        k = (x.get("record_type") or "album", norm(x.get("title")))
+        if k not in uno or (x.get("fans") or 0) > (uno[k].get("fans") or 0):
+            uno[k] = x
+    albums = [{"id": x["id"], "title": x.get("title") or "", "type": x.get("record_type") or "album",
+               "date": x.get("release_date") or "", "year": int((x.get("release_date") or "0")[:4] or 0) or None,
+               "cover": x.get("cover_big") or x.get("cover_medium") or ""}
+              for x in uno.values()]
+    albums.sort(key=lambda x: x["date"], reverse=True)
+    simili = (deezer("artist/%s/related?limit=12" % a["id"]) or {}).get("data") or []
+    return {"artist": _artista(a), "albums": albums, "similar": [_artista(x) for x in simili]}
+
+
+def album_deezer(dzid):
+    """Un album di Deezer per id, con la sua scaletta (stessa forma di scaletta()) e il suo tipo."""
+    d = deezer("album/%d" % int(dzid))
+    if not d:
+        return None
+    s = _scaletta(d)
+    s.update(id=d["id"], type=d.get("record_type") or "album", artist=_artista(d.get("artist") or {"id": 0}))
+    return s
 
 
 def tagga(path, m, pulisci=False):
