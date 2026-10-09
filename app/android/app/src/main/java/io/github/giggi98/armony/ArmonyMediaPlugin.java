@@ -4,7 +4,13 @@ import android.Manifest;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.AudioAttributes;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
@@ -17,6 +23,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -25,6 +32,9 @@ import java.util.concurrent.Executors;
  *   update({ title, artist, album, artwork, playing, position, duration, rate })  posizioni in secondi
  *   stop()
  *   evento "action": { action: play | pause | next | previous | seek, position? }
+ *   output()  e evento "output" (trattenuto): { kind: bluetooth | wired | usb | speaker, name }
+ *     l'uscita audio della musica in questo momento. getProductName() non chiede permessi
+ *     (BLUETOOTH_CONNECT su Android 12+ serve solo per l'indirizzo, che qui non si usa)
  */
 @CapacitorPlugin(
     name = "ArmonyMedia",
@@ -38,6 +48,78 @@ public class ArmonyMediaPlugin extends Plugin {
     @Override
     public void load() {
         ArmonyMediaService.plugin = this;
+        AudioManager am = getContext().getSystemService(AudioManager.class);
+        // si chiama subito con i dispositivi già collegati, poi a ogni cuffia che entra o esce
+        // (l'instradamento può cambiare un attimo dopo l'avviso: si ricontrolla dopo un secondo)
+        Handler h = new Handler(Looper.getMainLooper());
+        if (am != null) am.registerAudioDeviceCallback(new AudioDeviceCallback() {
+            @Override public void onAudioDevicesAdded(AudioDeviceInfo[] d) { fireOutput(); h.postDelayed(() -> fireOutput(), 1000); }
+            @Override public void onAudioDevicesRemoved(AudioDeviceInfo[] d) { fireOutput(); h.postDelayed(() -> fireOutput(), 1000); }
+        }, h);
+    }
+
+    @PluginMethod
+    public void output(PluginCall call) {
+        call.resolve(currentOutput());
+    }
+
+    private String lastOutput = "";
+
+    private void fireOutput() {
+        JSObject o = currentOutput();
+        if (o.toString().equals(lastOutput)) return;
+        lastOutput = o.toString();
+        notifyListeners("output", o, true);
+    }
+
+    private JSObject currentOutput() {
+        AudioManager am = getContext().getSystemService(AudioManager.class);
+        AudioDeviceInfo dev = null;
+        if (am != null && Build.VERSION.SDK_INT >= 33) {
+            // dove Android manda davvero la musica adesso
+            try {
+                List<AudioDeviceInfo> l = am.getAudioDevicesForAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build());
+                if (!l.isEmpty()) dev = l.get(0);
+            } catch (RuntimeException ignored) {}
+        }
+        if (dev == null && am != null) {
+            // Android più vecchi: la stessa precedenza che usa il sistema (Bluetooth, poi filo, poi USB)
+            int best = 0;
+            for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                int r = rank(kind(d.getType()));
+                if (r > best) { best = r; dev = d; }
+            }
+        }
+        String k = dev == null ? "speaker" : kind(dev.getType());
+        JSObject o = new JSObject();
+        o.put("kind", k);
+        CharSequence n = dev == null ? null : dev.getProductName();
+        o.put("name", k.equals("speaker") || n == null ? "" : n.toString().trim());
+        return o;
+    }
+
+    private static int rank(String k) {
+        switch (k) { case "bluetooth": return 3; case "wired": return 2; case "usb": return 1; default: return 0; }
+    }
+
+    private static String kind(int t) {
+        switch (t) {
+            case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+            case AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
+            case AudioDeviceInfo.TYPE_BLE_HEADSET:
+            case AudioDeviceInfo.TYPE_BLE_SPEAKER:
+            case AudioDeviceInfo.TYPE_BLE_BROADCAST:
+            case AudioDeviceInfo.TYPE_HEARING_AID:
+                return "bluetooth";
+            case AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+            case AudioDeviceInfo.TYPE_WIRED_HEADSET:
+                return "wired";
+            case AudioDeviceInfo.TYPE_USB_HEADSET:
+            case AudioDeviceInfo.TYPE_USB_DEVICE:
+                return "usb";
+            default:
+                return "speaker";
+        }
     }
 
     @PluginMethod

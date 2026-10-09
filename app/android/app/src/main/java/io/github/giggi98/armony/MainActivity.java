@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
         // plugin locali: vanno registrati prima di super.onCreate
         registerPlugin(ArmonyMediaPlugin.class);
         registerPlugin(ArmonyUpdatePlugin.class);
+        registerPlugin(ArmonyInsetsPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
