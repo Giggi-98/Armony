@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-09 — App senza server: «Questo telefono» come server locale, file serviti dal WebViewClient
+
+**Contesto:** l'app Android deve funzionare senza server; il server diventa la copia.
+**Scelta:** un server virtuale (`Local` in `client/telefono.js`, restituito da `srv()` ma fuori da `S.servers`) risponde alle chiamate Subsonic delle viste partendo da MediaStore (plugin `ArmonyLibrary`) e dai brani offline; preferiti, playlist e ascolti del telefono stanno nell'IndexedDB. Audio e copertine li serve un WebViewClient a `/_armony_/` (stessa origine della pagina, quindi Web Audio funziona, e le Range sono gestite). Il backup confronta i brani con `matchTrack` e carica i mancanti con `/api/upload`, dal plugin, a pezzi. Le playlist si copiano aggiungendo, mai togliendo.
+**Alternative scartate:** `convertFileSrc`/`_capacitor_content_` (Range sbagliate: la barra non salta); viste riscritte per il locale (doppio codice); una voce finta in `S.servers` (finirebbe nelle esportazioni, nelle sessioni, in Live); scaricare tutta la libreria del server per il confronto (pesante sul telefono); caricare dal JS con un blob (tutto il file in memoria); riproduzione nativa (si perdono EQ e dissolvenza).
+**Conseguenze:** gli ascolti dei brani del telefono non vanno al server; una playlist da cui togli un brano sul telefono lo tiene sul server; il primo backup fa una ricerca per ogni brano; un brano già sul server con titolo o artista diversi viene caricato di nuovo.
+**Da rivedere se:** le librerie sul telefono diventano molto grandi (allora indice e ricerca nativi), o serve la sincronizzazione delle playlist nei due versi.
+
 ## 2026-10-09 — Dispositivi agganciati: stessa coda (i prossimi 20), visualizzatore calcolato dove non c'è audio
 
 **Contesto:** il telefono che comanda il PC mostrava la sua coda e non quella del PC, e il visualizzatore restava vuoto perché legge l'audio locale; il disco partiva solo dopo la ricerca del testo.
