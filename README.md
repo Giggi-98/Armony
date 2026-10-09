@@ -74,7 +74,7 @@ sudo deploy/install-updater.sh
 
 Fatto: da qui in avanti gli aggiornamenti arrivano con il tasto **Aggiorna** in Impostazioni.
 
-**Consigliato:** HTTPS. Il modo più semplice è [Tailscale](https://tailscale.com): sul server `tailscale serve --bg 8080` e ottieni un indirizzo `https://…ts.net` con certificato valido (dettagli in [`LEGGIMI.md`](LEGGIMI.md#consiglio-forte-usa-https)). Senza HTTPS Armony funziona, ma perdi la cifratura end-to-end delle Jam, l'installazione come app dal browser e l'offline persistente su alcuni telefoni.
+**Consigliato:** HTTPS. Il modo più semplice è [Tailscale](https://tailscale.com): sul server `tailscale serve --bg 8080` e ottieni un indirizzo `https://…ts.net` con certificato valido (dettagli in [`LEGGIMI.md`](LEGGIMI.md#consiglio-forte-usa-https)). Poi scrivi quell'indirizzo in **Impostazioni → Server musicali → Indirizzo pubblico di questo server**: link, inviti e QR useranno quello. Senza HTTPS Armony funziona, ma perdi la cifratura end-to-end delle Jam, l'installazione come app dal browser e l'offline persistente su alcuni telefoni.
 
 **Mac o Windows (Docker Desktop):** nel `docker-compose.yml` togli `network_mode: host` dal servizio `armony`, aggiungi `ports: ["8080:8080"]`, metti `NAVIDROME_URL: "http://navidrome:4533"` e `ARMONY_MULTICAST: "0"`. Si perde solo la scoperta automatica in casa (multicast).
 

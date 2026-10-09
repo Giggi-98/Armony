@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-09 — Indirizzo pubblico del server deciso dall'amministratore, non per dispositivo
+
+**Contesto:** link condivisi, inviti, QR dell'app e indirizzo per i server collegati usavano l'"Indirizzo pubblico per i link" di ogni dispositivo, o in mancanza l'indirizzo con cui quel dispositivo raggiunge il server (in casa un nome locale come `gigi.econnet`, irraggiungibile da fuori).
+**Scelta:** un indirizzo pubblico per server (`settings.public_url`, valore iniziale da `ARMONY_PUBLIC_URL`), impostato dall'amministratore con `PUT /api/indirizzo` e restituito da `/api/me` e `/api/info` (capacità `indirizzo`). Il client usa, in ordine: il campo del dispositivo, quello del server, l'indirizzo del dispositivo.
+**Alternative scartate:** dedurlo dall'intestazione Host delle richieste (cambia a seconda di come entri, e in casa è proprio quello sbagliato); toglierlo dai dispositivi (chi ha due indirizzi pubblici può volerne uno diverso su un dispositivo).
+**Conseguenze:** un campo in più da compilare una volta all'installazione; i link già condivisi con l'indirizzo vecchio restano com'erano.
+**Da rivedere se:** si vuole un indirizzo diverso per ogni rete (casa, Tailscale, dominio) scelto da solo.
+
 ## 2026-10-09 — Federazione, fase "mappa": ricerca fra amici degli amici e ascolto a distanza prima della copia
 
 **Contesto:** l'utente vuole una mappa live delle librerie sue e degli amici: server sempre collegati, ognuno di un proprietario, ricerca dei brani già presenti sui server agganciati, ascolto subito e copia a richiesta.

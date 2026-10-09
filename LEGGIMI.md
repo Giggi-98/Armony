@@ -51,6 +51,8 @@ Il modo più semplice è **Tailscale**, gratuito per uso personale. Installalo s
 
 In alternativa: un dominio con Caddy davanti alla porta 8080 (HTTPS automatico), oppure Cloudflare Tunnel.
 
+Poi, in Armony, **Impostazioni → Server musicali → Indirizzo pubblico di questo server** (solo l'amministratore): scrivi l'indirizzo HTTPS, per esempio `https://armony.nome-rete.ts.net`. Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati usano quello, anche se in casa apri Armony con un altro indirizzo.
+
 ## Funzioni
 
 ### Ascolto

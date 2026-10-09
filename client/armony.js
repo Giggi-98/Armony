@@ -445,8 +445,10 @@ function noServer() {
     <a class="btn" href="#/jam">Entra in una Jam</a>
   </div></div>${local ? `<div class="row" style="justify-content:center;margin-top:var(--s5)"><a class="btn sm" href="./app.apk">${ic('down')} App Android</a><button class="btn sm" id="welQr">QR code</button></div>` : ''}`;
   // il QR del benvenuto: stesso indirizzo di questa pagina, quindi raggiungibile dal telefono come lo è dal browser
-  $('#welQr')?.addEventListener('click', e => {
-    e.preventDefault(); const d = $('#dlg2'), url = location.origin + '/app.apk';
+  $('#welQr')?.addEventListener('click', async e => {
+    e.preventDefault(); const d = $('#dlg2'); let base = location.origin;
+    try { const i = await (await fetch('/api/info')).json(); if (i.public) base = i.public; } catch {}
+    const url = base + '/app.apk';
     d.innerHTML = `<h3>App Android</h3><p class="sub">Inquadra il codice con la fotocamera del telefono.</p><div id="welQrBox" style="margin:var(--s4) 0;display:grid;place-items:center"></div><div class="code" style="font-size:.8rem">${esc(url)}</div><div class="row"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
     closeOutside(d); d.showModal(); qrInto($('#welQrBox'), url).catch(() => {});
   });
@@ -2416,7 +2418,7 @@ async function shareItem(id, name, sid = S.active) {
   try {
     const r = await api('createShare', { id, description: name, expires: Date.now() + 30 * 864e5 }, s);
     let url = arr(r.shares?.share)[0]?.url; if (!url) throw new Error('Il server non ha creato il link.');
-    if (s.shareBase) { const u = new URL(url); url = s.shareBase.replace(/\/+$/, '') + u.pathname + u.search; }
+    const pb = s.shareBase || s.me?.public; if (pb) { const u = new URL(url); url = pb.replace(/\/+$/, '') + u.pathname + u.search; }
     if (navigator.share) { try { await navigator.share({ title: name, text: `Ascolta "${name}" su Armony`, url }); return; } catch {} }
     await copyText(url); toast('Link copiato. Funziona per 30 giorni, anche per chi non ha un account.');
   } catch (e) { toast(e.message.includes('sharing') || e.message.includes('70') ? 'Le condivisioni non sono attive sul server (ND_ENABLESHARING).' : e.message); }
@@ -2620,7 +2622,11 @@ function vSettings() {
     <button class="btn sm" data-act="editsrv" data-id="${s.id}">Modifica</button>
     <button class="icon-btn" data-act="delsrv" data-id="${s.id}" aria-label="Rimuovi">${ic('trash')}</button></div>`).join('') || '<p class="sub">Nessun server.</p>'}</div>
   <div class="row" style="margin-top:12px"><button class="btn primary" data-act="addsrv">${ic('plus')} Aggiungi server</button><button class="btn" data-act="lanscan">${ic('wifi')} Cerca sulla rete</button></div>
-  <div id="lanRes"></div>`)}
+  <div id="lanRes"></div>
+  ${access().admin && srv()?.me?.caps?.includes('indirizzo') ? `<div class="panel stack" style="margin-top:var(--s4)">
+    <label class="f">Indirizzo pubblico di questo server<input type="url" id="pubUrl" value="${esc(srv().me.public || '')}" placeholder="https://armony.nome-rete.ts.net"></label>
+    <p class="small" style="color:var(--muted);margin:0">Quello con cui gli altri raggiungono Armony (Tailscale, dominio). Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati lo usano al posto dell'indirizzo di casa.</p>
+    <div class="row"><button class="btn" id="pubSave">Salva</button></div></div>` : ''}`)}
   ${Local.p ? grp('telefono', 'Questo telefono', 'musica telefono memoria backup copia caricamento wifi', '<div class="panel stack" id="phoneBox"></div>') : ''}
 
   ${grp('spazio', 'Spazio', 'memoria disco spazio occupato libero gb archiviazione', '<div class="panel stack" id="spazioBox"><p class="sub">Calcolo…</p></div>')}
@@ -2687,6 +2693,13 @@ function vSettings() {
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
   refreshSpazio(); refreshApk();
+  $('#pubSave')?.addEventListener('click', async () => {
+    const s = srv();
+    try {
+      const r = await srvApi(s, '/api/indirizzo', { method: 'PUT', body: JSON.stringify({ url: $('#pubUrl').value.trim() }) });
+      s.me = { ...s.me, public: r.public }; persistServers(); toast(r.public ? `Fatto: i link useranno ${r.public}.` : 'Indirizzo tolto: i link useranno quello di ogni dispositivo.');
+    } catch (e) { toast(e.message.includes('400') ? 'Scrivi solo l\'indirizzo, per esempio https://armony.nome.ts.net' : e.message); }
+  });
   if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); }
   if (window.ARMONY_APP) AppUpdate.paint();
   Local.paint();
@@ -2760,10 +2773,13 @@ async function refreshUpdate(force) {
 }
 /* ================= registrazione degli amici (solo amministratori) ================= */
 const fmtCode = c => String(c).replace(/^(.{4})(.+)$/, '$1-$2');
-const inviteLink = c => `${absUrl(srv()?.shareBase || srv()?.url || location.origin)}/#/invito/${fmtCode(c)}`;
+// indirizzo da mettere nei link per gli altri: quello scelto su questo dispositivo, poi quello che l'amministratore ha dato
+// al server (vale per tutti), infine quello con cui questo dispositivo raggiunge il server
+const pubBase = s => (s?.shareBase || s?.me?.public || absUrl(s?.url || location.origin)).replace(/\/+$/, '');
+const inviteLink = c => `${pubBase(srv())}/#/invito/${fmtCode(c)}`;
 // l'ultima app Android: il server rimanda sempre all'APK più recente (/app.apk), così link e QR non cambiano mai.
 // Per il QR serve un indirizzo che il telefono raggiunga: quello pubblico dei link, se c'è, altrimenti quello del server
-const apkBase = () => { const s = dlSrv(); return s ? (s.shareBase || absUrl(s.url)).replace(/\/+$/, '') : ''; };
+const apkBase = () => { const s = dlSrv(); return s ? pubBase(s) : ''; };
 async function refreshApk() {
   const box = $('#apkBox'); if (!box) return;
   const s = dlSrv(); let a = null;
@@ -2829,7 +2845,7 @@ function inviteSheet(code) {
 /* ================= librerie collegate (federazione, solo amministratori) ================= */
 const FED_STATE = { attesa: ['aspetta che accetti', ''], richiesta: ['vuole collegarsi', 'acc'], chiuso: ['chiuso dall\'altro server', 'err'] };
 // l'indirizzo con cui gli altri server raggiungono questo: quello pubblico del server, se c'è
-const fedBase = () => absUrl(srv()?.shareBase || srv()?.url || location.origin);
+const fedBase = () => pubBase(srv());
 async function refreshFed() {
   const box = $('#fedBox'); if (!box) return;
   let f; try { f = await dlApi('/api/fed'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }

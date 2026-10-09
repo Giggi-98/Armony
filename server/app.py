@@ -7,7 +7,8 @@ Armony - server di supporto.
                         /api/jam/ora è l'orologio comune. Il server inoltra solo messaggi cifrati
                         dai client con la chiave della stanza: non può leggerli né falsificarli
   /api/lan/*            scoperta di altri server Armony e Jam vicine via multicast UDP
-  /api/info            pubblica: nome, versione, livello di API e capacità del server
+  /api/info            pubblica: nome, versione, livello di API, capacità e indirizzo pubblico del server
+  /api/indirizzo        l'indirizzo pubblico del server, deciso dall'amministratore (vale per tutti i dispositivi)
   /app.apk, /api/app    pubblici: l'ultima app Android pubblicata su GitHub (rimando all'APK) e la sua versione
   /api/login, /api/logout, /api/me   accesso con le credenziali Navidrome (token + sale
                         Subsonic); la sessione va nell'intestazione X-Token
@@ -88,9 +89,9 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "app"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "app", "indirizzo"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
-RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/update", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -152,7 +153,7 @@ failed = {}  # ip -> [istanti dei tentativi falliti]
 
 @app.get("/api/info")
 def info():
-    return jsonify(name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS, armony=True)
+    return jsonify(name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS, armony=True, public=public_url() or None)
 
 
 # ultima app Android: l'APK sta nelle release di GitHub; /app.apk rimanda sempre a quella più recente,
@@ -218,9 +219,25 @@ def login():
     return jsonify(session=tok, **me_payload())
 
 
+# indirizzo pubblico del server (es. https://armony.nome.ts.net): lo decide l'amministratore una volta e vale per tutti
+# i dispositivi, per i link condivisi, gli inviti, il QR dell'app e la federazione. ARMONY_PUBLIC_URL fa da valore iniziale
+def public_url():
+    r = db.one("SELECT value FROM settings WHERE key = 'public_url'")
+    return (r["value"] if r else os.environ.get("ARMONY_PUBLIC_URL", "")).strip().rstrip("/")
+
+
 def me_payload():
     return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"], delete=g.who["delete"],
-                name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS)
+                name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS, public=public_url())
+
+
+@app.put("/api/indirizzo")
+def set_public_url():
+    u = str((request.get_json(silent=True) or {}).get("url") or "").strip().rstrip("/")
+    if u and not re.match(r"^https?://[^\s/]+(:\d+)?$", u):
+        return jsonify(error="Scrivi solo l'indirizzo, per esempio https://armony.nome.ts.net"), 400
+    db.run("INSERT INTO settings (key, value) VALUES ('public_url', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", u)
+    return jsonify(ok=True, public=public_url())
 
 
 @app.get("/api/me")
