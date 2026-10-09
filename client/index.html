@@ -257,28 +257,6 @@ label.check small{display:block;color:var(--muted)}
   .tracklist .al>[data-act]:hover{color:var(--ink);text-decoration:underline}
 }
 
-/* intestazione di album, artista, playlist (phero): fascia col colore della copertina fino al fondo */
-@property --ph{syntax:'<color>';inherits:false;initial-value:transparent}
-.phero{--ph:color-mix(in srgb,var(--surface2) 70%,transparent);display:flex;align-items:flex-end;gap:var(--s5);
-  margin:calc(-1 * var(--pad-t)) calc(-1 * var(--pad-x)) var(--s5);padding:var(--s7) var(--pad-x) var(--s5);
-  background:linear-gradient(to bottom,var(--ph),transparent);transition:--ph .6s ease}
-.phero .art{width:232px;flex:none;border-radius:8px;box-shadow:var(--shadow-float)}
-.phero .art.round{border-radius:50%}
-.ph-t{flex:1;min-width:0}
-.ph-label{display:block;margin-bottom:var(--s2);font-size:.8rem;font-weight:700}
-.phero h1{font-size:var(--fs-hero);line-height:.95;letter-spacing:-.04em;margin:0 0 var(--s3);overflow-wrap:anywhere;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;padding-bottom:.06em}
-.ph-meta{margin:0;color:var(--muted);font-size:.92rem;font-weight:500}
-.ph-meta b,.ph-meta a{color:var(--ink);font-weight:700}
-/* barra delle azioni: ▶ grande in ambra, il resto icone */
-.actionbar{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2);margin:0 0 var(--s4)}
-.ab-play{width:56px;height:56px;flex:none;margin-right:var(--s2);border:0;border-radius:50%;padding:0;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;
-  box-shadow:0 10px 22px -10px color-mix(in srgb,var(--accent) 90%,transparent);transition:transform var(--t-tap) var(--ease-out),background var(--t-tap) ease}
-.ab-play svg{width:24px;height:24px;margin-left:3px}
-.ab-play:active{transform:scale(.94)}
-.actionbar .icon-btn svg{width:24px;height:24px}
-@media (hover:hover) and (pointer:fine){.ab-play:hover{transform:scale(1.04);background:color-mix(in srgb,var(--accent) 88%,#fff)}}
-
 /* barra laterale: le playlist sotto le sezioni, scorrono da sole */
 @media (min-width:1200px){:root{--side-w:260px}}
 #sidePl{flex:1 1 0;min-height:96px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;margin:0 -6px;padding:var(--s3) 6px 0;border-top:1px solid var(--line);scrollbar-width:thin}
@@ -310,9 +288,6 @@ label.check small{display:block;color:var(--muted)}
   .cards.shelf::-webkit-scrollbar{display:none}
   .cards.shelf .card{scroll-snap-align:start}
   .shelf-head{margin-top:var(--s6)}
-  .phero{flex-direction:column;align-items:stretch;gap:var(--s4);padding-top:var(--s5)}
-  .phero .art{width:min(62vw,280px);align-self:center}
-  .phero h1{font-size:clamp(1.9rem,8vw,2.6rem);line-height:1}
 }
 @media (prefers-reduced-motion:reduce){
   .card-play{transition:opacity 200ms linear;transform:none}
@@ -406,11 +381,6 @@ label.check small{display:block;color:var(--muted)}
   display:grid;place-items:center;cursor:pointer;box-shadow:0 8px 18px -8px rgb(0 0 0 / .55);transition:transform var(--t-tap) var(--ease-out)}
 .hbest-play svg{width:22px;height:22px}
 .hbest-play:active{transform:scale(.94)}
-.hart{display:flex;flex-direction:column;gap:var(--s1);text-align:center;cursor:pointer;padding:var(--s2);border-radius:var(--r-m);transition:background var(--t-tap) ease}
-.hart-img{aspect-ratio:1;border-radius:50%;overflow:hidden;background:var(--surface2);box-shadow:var(--shadow-art);margin-bottom:var(--s2)}
-.hart-img img{width:100%;height:100%;object-fit:cover}
-.hart b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hart small{color:var(--muted);font-size:var(--fs-small,.8rem)}
 .hres.empty{margin-top:var(--s5)}
 .hres.empty .btn{margin-top:var(--s3)}
 @media (hover:hover) and (pointer:fine){
@@ -422,11 +392,102 @@ label.check small{display:block;color:var(--muted)}
   .hbanner:is(a):hover{border-color:var(--muted)}
   .hrq button:hover{color:var(--accent-text)}
   .htile:hover .ht-art{transform:rotate(25deg) scale(1.06)}
-  .hbest:hover,.hart:hover{background:var(--surface2)}
-  .hbest:hover .hbest-play{transform:scale(1.05)}
+  .hbest:hover,  .hbest:hover .hbest-play{transform:scale(1.05)}
 }
 @media (prefers-reduced-motion:reduce){.qk-play,.hmix-art,.ht-art,.hbest-play{transition:none}}
 /* === fine H === */
+/* === L: libreria, album, playlist, artista, preferiti, genere, decennio === */
+/* intestazione di pagina: copertina grande a sinistra, etichetta, titolo enorme e riga meta in basso a destra */
+@property --ph{syntax:'<color>';inherits:false;initial-value:transparent}
+/* la fascia dietro l'intestazione prende il colore della copertina (lPhero ph) e sfuma nel fondo */
+.phero{--ph:color-mix(in srgb,var(--surface2) 70%,transparent);display:flex;gap:var(--s5);align-items:flex-end;
+  margin:calc(-1 * var(--pad-t)) calc(-1 * var(--pad-x)) var(--s5);padding:var(--s7) var(--pad-x) var(--s5);
+  background:linear-gradient(to bottom,var(--ph),transparent);transition:--ph .6s ease}
+.phero-art{width:232px;aspect-ratio:1;flex:none;border-radius:var(--r-s);overflow:hidden;background:var(--surface2);box-shadow:var(--shadow-float);display:grid;place-items:center;color:var(--muted)}
+.phero-art img{width:100%;height:100%;object-fit:cover}
+.phero.round .phero-art{border-radius:50%}
+.phero-art.tile{background:radial-gradient(120% 100% at 100% 100%,rgb(0 0 0 / .28),transparent 62%),var(--tile);color:#fff;place-items:end start;padding:var(--s4)}
+.phero-art.tile b{font:800 2.4rem/1 var(--display);letter-spacing:-.03em;overflow-wrap:anywhere}
+.phero-art.tile svg{width:42%;height:42%;place-self:center;filter:drop-shadow(0 8px 18px rgb(0 0 0 / .3))}
+.phero-txt{min-width:0;flex:1}
+.phero-kind{font-weight:700;font-size:.8rem;color:var(--ink)}
+.phero-title{font:800 var(--fs-hero,clamp(2.6rem,6vw,5.2rem))/.95 var(--display);font-stretch:88%;letter-spacing:-.04em;margin:.12em 0 .28em;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;padding-bottom:.06em}
+.phero-meta{margin:0;color:var(--muted);font-size:.92rem}
+.phero-meta b{color:var(--ink);font-weight:700}
+.phero-meta a{color:inherit;text-decoration:none}
+.phero-desc{display:block;margin-bottom:var(--s1);max-width:70ch}
+/* barra delle azioni: play grande in ambra, poi icone senza scritte; il resto sta nel foglio ⋯ */
+.actionbar{display:flex;align-items:center;gap:var(--s1);margin:0 0 var(--s4);flex-wrap:wrap}
+.ab-play{width:56px;height:56px;margin-right:var(--s3);border:0;border-radius:50%;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;box-shadow:0 10px 22px -12px color-mix(in srgb,var(--accent) 90%,transparent);transition:transform var(--t-tap) var(--ease-out)}
+.ab-play svg{width:24px;height:24px;margin-left:2px}
+.ab-play:active{transform:scale(.94)}
+.icon-btn.ab{width:48px;height:48px}
+.icon-btn.ab svg{width:24px;height:24px}
+dialog.sheet .mi.danger{color:var(--danger)}
+dialog.sheet .mi svg{width:20px;height:20px;flex:none}
+/* schede: artisti tondi, playlist quadrate, due schede speciali in testa alle playlist */
+.lcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--card-min,164px),1fr));gap:var(--s2)}
+.lcard{display:flex;flex-direction:column;min-width:0;padding:var(--s3);border:0;border-radius:var(--r-s);background:none;color:inherit;text-align:left;cursor:pointer;transition:background var(--t-tap) ease,transform var(--t-tap) var(--ease-out)}
+.lcard:active{transform:scale(.98)}
+.lcover{aspect-ratio:1;border-radius:var(--r-s);overflow:hidden;background:var(--surface2);margin-bottom:var(--s2);box-shadow:var(--shadow-art);display:grid;place-items:center;color:var(--muted)}
+.lcover img{width:100%;height:100%;object-fit:cover;grid-area:1/1}
+.lcover svg{width:38%;height:38%;grid-area:1/1}
+.lcard b{font-weight:600;font-size:var(--fs-card,.95rem);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lcard small{color:var(--muted);font-size:var(--fs-small,.84rem);line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lcard.round{text-align:center}
+.lcard.round .lcover{border-radius:50%}
+.lcard.special .lcover{background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#c2410c));color:var(--on-accent);box-shadow:none}
+.lcard.special.alt .lcover{background:linear-gradient(135deg,#1e3264,#148a08);color:#fff}
+.lcard.special svg{width:34%;height:34%}
+/* lettera dell'indice degli artisti: una riga intera, compatta */
+.lletter{grid-column:1/-1;font:800 1.15rem/1 var(--display);color:var(--accent-text);padding:var(--s4) var(--s3) 0}
+.lletter:first-child{padding-top:0}
+/* mensola: le stesse schede su una riga che scorre */
+.lcards.shelfish{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:var(--card-min,164px);overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;margin:0 calc(-1 * var(--s3))}
+.lcards.shelfish .lcard{scroll-snap-align:start}
+/* schede delle sezioni della libreria */
+.lpills{display:flex;gap:var(--s2);overflow-x:auto;scrollbar-width:none;margin:var(--s3) 0 var(--s5);min-width:0}
+.lpills a{display:inline-flex;align-items:center;min-height:36px;padding:0 var(--s4);border-radius:999px;background:var(--surface2);color:var(--ink);font-weight:600;font-size:.92rem;text-decoration:none;white-space:nowrap;transition:background var(--t-tap) ease,color var(--t-tap) ease}
+.lpills a.on{background:var(--ink);color:var(--bg)}
+.lbar{display:flex;justify-content:flex-end;margin:calc(-1 * var(--s3)) 0 var(--s3)}
+.lsort{display:inline-flex;align-items:center;gap:var(--s2);color:var(--muted)}
+.lsort svg{width:18px;height:18px;flex:none}
+.lsort select{width:auto;min-height:36px;border:0;border-radius:999px;background:var(--surface2);padding:0 var(--s3);font-weight:600;color:var(--ink);cursor:pointer}
+/* riquadri colorati dei generi */
+.ltiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:var(--s3)}
+.ltile{aspect-ratio:16/10;display:flex;flex-direction:column;justify-content:space-between;min-width:0;padding:var(--s3) var(--s4);border-radius:var(--r-s);background:radial-gradient(120% 100% at 100% 100%,rgb(0 0 0 / .28),transparent 62%),var(--tile);color:#fff;text-decoration:none;overflow:hidden;transition:transform var(--t-tap) var(--ease-out)}
+.ltile:active{transform:scale(.97)}
+.ltile b{font:800 1.25rem/1.1 var(--display);letter-spacing:-.02em;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ltile small{font-size:var(--fs-small,.84rem);opacity:.88}
+/* artista: cinque popolari, poi "Mostra altri" */
+.ltop:not(.all) .song:nth-child(n+6){display:none}
+.lmorebtn{border:0;background:none;color:var(--muted);font-weight:700;font-size:.9rem;padding:var(--s3) var(--s2);cursor:pointer}
+.lbio{max-width:70ch;color:var(--muted)}
+@media (hover:hover) and (pointer:fine){
+  .lcard:hover{background:var(--surface2)}
+  .ab-play:hover{transform:scale(1.04)}
+  .icon-btn.ab:hover,.lmorebtn:hover{color:var(--ink)}
+  .lpills a:not(.on):hover{background:color-mix(in srgb,var(--ink) 14%,var(--surface2))}
+  .ltile:hover{transform:scale(1.02)}
+}
+@media (min-width:1400px){.lcards{--card-min:184px}}
+@media (max-width:860px){.lcards{--card-min:140px}}
+@media (max-width:640px){
+  .phero{flex-direction:column;align-items:flex-start;gap:var(--s4)}
+  .phero-art{width:min(62vw,280px);align-self:center}
+  .phero-title{font-size:clamp(2rem,9vw,2.6rem);-webkit-line-clamp:4}
+  .ltiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s2)}
+  .ltile b{font-size:1.05rem}
+}
+@media (max-width:520px){
+  .lcards:not(.shelfish):has(>.lcard.round){grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s1)}
+  .lcards.shelfish{grid-auto-columns:128px}
+  .lcard{padding:var(--s2)}
+  .lcard b{font-size:.86rem}
+  .lcard small{font-size:.78rem}
+}
+@media (prefers-reduced-motion:reduce){.lcard,.ltile,.ab-play,.phero{transition:none}}
+/* === fine L === */
 
 /* in riproduzione */
 .now:not(.song){display:grid;grid-template-columns:minmax(260px,420px) minmax(0,1fr);gap:clamp(20px,4vw,56px);align-items:start}
