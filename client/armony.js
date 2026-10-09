@@ -138,7 +138,7 @@ const QUALITIES = {
 };
 const DEFAULT_PREFS = {
   quality: '192', qualityMobile: 'same', offlineQ: '192', crossfade: 0, rg: 'track', rgPre: 0, night: false, speed: 1,
-  eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqOn: true, compat: false, lyricsOnline: true, syncQueue: true,
+  eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqOn: true, eqAuto: false, compat: false, lyricsOnline: true, syncQueue: true,
   nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true, live: true, deviceName: '', solo: false
 };
 const P = Object.assign({}, DEFAULT_PREFS, store.get('prefs', {}));
@@ -1166,7 +1166,10 @@ function sleepDialog() {
 
 /* ================= motore audio =================
    Due "piatti" audio per crossfade e passaggi senza pause.
-   Catena: piatto → guadagno (normalizzazione + dissolvenza) → EQ 10 bande → compressore (volume notte) → volume → uscita
+   Catena: piatto → guadagno (normalizzazione + dissolvenza) → margine (pre) → EQ 10 bande → compressore (volume notte)
+   → limitatore → volume → uscita. Da pre parte anche la misura dello spettro per l'EQ automatico (tap).
+   Contro i gracchi: pre abbassa il segnale di quanto l'EQ alza nel punto più alto della sua curva, e il limitatore
+   (soglia -1 dB) ferma quel che resta (normalizzazione con preamplificazione, picchi fra campioni). Sotto soglia non tocca nulla.
    L'uscita viene anche resa disponibile come flusso, usato dalla Jam in modalità trasmissione. */
 const EQ_FREQS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const EQ_PRESETS = {
@@ -1175,8 +1178,56 @@ const EQ_PRESETS = {
   'Acustica': [3, 2, 1, 1, 2, 2, 3, 3, 2, 1], 'Classica': [3, 2, 1, 0, 0, 0, -1, 1, 2, 3], 'Cuffiette piccole': [5, 4, 3, 1, 0, 0, 1, 2, 2, 1],
   'Altoparlante del telefono': [-6, -4, -1, 2, 3, 3, 2, 1, 0, -2]
 };
+/* EQ automatico: misura lo spettro medio del brano PRIMA dell'EQ (le correzioni non rientrano nella misura),
+   come energia per ottava sulle 10 bande, e lo confronta con EQ_REF. In bande d'ottava il rumore rosa è piatto;
+   lo spettro medio dei mix commerciali (es. Pestana et al., AES 2013, su migliaia di brani masterizzati) ha bassi
+   pieni e scende di circa 2 dB per ottava sopra i 250 Hz, con un calo netto agli estremi. La curva è indicativa:
+   si corregge metà della differenza, entro EQ_LIM, ancorata alle bande centrali, quindi conta la forma, non il decimale.
+   È una modalità a sé (non si somma alle preimpostazioni): sommarle porterebbe la curva a doppio, e chi sceglie
+   "Bassi potenti" vuole proprio scostarsi dal riferimento. */
+const EQ_REF = [-4, 0, 0, -1.5, -3, -5, -7, -9, -11, -16];
+const EQ_LIM = [3, 4.5, 6, 6, 6, 6, 6, 6, 4.5, 3];
+const EQ_ZERO = new Float32Array(10);
+// 72 frequenze in scala logaritmica 20 Hz – 20 kHz per leggere la curva dell'EQ, allocate una volta
+const EQ_RESP = { f: Float32Array.from({ length: 72 }, (_, i) => 20 * 1000 ** (i / 71)), m: new Float32Array(72), p: new Float32Array(72), acc: new Float32Array(72) };
+// il compressore del browser aggiunge un guadagno di compensazione fisso, (−soglia·(1−1/rapporto))·0,6 = +0,57 dB
+// con soglia -1 e rapporto 20 (misurato in Chromium): lo si toglie, così sotto soglia il limitatore è trasparente
+const LIM_MAKEUP = 10 ** (-.57 / 20);
+const AutoEq = {
+  timer: 0, n: 0, key: '', buf: null, bins: null, onpaint: null,
+  pow: new Float32Array(10), now: new Float32Array(10), d: new Float32Array(10), t: new Float32Array(10),
+  setup(ctx, tap) {
+    this.buf = new Float32Array(tap.frequencyBinCount); const hz = ctx.sampleRate / tap.fftSize;
+    this.bins = EQ_FREQS.map(f => [Math.max(1, Math.round(f / Math.SQRT2 / hz)), Math.min(tap.frequencyBinCount - 1, Math.round(f * Math.SQRT2 / hz))]);
+    document.addEventListener('visibilitychange', () => this.run());
+  },
+  reset() { this.key = ''; this.n = 0; this.pow.fill(0); this.t.fill(0); },
+  // gira solo se serve: modalità attiva, musica in corso, pagina visibile. Una lettura ogni 400 ms
+  run() {
+    const go = P.eqOn && P.eqAuto && !!Engine.ctx && !Engine.el.paused && !document.hidden;
+    if (go && !this.timer) this.timer = setInterval(() => this.step(), 400);
+    else if (!go && this.timer) { clearInterval(this.timer); this.timer = 0; this.onpaint?.(); }
+  },
+  step() {
+    const k = Engine.el.dataset.key; if (k !== this.key) { this.key = k; this.n = 0; this.pow.fill(0); }  // brano nuovo: si riparte
+    Engine.tap.getFloatFrequencyData(this.buf);
+    let tot = 0;
+    for (let i = 0; i < 10; i++) { let s = 0; const [a, b] = this.bins[i]; for (let j = a; j <= b; j++) s += 10 ** (this.buf[j] / 10); this.now[i] = s; tot += s; }
+    if (tot < 1e-7) return;  // silenzio o intro quasi muto (sotto -70 dB): non conta
+    this.n++; const w = 1 / Math.min(this.n, 20);  // media semplice per i primi 8 s, poi media mobile lenta (~8 s)
+    let m = 0;
+    for (let i = 0; i < 10; i++) { this.pow[i] += (this.now[i] - this.pow[i]) * w; this.d[i] = EQ_REF[i] - 10 * Math.log10(this.pow[i] + 1e-20); if (i > 1 && i < 8) m += this.d[i] / 6; }
+    const conf = Math.min(1, this.n / 12);  // le prime letture contano poco: si parte morbidi
+    for (let i = 0; i < 10; i++) {
+      const x = this.d[i] - m;  // > 0: la banda manca rispetto al riferimento
+      const c = (x > 12 ? Math.max(0, 24 - x) : x) * .5;  // banda quasi assente (filtro dell'MP3, niente sub): non si gonfia il rumore
+      this.t[i] = Math.round(Math.max(-EQ_LIM[i], Math.min(EQ_LIM[i], c)) * conf * 10) / 10;
+    }
+    Engine.applyEq(); this.onpaint?.();
+  }
+};
 const Engine = {
-  decks: [], gains: [], cur: 0, ctx: null, master: null, eq: [], comp: null, analyser: null, dest: null, fading: false, blobUrls: [null, null], scrobbled: null,
+  decks: [], gains: [], cur: 0, ctx: null, master: null, eq: [], comp: null, analyser: null, pre: null, tap: null, lim: null, shadow: [], dest: null, fading: false, blobUrls: [null, null], scrobbled: null,
   init() {
     for (let i = 0; i < 2; i++) {
       const a = document.createElement('audio'); a.preload = 'auto';
@@ -1195,16 +1246,36 @@ const Engine = {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' }); this.ctx = ctx;
       this.eq = EQ_FREQS.map((f, i) => { const b = ctx.createBiquadFilter(); b.type = i === 0 ? 'lowshelf' : i === 9 ? 'highshelf' : 'peaking'; b.frequency.value = f; b.Q.value = 1.1; return b; });
-      this.decks.forEach((a, i) => { const src = ctx.createMediaElementSource(a); const g = ctx.createGain(); g.gain.value = i === this.cur ? this.rg(currentTrack()) : 0; src.connect(g); g.connect(this.eq[0]); this.gains[i] = g; });
+      // copie scollegate dei filtri: servono solo a calcolare la curva dell'EQ (getFrequencyResponse), non suonano
+      this.shadow = EQ_FREQS.map((f, i) => { const b = ctx.createBiquadFilter(); b.type = this.eq[i].type; b.frequency.value = f; b.Q.value = 1.1; return b; });
+      this.pre = ctx.createGain(); this.tap = ctx.createAnalyser(); this.tap.fftSize = 4096; this.tap.smoothingTimeConstant = 0;
+      this.decks.forEach((a, i) => { const src = ctx.createMediaElementSource(a); const g = ctx.createGain(); g.gain.value = i === this.cur ? this.rg(currentTrack()) : 0; src.connect(g); g.connect(this.pre); this.gains[i] = g; });
+      this.pre.connect(this.eq[0]); this.pre.connect(this.tap); AutoEq.setup(ctx, this.tap);
       this.eq.reduce((p, n) => { p.connect(n); return n; });
       this.comp = ctx.createDynamicsCompressor(); this.master = ctx.createGain();
+      // limitatore: rapporto massimo, attacco immediato (il nodo guarda avanti di 6 ms); lo segue la compensazione tolta
+      const l = this.lim = ctx.createDynamicsCompressor(); l.threshold.value = -1; l.knee.value = 0; l.ratio.value = 20; l.attack.value = 0; l.release.value = .1;
+      const lo = ctx.createGain(); lo.gain.value = LIM_MAKEUP;
       this.analyser = ctx.createAnalyser(); this.analyser.fftSize = 512; this.analyser.smoothingTimeConstant = .8;
-      this.eq[9].connect(this.comp); this.comp.connect(this.master); this.master.connect(this.analyser); this.analyser.connect(ctx.destination);
+      this.eq[9].connect(this.comp); this.comp.connect(l); l.connect(lo); lo.connect(this.master); this.master.connect(this.analyser); this.analyser.connect(ctx.destination);
       this.dest = ctx.createMediaStreamDestination(); this.master.connect(this.dest);
       this.applyEq(); this.applyNight(); this.applyVolume();
     } catch (e) { console.warn('Web Audio non disponibile', e); this.ctx = null; }
   },
-  applyEq() { this.eq.forEach((b, i) => { b.gain.value = P.eqOn ? (P.eq[i] || 0) : 0; }); },
+  // manuale: subito; automatico: scivola con costante di 2,5 s (niente pompaggio). pre segue di pari passo
+  applyEq() {
+    AutoEq.run(); if (!this.ctx) return;
+    const g = !P.eqOn ? EQ_ZERO : P.eqAuto ? AutoEq.t : P.eq, now = this.ctx.currentTime, tau = P.eqOn && P.eqAuto ? 2.5 : .02;
+    this.eq.forEach((b, i) => b.gain.setTargetAtTime(g[i] || 0, now, tau));
+    this.pre.gain.setTargetAtTime(10 ** (-this.eqPeak(g) / 20), now, tau);
+  },
+  // punto più alto della curva dell'EQ, in dB (0 se nessuna banda alza): è il margine da lasciare prima dell'EQ
+  eqPeak(g) {
+    const acc = EQ_RESP.acc.fill(1);
+    this.shadow.forEach((b, i) => { b.gain.value = g[i] || 0; b.getFrequencyResponse(EQ_RESP.f, EQ_RESP.m, EQ_RESP.p); for (let j = 0; j < acc.length; j++) acc[j] *= EQ_RESP.m[j]; });
+    let mx = 1; for (let j = 0; j < acc.length; j++) if (acc[j] > mx) mx = acc[j];
+    return 20 * Math.log10(mx);
+  },
   applyNight() {
     const c = this.comp; if (!c) return;
     if (P.night) { c.threshold.value = -34; c.knee.value = 14; c.ratio.value = 7; c.attack.value = .004; c.release.value = .3; }
@@ -1261,8 +1332,8 @@ const Engine = {
       return;
     }
     if (ev === 'timeupdate') { this.tick(); emit('time'); }
-    else if (ev === 'play' || ev === 'playing') { paintButtons(); emit('play'); }
-    else if (ev === 'pause') { paintButtons(); emit('pause'); QSync.schedule(); }
+    else if (ev === 'play' || ev === 'playing') { paintButtons(); emit('play'); AutoEq.run(); }
+    else if (ev === 'pause') { paintButtons(); emit('pause'); QSync.schedule(); AutoEq.run(); }
     else if (ev === 'ended') this.ended();
     else if (ev === 'loadedmetadata') emit('time');
   },
@@ -2675,18 +2746,34 @@ function qualityDialog() {
 function eqDialog() {
   Engine.graph();
   const d = $('#dlg'); d.className = 'wide';
-  const lbl = f => f >= 1000 ? f / 1000 + 'k' : f;
-  d.innerHTML = `<h3>Equalizzatore</h3>${P.compat || !Engine.ctx ? '<p class="sub">Non disponibile in modalità compatibile, o finché non parte la musica.</p>' : ''}
+  const lbl = f => f >= 1000 ? f / 1000 + 'k' : f, fmt = v => (v > 0 ? '+' : '') + String(Math.round(v * 10) / 10).replace('.', ',');
+  const off = P.compat ? 'In modalità compatibile l\'audio non passa dal motore del browser: equalizzatore, modalità automatica e protezione dai gracchi sono spenti.'
+    : !Engine.ctx ? 'Si attiva quando parte la musica.' : '';
+  d.innerHTML = `<h3>Equalizzatore</h3>${off ? `<p class="sub">${esc(off)}</p>` : ''}
     <div class="row between"><label class="check" style="align-items:center"><input type="checkbox" id="eqOn" ${P.eqOn ? 'checked' : ''}><span>Attivo</span></label>
-    <select id="eqPre" style="width:auto"><option value="">Preimpostazioni…</option>${Object.keys(EQ_PRESETS).map(k => `<option>${k}</option>`).join('')}</select></div>
-    <div class="eq">${EQ_FREQS.map((f, i) => `<label><span id="eqv${i}">${P.eq[i] > 0 ? '+' : ''}${P.eq[i]}</span><input type="range" min="-12" max="12" step="1" value="${P.eq[i]}" data-b="${i}" aria-label="${lbl(f)} Hz"><span>${lbl(f)}</span></label>`).join('')}</div>
+    <select id="eqPre" style="width:auto"><option value="">Manuale</option><option value="auto">Automatico</option><optgroup label="Preimpostazioni">${Object.keys(EQ_PRESETS).map(k => `<option>${esc(k)}</option>`).join('')}</optgroup></select></div>
+    <p class="sub" id="eqInfo" hidden></p>
+    <div class="eq">${EQ_FREQS.map((f, i) => `<label><span id="eqv${i}"></span><input type="range" min="-12" max="12" step="1" data-b="${i}" aria-label="${lbl(f)} Hz"><span>${lbl(f)}</span></label>`).join('')}</div>
     <div class="row"><button class="btn" id="eqReset">Azzera</button><button class="btn primary" onclick="this.closest('dialog').close()">Fatto</button></div>`;
-  const paint = () => EQ_FREQS.forEach((_, i) => { $(`[data-b="${i}"]`).value = P.eq[i]; $('#eqv' + i).textContent = (P.eq[i] > 0 ? '+' : '') + P.eq[i]; });
-  d.querySelectorAll('[data-b]').forEach(r => r.oninput = () => { P.eq[+r.dataset.b] = +r.value; savePrefs(); Engine.applyEq(); paint(); });
-  $('#eqOn').onchange = e => { P.eqOn = e.target.checked; savePrefs(); Engine.applyEq(); };
-  $('#eqPre').onchange = e => { if (!e.target.value) return; P.eq = EQ_PRESETS[e.target.value].slice(); savePrefs(); Engine.applyEq(); paint(); };
-  $('#eqReset').onclick = () => { P.eq = Array(10).fill(0); savePrefs(); Engine.applyEq(); paint(); };
-  d.onclose = () => { d.className = ''; d.onclose = null; }; d.showModal();
+  // in automatico le barre mostrano il guadagno applicato in quel momento (scivola verso la correzione calcolata)
+  const paint = () => {
+    const auto = P.eqAuto, live = auto && P.eqOn && Engine.ctx;
+    $('#eqPre').value = auto ? 'auto' : ''; d.querySelector('.eq').classList.toggle('auto', auto);
+    EQ_FREQS.forEach((_, i) => { const r = $(`[data-b="${i}"]`), v = live ? Engine.eq[i].gain.value : auto ? 0 : P.eq[i]; r.step = auto ? 'any' : 1; r.value = v; r.tabIndex = auto ? -1 : 0; $('#eqv' + i).textContent = fmt(v); });
+    const info = $('#eqInfo'); info.hidden = !auto || !!off;
+    info.textContent = !P.eqOn ? 'Equalizzatore spento.' : Engine.el.paused ? 'Analizza lo spettro del brano mentre suona e corregge da solo, piano piano. In pausa.'
+      : AutoEq.n < 12 ? 'Sto ascoltando il brano…' : 'Correzione su misura per questo brano.';
+  };
+  paint(); AutoEq.onpaint = paint;
+  d.querySelectorAll('[data-b]').forEach(r => r.oninput = () => { if (P.eqAuto) return paint(); P.eq[+r.dataset.b] = +r.value; savePrefs(); Engine.applyEq(); paint(); });
+  $('#eqOn').onchange = e => { P.eqOn = e.target.checked; savePrefs(); Engine.applyEq(); paint(); };
+  $('#eqPre').onchange = e => {
+    const v = e.target.value; P.eqAuto = v === 'auto';
+    if (P.eqAuto) AutoEq.reset(); else if (v) P.eq = EQ_PRESETS[v].slice();
+    savePrefs(); Engine.applyEq(); paint();
+  };
+  $('#eqReset').onclick = () => { P.eqAuto = false; P.eq = Array(10).fill(0); savePrefs(); Engine.applyEq(); paint(); };
+  d.onclose = () => { d.className = ''; d.onclose = null; AutoEq.onpaint = null; }; d.showModal();
 }
 function speedDialog() {
   const d = $('#dlg'); d.className = 'sheet';
