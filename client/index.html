@@ -235,6 +235,12 @@ label.check small{display:block;color:var(--muted)}
 @media (hover:none){.card-play{display:none}}
 /* scaffale: una riga sola, le schede che non ci stanno restano fuori ("Mostra tutto" porta al resto) */
 .cards.shelf{grid-template-rows:auto;grid-auto-rows:0;row-gap:0;overflow:hidden}
+/* discografia dell'artista: su schermo largo tutte le righe, sul telefono scaffale; ciò che manca in libreria (da Deezer) è attenuato */
+.cards.shelf.disco{grid-auto-rows:auto;row-gap:var(--s2)}
+.card.ghost .art{box-shadow:none;outline:1px dashed color-mix(in srgb,var(--muted) 50%,transparent);outline-offset:-1px}
+.card.ghost .art img{opacity:.42;filter:grayscale(.5)}
+.card.ghost b{color:var(--muted)}
+.ghost-tag{position:absolute;left:var(--s2);bottom:var(--s2);max-width:calc(100% - 2 * var(--s2));padding:2px var(--s2);border-radius:99px;background:color-mix(in srgb,var(--bg) 85%,transparent);color:var(--ink);font-size:.72rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .shelf-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);margin:var(--s7) 0 var(--s2)}
 .shelf-head h2{margin:0;min-width:0}
 .shelf-head a{flex:none;font-size:var(--fs-small);font-weight:700;color:var(--muted);text-decoration:none}

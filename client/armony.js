@@ -304,7 +304,7 @@ const SK = {
 function skeleton(r, id) {
   const h = '<i class="sk sk-h1"></i><i class="sk sk-line short"></i>', rows = n => SK.row.repeat(n);
   const body = r === 'home' ? h + SK.pills(4) + '<i class="sk sk-h2"></i><div class="cards shelf">' + SK.card.repeat(8) + '</div><i class="sk sk-h2"></i>' + SK.pills(6)
-    : r === 'album' || r === 'artista' ? `<div class="phero"><div class="art sk"${r === 'artista' ? ' style="border-radius:50%"' : ''}></div><div class="sk-wrap">${h}</div></div>` + rows(8)
+    : /^(album|artista)(-dz)?$/.test(r) ? `<div class="phero"><div class="art sk"${r.startsWith('artista') ? ' style="border-radius:50%"' : ''}></div><div class="sk-wrap">${h}</div></div>` + rows(8)
     : r === 'genere' || r === 'decennio' || (r === 'libreria' && id === 'album') ? h + '<div class="cards" style="margin-top:18px">' + SK.card.repeat(12) + '</div>'
     : r === 'ora' || r === 'cerca' || r === 'impostazioni' || r === 'scarica' || r === 'jam' || r === 'tasti' ? ''
     : h + '<div style="margin-top:18px">' + rows(8) + '</div>';
@@ -334,7 +334,7 @@ const NAV = [
   ['statistiche', 'Statistiche', 'stats'], ['scarica', 'Scarica', 'down'], ['impostazioni', 'Impostazioni', 'gear']
 ];
 const view = $('#view');
-const ROUTE_PARENT = { album: 'libreria', artista: 'libreria', genere: 'libreria', decennio: 'libreria' };
+const ROUTE_PARENT = { album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria' };
 // su telefono: quattro sezioni nella barra in basso, le altre nel foglio "Altro"
 const TABS = ['home', 'cerca', 'libreria', 'jam'];
 const MORE = [...NAV.map(n => n[0]).filter(h => !TABS.includes(h)), 'tasti'];
@@ -349,7 +349,7 @@ async function route() {
   $('#tabMore')?.classList.toggle('on', MORE.includes(ROUTE_PARENT[r] || r));
   $$('#sidePl a').forEach(a => a.classList.toggle('on', r === 'playlist' && a.dataset.pl === id));
   const fn = {
-    home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, genere: vGenre, decennio: vDecade,
+    home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
     statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite
   }[r] || vHome;
@@ -603,8 +603,11 @@ async function vLibrary(tab = 'artisti') {
 async function vArtist(id) {
   const n = Scene.nav;
   const a = (await api('getArtist', { id })).artist;
+  // la discografia di Deezer arriva insieme al resto; se tarda più di 3 s la pagina esce senza e la aggiunge dopo
+  const dzP = discoOk() ? Promise.all([dlApi('/api/discografia?artist=' + encodeURIComponent(a.name)), libNames()]).catch(() => null) : null;
   let info = null; try { info = (await api('getArtistInfo2', { id, count: 12 })).artistInfo2; } catch {}
   let top = []; try { top = arr((await api('getTopSongs', { artist: a.name, count: 10 })).topSongs?.song).map(x => norm(x)); } catch {}
+  const early = dzP && await Promise.race([dzP, new Promise(r => setTimeout(r, 3000))]);
   if (stale(n)) return;
   const bio = (info?.biography || '').replace(/<a[^>]*>.*?<\/a>/g, '').replace(/<[^>]+>/g, '').trim();
   // luce dalla copertina sul server (stessa origine): l'immagine grande dell'artista spesso è di un altro dominio
@@ -614,11 +617,108 @@ async function vArtist(id) {
   view.innerHTML = lPhero({ kind: 'Artista', title: a.name, ph: a.coverArt, art: img, round: true, meta: `${albums.length} album${top.length ? ` · ${top.length} brani popolari` : ''}` }) +
     lActionBar({ play: { act: 'artistall', data: { id }, label: 'Riproduci tutto' }, shuffle: { act: 'artistradio', data: { id, name: a.name }, icon: 'radio', label: 'Radio dell\'artista' }, offline: false, addpl: false }) +
     (top.length ? `<h2>Popolari</h2><div class="ltop" id="lTop">${songList(top)}</div>${top.length > 5 ? `<button class="lmorebtn" id="lTopMore">Mostra altri</button>` : ''}` : '') +
-    `<h2>Discografia</h2>${albumGrid(albums, { strip: true })}` +
-    (sim.length ? `<h2>Artisti simili</h2><div class="lcards shelfish">${sim.map(lArtistCard).join('')}</div>` : '') +
+    `<div id="lDisco">${discoHtml(albums, early?.[0])}</div><div id="lSim">${simHtml(sim, early?.[0], early?.[1])}</div>` +
     (bio ? `<h2>Informazioni</h2><p class="lbio">${esc(bio.slice(0, 700))}${bio.length > 700 ? '…' : ''}</p>` : '');
   const more = $('#lTopMore');
   if (more) more.onclick = () => { const t = $('#lTop'); t.classList.toggle('all'); more.textContent = t.classList.contains('all') ? 'Mostra meno' : 'Mostra altri'; };
+  const got = early || await dzP; if (!got || stale(n)) return;
+  const [dz, names] = got;
+  if (!early) { $('#lDisco').innerHTML = discoHtml(albums, dz); $('#lSim').innerHTML = simHtml(sim, dz, names); }
+  // tempo reale: un album scaricato entra in libreria e la sua scheda fantasma diventa normale
+  let cur = albums.map(x => x.id).join();
+  const check = async () => {
+    if (stale(n)) return Bus.removeEventListener('libreria', check);
+    let b; try { b = arr((await api('getArtist', { id })).artist.album); } catch { return; }
+    if (stale(n) || b.map(x => x.id).join() === cur) return;
+    cur = b.map(x => x.id).join(); $('#lDisco').innerHTML = discoHtml(b, dz);
+  };
+  viewInterval(check, 20000); Bus.addEventListener('libreria', check);
+}
+
+/* ---- discografia completa da Deezer (/api/discografia): ciò che manca in libreria come schede "fantasma" ---- */
+const discoOk = () => !!(srv()?.me?.caps?.includes('discografia') && access().download && S.dl.url);
+const DZTYPE = { album: 'Album', ep: 'EP', single: 'Singolo', compile: 'Compilation' };
+// titolo per riconoscere lo stesso album fra edizioni: senza parentesi, "- 2011 Remaster", "Deluxe", "Edition"…
+const albKey = s => cleanTxt(String(s || '').replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/\s[-–]\s.*$/, '')).replace(/\b(deluxe|remaster(ed)?|expanded|edition|version|anniversary|edizione)\b/g, '').replace(/\s+/g, ' ').trim();
+// artisti della libreria per nome (una richiesta, ricordata finché la libreria non cambia)
+let libNamesP = null;
+Bus.addEventListener('libreria', () => { libNamesP = null; });
+const libNames = () => libNamesP ||= api('getArtists').then(r => new Map(arr(r.artists.index).flatMap(x => arr(x.artist)).map(x => [cleanTxt(x.name), x.id]))).catch(() => (libNamesP = null, new Map()));
+// sezioni come su Spotify: Album, Singoli ed EP, Compilation; dentro, dal più recente. Senza Deezer: la griglia di sempre
+function discoHtml(albums, dz) {
+  if (!dz) return `<h2>Discografia</h2>${albumGrid(albums, { strip: true })}`;
+  const lib = new Map(); albums.forEach(a => { const k = albKey(a.name); if (!lib.has(k)) lib.set(k, a); });
+  const used = new Set(), seen = new Set(), items = [];
+  // le edizioni dello stesso titolo diventano una scheda (la più breve, di solito l'originale); la libreria vince
+  [...dz.albums].sort((x, y) => (x.type !== 'album') - (y.type !== 'album') || x.title.length - y.title.length).forEach(x => {
+    const k = albKey(x.title), a = lib.get(k); if (seen.has(x.type + '|' + k)) return; seen.add(x.type + '|' + k);
+    if (!a) items.push({ type: x.type, year: x.year, x });
+    else if (!used.has(a.id)) { used.add(a.id); items.push({ type: x.type, year: a.year || x.year, a }); }
+  });
+  albums.forEach(a => { if (!used.has(a.id)) items.push({ type: 'album', year: a.year, a }); });
+  return [['Album', ['album']], ['Singoli ed EP', ['single', 'ep']], ['Compilation', ['compile']]].map(([t, ts]) => {
+    const g = items.filter(i => ts.includes(i.type)).sort((p, q) => (q.year || 0) - (p.year || 0));
+    return g.length ? `<h2>${t}</h2><div class="cards shelf disco">${g.map(discoCard).join('')}</div>` : '';
+  }).join('') || `<h2>Discografia</h2>${albumGrid([], {})}`;
+}
+function discoCard({ type, year, a, x }) {
+  const sub = esc((year ? year + ' · ' : '') + (DZTYPE[type] || 'Album'));
+  if (a) return `<div class="card"><div class="art">${imgTag(a.coverArt, 300)}<button class="card-play" data-act="playalbum" data-id="${esc(a.id)}" aria-label="Riproduci ${esc(a.name)}">${ic('play')}</button></div>
+    <button class="card-go" data-act="album" data-id="${esc(a.id)}"><b>${esc(a.name)}</b></button><small>${sub}</small></div>`;
+  return `<div class="card ghost"><div class="art">${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy" onerror="this.remove()">` : ''}<span class="ghost-tag">Non in libreria</span></div>
+    <button class="card-go" data-act="dzalbum" data-id="${esc(x.id)}"><b>${esc(x.title)}</b></button><small>${sub}</small></div>`;
+}
+// simili della libreria, poi quelli di Deezer: se l'artista c'è in libreria apre la sua pagina, altrimenti quella da Deezer
+function simHtml(sim, dz, names) {
+  const have = new Set(sim.map(x => cleanTxt(x.name)));
+  const extra = (dz?.similar || []).filter(x => !have.has(cleanTxt(x.name))).map(x => {
+    const lid = names?.get(cleanTxt(x.name));
+    return lid ? lArtistCard({ id: lid, name: x.name, artistImageUrl: x.picture })
+      : `<button class="lcard round" data-act="dzartist" data-id="${esc(x.id)}"><div class="lcover">${x.picture ? `<img src="${esc(x.picture)}" alt="" loading="lazy" onerror="this.remove()">` : ic('artist')}</div><b>${esc(x.name)}</b><small>Non in libreria</small></button>`;
+  });
+  return sim.length || extra.length ? `<h2>Artisti simili</h2><div class="lcards shelfish">${sim.map(lArtistCard).join('')}${extra.join('')}</div>` : '';
+}
+// pagina di un artista che non è in libreria: solo la discografia di Deezer. Se c'è in libreria (anche dopo un download) si va alla sua pagina
+async function vArtistDz(dzid) {
+  const n = Scene.nav;
+  if (!discoOk()) throw new Error('Questa pagina viene da Deezer: serve il permesso di download su un server Armony.');
+  const [dz, names] = await Promise.all([dlApi('/api/discografia?id=' + encodeURIComponent(dzid)), libNames()]);
+  if (stale(n)) return;
+  const own = names.get(cleanTxt(dz.artist.name)); if (own) return location.replace('#/artista/' + encodeURIComponent(own));
+  Glow.show(dz.artist.picture, 'album');
+  view.innerHTML = lPhero({ kind: 'Artista', title: dz.artist.name, round: true, art: dz.artist.picture ? `<img src="${esc(dz.artist.picture)}" alt="" onerror="this.remove()">` : ic('artist'),
+      meta: `Non in libreria · ${dz.albums.length} ${dz.albums.length === 1 ? 'uscita' : 'uscite'} su Deezer` }) +
+    `<div id="lDisco">${discoHtml([], dz)}</div>${simHtml([], dz, names)}`;
+  const check = async () => {
+    if (stale(n)) return Bus.removeEventListener('libreria', check);
+    const id = (await libNames()).get(cleanTxt(dz.artist.name)); if (id && !stale(n)) location.replace('#/artista/' + encodeURIComponent(id));
+  };
+  Bus.addEventListener('libreria', check);
+}
+// pagina di un album che non è in libreria: scaletta di Deezer, righe fantasma come quelle di albumGaps, "Scarica l'album"
+async function vAlbumDz(dzid) {
+  const n = Scene.nav;
+  if (!discoOk()) throw new Error('Questa pagina viene da Deezer: serve il permesso di download su un server Armony.');
+  const sc = await dlApi('/api/discografia/album/' + encodeURIComponent(dzid));
+  if (stale(n)) return;
+  const tot = sc.tracks.reduce((m, t) => m + (t.duration || 0), 0), discs = new Set(sc.tracks.map(t => t.disc)).size, nt = sc.tracks.length;
+  Glow.show(sc.cover, 'album');
+  view.innerHTML = lPhero({ kind: DZTYPE[sc.type] || 'Album', title: sc.album, art: sc.cover ? `<img src="${esc(sc.cover)}" alt="" onerror="this.remove()">` : ic('album'),
+      meta: `<a href="#/artista-dz/${esc(sc.artist.id)}"><b>${esc(sc.albumartist)}</b></a>${sc.date ? ' · ' + esc(sc.date.slice(0, 4)) : ''} · ${nt} ${nt === 1 ? 'brano' : 'brani'}, ${fmtLong(tot)}${discs > 1 ? ' · ' + discs + ' dischi' : ''}` }) +
+    `<div id="gapsNote"><div class="gaps-note"><span id="dzState">Non è nella tua libreria: la scaletta viene da Deezer.</span><button class="btn sm primary" id="gapsAll">${ic('down')} Scarica l'album</button></div></div>
+    <div class="songs tracklist noalb"><div class="th noart" aria-hidden="true"><span class="n">#</span><span class="tt">Titolo</span><span class="d">${ic('clock')}</span><span></span></div>${sc.tracks.map((t, k) => `
+    <div class="song noart ghost"><span class="n">${t.track}</span><span class="thumb"></span>
+      <span class="t"><b>${esc(t.title)}</b><small>${esc(t.artists.join(', '))} · non in libreria</small></span>
+      <span class="d">${fmt(t.duration)}</span><span class="acts"><button class="btn sm" data-gap="${k}">${ic('down')} Scarica</button></span></div>`).join('')}</div>`;
+  gapButtons($('#view .songs'), sc.tracks, { album: sc.album, albumartist: sc.albumartist, date: sc.date, cover: sc.cover });
+  // tempo reale: quando l'album entra in libreria lo si può aprire da lì
+  const check = async () => {
+    if (stale(n)) return Bus.removeEventListener('libreria', check);
+    let r; try { r = await api('search3', { query: sc.album, albumCount: 20, artistCount: 0, songCount: 0 }); } catch { return; }
+    const a = arr(r.searchResult3?.album).find(x => albKey(x.name) === albKey(sc.album) && cleanTxt(x.artist) === cleanTxt(sc.albumartist));
+    if (a && !stale(n) && $('#dzState')) $('#dzState').innerHTML = `È arrivato nella tua libreria. <a href="#/album/${encodeURIComponent(a.id)}"><b>Apri l'album</b></a>`;
+  };
+  viewInterval(check, 20000); Bus.addEventListener('libreria', check);
 }
 
 async function vAlbum(id) {
@@ -678,9 +778,12 @@ async function albumGaps(a, songs, n) {
   $('#gapsNote').innerHTML = `<div class="gaps-note"><span>Questo album ha ${sc.tracks.length} tracce, in libreria ne hai ${sc.tracks.length - miss.length}.</span>
     <button class="btn sm primary" id="gapsAll">${ic('down')} Scarica le ${miss.length} mancanti</button></div>`;
   // i file arrivano con gli stessi album e artista dell'album della libreria: Navidrome li mette nello stesso album
+  gapButtons(box, miss, { album: a.name, albumartist: a.artist || sc.albumartist, date: sc.date || (a.year ? String(a.year) : ''), cover: sc.cover });
+}
+// tasti "Scarica" delle righe fantasma ([data-gap] = indice in miss) e "Scarica tutte" (#gapsAll): /api/import, stessa cartella
+function gapButtons(box, miss, alb) {
   const send = async ks => {
-    const tracks = ks.map(k => { const t = miss[k]; return { title: t.title, artists: t.artists, album: a.name, albumartist: a.artist || sc.albumartist,
-      date: sc.date || (a.year ? String(a.year) : ''), duration: t.duration, track: t.track, disc: t.disc, isrc: t.isrc, cover: sc.cover }; });
+    const tracks = ks.map(k => { const t = miss[k]; return { title: t.title, artists: t.artists, ...alb, duration: t.duration, track: t.track, disc: t.disc, isrc: t.isrc }; });
     try {
       const r = await dlApi('/api/import', { method: 'POST', body: JSON.stringify({ tracks, folder: store.get('impDir', 'Spotify') }) });
       ks.forEach(k => { const b = box.querySelector(`[data-gap="${k}"]`); if (b) b.outerHTML = '<span class="tag">in coda</span>'; });
@@ -2604,6 +2707,8 @@ view.addEventListener('click', async e => {
       case 'showall': sessionStorage.setItem('armony:asort', { newest: 'newest', frequent: 'frequent', random: 'random', starred: 'starred' }[el.dataset.sort] || 'newest'); location.hash = '#/libreria/album'; break;
       case 'lmore': lMore(); break;
       case 'artist': location.hash = '#/artista/' + encodeURIComponent(id); break;
+      case 'dzartist': location.hash = '#/artista-dz/' + encodeURIComponent(id); break;
+      case 'dzalbum': location.hash = '#/album-dz/' + encodeURIComponent(id); break;
       case 'openpl': location.hash = '#/playlist/' + encodeURIComponent(id); break;
       case 'playalbum': { const sid = el.dataset.sid || S.active, a = (await api('getAlbum', { id }, srv(sid))).album; setQueue(arr(a.song).map(x => norm(x, sid)), 0); break; }
       case 'play': setQueue(list, i); break;
@@ -3151,5 +3256,5 @@ async function boot() {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); notifyUpdate(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche)/.test(location.hash)) route(); });
+  syncSessions().then(async () => { Live.connect(); notifyUpdate(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz)/.test(location.hash)) route(); });
 }
