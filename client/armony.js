@@ -469,7 +469,7 @@ async function vHome() {
       ${dec ? mix('decademix', `Anni ${String(dec).slice(2)}`, 'Il decennio che ascolti di più', 'album', '#c2560a', `data-y="${dec}"`) : ''}
       <a class="hmix" href="#/jam" style="--h1:#2d46b9"><span class="hmix-art">${ic('jam')}<b>Jam</b></span><span class="hmix-t"><b>Avvia una Jam</b><small>Ascoltate insieme, ognuno dal suo telefono</small></span></a>
     </div>
-    ${L(recent).length ? secHead('Ascoltati di recente', 'recent') + albumGrid(L(recent), { strip: true }) : ''}
+    ${L(recent).length ? secHead('Ascoltati di recente') + albumGrid(L(recent), { strip: true }) : ''}
     ${secHead('Aggiunti di recente', 'newest')}${albumGrid(L(nw), { strip: true })}
     ${L(freq).length ? secHead('I più ascoltati', 'frequent') + albumGrid(L(freq), { strip: true }) : ''}
     ${secHead('Da riscoprire', 'random')}${albumGrid(L(rnd), { strip: true })}`;
@@ -2503,7 +2503,7 @@ view.addEventListener('click', async e => {
     switch (act) {
       case 'album': location.hash = '#/album/' + encodeURIComponent(id); break;
       case 'playalb': { const r = (await api('getAlbum', { id })).album; setQueue(arr(r.song).map(x => norm(x)), 0); break; }
-      case 'showall': sessionStorage.setItem('armony:asort', { recent: 'newest', newest: 'newest', frequent: 'frequent', random: 'random', starred: 'starred' }[el.dataset.sort] || 'newest'); location.hash = '#/libreria/album'; break;
+      case 'showall': sessionStorage.setItem('armony:asort', { newest: 'newest', frequent: 'frequent', random: 'random', starred: 'starred' }[el.dataset.sort] || 'newest'); location.hash = '#/libreria/album'; break;
       case 'artist': location.hash = '#/artista/' + encodeURIComponent(id); break;
       case 'openpl': location.hash = '#/playlist/' + encodeURIComponent(id); break;
       case 'play': setQueue(list, i); break;
