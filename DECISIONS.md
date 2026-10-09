@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-09 — L'app si scarica direttamente da GitHub, non dal server
+
+**Contesto:** con la 0.16.2 il server dava `/app.apk`, un rimando all'ultima APK su GitHub, usato da link e QR. L'utente vuole poter chiudere le porte del server: l'app non deve passare di lì (un gettone per proteggere il link non serve, visto che l'APK è pubblica nelle release).
+**Scelta:** ogni release pubblica la stessa APK anche come `armony.apk` (con il suo `.sha256`), così `releases/latest/download/armony.apk` porta sempre all'ultima; link e QR (Impostazioni → App Android, pagina di benvenuto) usano quello, la versione la chiede il client all'API di GitHub. Tolti `/app.apk` e `/api/app` dal server (ribalta la scelta della 0.16.2).
+**Alternative scartate:** link del server con un gettone rigenerabile (lo si era iniziato: tiene il server esposto e non protegge un file che è pubblico comunque); solo la pagina delle release (un tocco in più, e sul telefono la pagina di GitHub è scomoda).
+**Conseguenze:** serve GitHub raggiungibile per scaricare l'app; l'aggiornamento dall'app può prendere indifferentemente `armony.apk` o `armony-vX.Y.Z.apk`, entrambi con l'impronta.
+**Da rivedere se:** il repository diventa privato (allora il link deve tornare a passare dal server).
+
 ## 2026-10-09 — Jam Radio: stazione a orario sul server, elenco preparato dal client
 
 **Contesto:** stazioni che girano all'infinito a cui sintonizzarsi, anche dai server collegati, tutti allo stesso punto.

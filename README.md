@@ -39,7 +39,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 **App Android**
 - Musica a schermo spento, comandi nella notifica, aggiornamenti dall'app stessa.
 - Funziona **anche senza server** con la musica del telefono; il server diventa la copia di sicurezza.
-- Si scarica dal server con un QR code (Impostazioni → App Android), oppure dalle [release](https://github.com/Giggi-98/Armony/releases/latest).
+- Si scarica con un QR code (Impostazioni → App Android) o da [questo link](https://github.com/Giggi-98/Armony/releases/latest/download/armony.apk), che porta sempre all'ultima versione.
 
 ---
 

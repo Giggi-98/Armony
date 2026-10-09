@@ -443,12 +443,9 @@ function noServer() {
     <button class="btn${ph ? '' : ' primary'}" data-act="addsrv" ${local ? `data-url="${esc(location.origin)}"` : ''}>${ph ? 'Collegati a un server' : 'Aggiungi server'}</button>
     <button class="btn" data-act="importset">Importa impostazioni da un amico</button>
     <a class="btn" href="#/jam">Entra in una Jam</a>
-  </div></div>${local ? `<div class="row" style="justify-content:center;margin-top:var(--s5)"><a class="btn sm" href="./app.apk">${ic('down')} App Android</a><button class="btn sm" id="welQr">QR code</button></div>` : ''}`;
-  // il QR del benvenuto: stesso indirizzo di questa pagina, quindi raggiungibile dal telefono come lo è dal browser
-  $('#welQr')?.addEventListener('click', async e => {
-    e.preventDefault(); const d = $('#dlg2'); let base = location.origin;
-    try { const i = await (await fetch('/api/info')).json(); if (i.public) base = i.public; } catch {}
-    const url = base + '/app.apk';
+  </div></div>${local ? `<div class="row" style="justify-content:center;margin-top:var(--s5)"><a class="btn sm" href="${esc(apkUrl())}">${ic('down')} App Android</a><button class="btn sm" id="welQr">QR code</button></div>` : ''}`;
+  $('#welQr')?.addEventListener('click', e => {
+    e.preventDefault(); const d = $('#dlg2'), url = apkUrl();
     d.innerHTML = `<h3>App Android</h3><p class="sub">Inquadra il codice con la fotocamera del telefono.</p><div id="welQrBox" style="margin:var(--s4) 0;display:grid;place-items:center"></div><div class="code" style="font-size:.8rem">${esc(url)}</div><div class="row"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
     closeOutside(d); d.showModal(); qrInto($('#welQrBox'), url).catch(() => {});
   });
@@ -2792,15 +2789,14 @@ const fmtCode = c => String(c).replace(/^(.{4})(.+)$/, '$1-$2');
 // al server (vale per tutti), infine quello con cui questo dispositivo raggiunge il server
 const pubBase = s => (s?.shareBase || s?.me?.public || absUrl(s?.url || location.origin)).replace(/\/+$/, '');
 const inviteLink = c => `${pubBase(srv())}/#/invito/${fmtCode(c)}`;
-// l'ultima app Android: il server rimanda sempre all'APK più recente (/app.apk), così link e QR non cambiano mai.
-// Per il QR serve un indirizzo che il telefono raggiunga: quello pubblico dei link, se c'è, altrimenti quello del server
-const apkBase = () => { const s = dlSrv(); return s ? pubBase(s) : ''; };
+// l'ultima app Android, scaricata direttamente da GitHub: ogni release la pubblica anche come armony.apk, così
+// releases/latest/download/armony.apk (link e QR) porta sempre all'ultima senza passare dal server
+const APK_REPO = window.ARMONY_APP?.repo || 'Giggi-98/Armony';
+const apkUrl = () => `https://github.com/${APK_REPO}/releases/latest/download/armony.apk`;
 async function refreshApk() {
   const box = $('#apkBox'); if (!box) return;
-  const s = dlSrv(); let a = null;
-  // si chiede direttamente: un server vecchio risponde 404 e il link va alla pagina delle release
-  if (s?.url) try { const r = await fetch(absUrl(s.url) + '/api/app'); if (r.ok) a = await r.json(); } catch {}
-  const url = a?.apk ? apkBase() + '/app.apk' : 'https://github.com/Giggi-98/Armony/releases/latest';
+  let a = null; try { const r = await fetch(`https://api.github.com/repos/${APK_REPO}/releases/latest`); if (r.ok) a = { version: (await r.json()).tag_name?.replace(/^v/, '') }; } catch {}
+  const url = apkUrl();
   if ($('#apkBox') !== box) return;
   box.innerHTML = `${window.ARMONY_APP ? '<h3 style="margin:var(--s5) 0 var(--s1)">Passala a un amico</h3>' : ''}
     <p class="sub">${window.ARMONY_APP ? 'Fagli inquadrare il codice: scarica l\'ultima versione dell\'app.' : `L'app per Android${a?.version ? ` (ultima versione: <b>${esc(a.version)}</b>)` : ''}: musica a schermo spento, comandi nella notifica, anche senza server. Il link porta sempre all'ultima versione.`}</p>
