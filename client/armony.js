@@ -458,7 +458,7 @@ function lPhero({ kind, title, art = '', round = false, meta = '', tile = '', ph
   const url = ph ? coverUrl(ph, 300) : '';
   if (url) Glow.colors(url).then(c => { const el = $('#view .phero'); if (el && Glow.usable(c)) el.style.setProperty('--ph', Glow.tone(c.c1, .55, c.neutral)); });
   return `<header class="phero${round ? ' round' : ''}"${tile.startsWith('#') ? ` style="--ph:${tile}"` : ''}><button class="ph-back" data-act="goback" aria-label="Indietro" title="Indietro">${ic('chevl')}</button><div class="phero-art${tile ? ' tile' : ''}"${tile ? ` style="--tile:${tile}"` : ''}>${art}</div>
-    <div class="phero-txt"><span class="phero-kind">${kind}</span><h1 class="phero-title">${esc(title)}</h1>${meta ? `<p class="phero-meta">${meta}</p>` : ''}</div>${aside ? `<div class="ph-aside">${aside}</div>` : ''}</header>`;
+    <div class="phero-txt"><span class="phero-kind">${kind}</span><h1 class="phero-title">${esc(title)}</h1>${meta ? `<p class="phero-meta">${meta}</p>` : ''}</div>${aside ? `<button class="ph-aside" data-act="bio" aria-label="Leggi la biografia">${aside}</button>` : ''}</header>`;
 }
 // barra azioni: play grande, poi icone; il resto nel foglio "⋯" (lMore)
 let lMoreItems = [];
@@ -636,14 +636,14 @@ async function vArtist(id) {
   Glow.show(coverUrl(a.coverArt || arr(a.album)[0]?.coverArt, 300), 'album');
   const albums = arr(a.album), sim = arr(info?.similarArtist).filter(x => x.id);
   const img = info?.largeImageUrl ? `<img src="${esc(info.largeImageUrl)}" alt="" onerror="this.remove()">` : imgTag(a.coverArt, 500);
-  const aside = bio ? `<h3>Informazioni</h3><p class="lbio" id="phBio">${esc(bio)}</p>${bio.length > 320 ? '<button class="lmorebtn" id="phBioMore">Leggi tutto</button>' : ''}` : '';
+  const aside = bio ? `<span class="phero-kind">Informazioni</span><span class="lbio" style="display:block">${esc(bio.slice(0, 600))}</span>` : '';
+  S.bio = { name: a.name, text: bio };
   view.innerHTML = lPhero({ kind: 'Artista', title: a.name, ph: a.coverArt, art: img, round: true, aside, meta: `${albums.length} album${top.length ? ` · ${top.length} brani popolari` : ''}` }) +
     lActionBar({ play: { act: 'artistall', data: { id }, label: 'Riproduci tutto' }, shuffle: { act: 'artistradio', data: { id, name: a.name }, icon: 'radio', label: 'Radio dell\'artista' }, offline: false, addpl: false }) +
     (top.length ? `<h2>Popolari</h2><div class="ltop" id="lTop">${songList(top)}</div>${top.length > 5 ? `<button class="lmorebtn" id="lTopMore">Mostra altri</button>` : ''}` : '') +
     `<div id="lDisco">${discoHtml(albums, early?.[0])}</div><div id="lSim">${simHtml(sim, early?.[0], early?.[1])}</div>` +
     (bio ? `<div class="bio-bottom"><h2>Informazioni</h2><p class="lbio">${esc(bio.slice(0, 700))}${bio.length > 700 ? '…' : ''}</p></div>` : '');
-  const bm = $('#phBioMore');
-  if (bm) bm.onclick = () => { const on = $('#phBio').classList.toggle('all'); bm.textContent = on ? 'Mostra meno' : 'Leggi tutto'; };
+
   const more = $('#lTopMore');
   if (more) more.onclick = () => { const t = $('#lTop'); t.classList.toggle('all'); more.textContent = t.classList.contains('all') ? 'Mostra meno' : 'Mostra altri'; };
   const got = early || await dzP; if (!got || stale(n)) return;
@@ -3052,6 +3052,11 @@ view.addEventListener('click', async e => {
       case 'showall': sessionStorage.setItem('armony:asort', { newest: 'newest', frequent: 'frequent', random: 'random', starred: 'starred' }[el.dataset.sort] || 'newest'); location.hash = '#/libreria/album'; break;
       case 'lmore': lMore(); break;
       case 'goback': goBack(); break;
+      case 'bio': {
+        const d = $('#dlg2'); d.className = 'bio';
+        d.innerHTML = `<h3>${esc(S.bio?.name || '')}</h3><p class="biotxt">${esc(S.bio?.text || '')}</p><div class="row"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
+        d.onclose = () => { d.className = ''; d.onclose = null; }; closeOutside(d); d.showModal(); break;
+      }
       case 'qremote': if (Live.remote()) Live.cmd('skipto', i); break;
       case 'artist': location.hash = '#/artista/' + encodeURIComponent(id); break;
       case 'dzartist': location.hash = '#/artista-dz/' + encodeURIComponent(id); break;

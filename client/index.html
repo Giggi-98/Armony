@@ -472,19 +472,22 @@ label.check small{display:block;color:var(--muted)}
 .ph-back:active{transform:scale(.92)}
 .ph-back:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (hover:hover) and (pointer:fine){.ph-back:hover{background:color-mix(in srgb,var(--bg) 80%,transparent)}}
-/* artista: le informazioni nello spazio a destra dell'intestazione, solo su schermo largo; altrimenti restano in fondo */
+/* artista: le informazioni a destra dell'intestazione, solo su schermo largo, come testo e non come riquadro
+   (stesse misure di "Artista" e della riga dei dettagli); un tocco apre la biografia intera. Altrimenti restano in fondo */
 .ph-aside{display:none}
 @media (min-width:1200px){
-  .ph-aside{display:block;flex:0 1 380px;min-width:260px;margin-left:auto;align-self:flex-end;padding:var(--s4) var(--s5);border-radius:var(--r-l);
-    background:color-mix(in srgb,var(--surface) 62%,transparent);border:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
-  .ph-aside h3{margin:0 0 var(--s2);font-size:.82rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
-  /* sei righe con dissolvenza in fondo (niente line-clamp: dentro un flex Chrome conta l'altezza intera) */
-  .ph-aside .lbio{margin:0;max-width:none;color:var(--ink);opacity:.86;font-size:.92rem;line-height:1.55;max-height:calc(1.55em * 6);overflow:hidden;
-    -webkit-mask:linear-gradient(#000 70%,transparent);mask:linear-gradient(#000 70%,transparent)}
-  .ph-aside .lbio.all{max-height:340px;overflow-y:auto;scrollbar-width:thin;-webkit-mask:none;mask:none}
-  .ph-aside .lmorebtn{padding:var(--s2) 0 0}
+  .ph-aside{display:block;flex:0 1 340px;min-width:240px;margin-left:auto;align-self:flex-end;padding:0;border:0;background:none;color:inherit;text-align:left;font:inherit;cursor:pointer}
+  .ph-aside .phero-kind{display:block;margin-bottom:var(--s2)}
+  .ph-aside .lbio{margin:0;max-width:none;color:var(--muted);font-size:.92rem;line-height:1.55;max-height:calc(1.55em * 4);overflow:hidden;
+    -webkit-mask:linear-gradient(#000 55%,transparent);mask:linear-gradient(#000 55%,transparent);transition:color var(--t-tap) ease}
+  .ph-aside:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:var(--r-s)}
   .bio-bottom{display:none}
 }
+@media (hover:hover) and (pointer:fine){.ph-aside:hover .lbio{color:var(--ink)}}
+/* biografia intera: lettura comoda, non un muro di testo */
+dialog.bio{width:min(640px,92vw)}
+dialog.bio h3{font-size:var(--fs-h2);letter-spacing:-.02em;margin-bottom:var(--s4)}
+dialog.bio .biotxt{color:var(--ink);opacity:.9;line-height:1.65;font-size:1rem;white-space:pre-line;max-width:62ch}
 /* coda dei download: un gruppo per importazione, con i brani in corso e i non trovati a richiesta */
 .jgroup .bar{margin:var(--s2) 0}
 .jnow{display:flex;align-items:center;gap:var(--s2);font-size:var(--fs-small);color:var(--muted);min-width:0;margin-top:2px}
