@@ -406,7 +406,7 @@ function songList(tracks, opts = {}) {
   const art = opts.art !== false, alb = opts.showAlbum !== false;
   return `<div class="songs tracklist${alb ? '' : ' noalb'}${opts.queue ? ' q' : ''}">
     <div class="th${art ? '' : ' noart'}" aria-hidden="true"><span class="n">#</span><span class="tt">Titolo</span>${alb ? '<span class="al">Album</span>' : ''}<span class="d">${ic('clock')}</span><span></span></div>${tracks.map((t, i) => `
-    <div class="song ${art ? '' : 'noart'} ${cur && key(cur) === key(t) ? 'now' : ''}" data-act="${opts.queue ? 'qplay' : 'play'}" data-i="${i}">
+    <div class="song ${art ? '' : 'noart'} ${cur && key(cur) === key(t) ? 'now' : ''}" data-act="${opts.queue ? 'qplay' : 'play'}" data-i="${i}" data-tid="${esc(t.id)}">
       <span class="n">${opts.queue ? i + 1 : (opts.numbers ? (t.track || i + 1) : i + 1)}</span>
       <span class="thumb">${art ? imgTag(t.coverArt, 84, t.serverId) : ''}</span>
       <span class="t"><b>${Offline.has(t) ? '<span class="badge-off" title="Disponibile offline"></span>' : ''}${esc(t.title)}</b><small>${esc(t.artist)}</small></span>
@@ -555,7 +555,7 @@ async function vHome() {
   const dec = Object.entries(byDec).sort((a, b) => b[1] - a[1])[0]?.[0];
   const mix = (act, title, sub, icon, hue, extra = '') => `<button class="hmix" data-act="${act}" ${extra} style="--h1:${hue}">
     <span class="hmix-art">${ic(icon)}<b>${title}</b></span><span class="hmix-t"><b>${title}</b><small>${sub}</small></span></button>`;
-  view.innerHTML = `<h1 class="hhello">${hello}${P.nick || s.user ? ', ' + esc(P.nick || s.user) : ''}</h1>
+  view.innerHTML = `<div class="stories" id="presStories" data-pres hidden></div><h1 class="hhello">${hello}${P.nick || s.user ? ', ' + esc(P.nick || s.user) : ''}</h1>
     <div id="resume"></div><div id="friendsStrip"></div>
     ${quick.length ? `<div class="quick">${quick.map(a => `<div class="qk" data-act="album" data-id="${esc(a.id)}" role="link" tabindex="0">
       <span class="qk-art">${imgTag(a.coverArt, 160)}</span><b>${esc(a.name)}</b>
@@ -580,7 +580,7 @@ async function vHome() {
     $('#resumeBtn').onclick = () => { S.queue = q.tracks; playIndex(q.index, { startAt: q.position }); $('#resume').innerHTML = ''; };
   });
   friendsNow().then(list => {
-    const box = $('#friendsStrip'); if (!box || !list.length) return;
+    const box = $('#friendsStrip'); if (!box || !list.length || Presence.on()) return;  // con la presenza ci sono le storie
     box.innerHTML = `<a class="hbanner" href="#/amici">${ic('friends')}<span class="grow"><small>Amici in ascolto</small><b>${list.slice(0, 2).map(f => `${esc(f.username)}: ${esc(f.title)}`).join(' · ')}${list.length > 2 ? ` e altri ${list.length - 2}` : ''}</b></span>${ic('chevr')}</a>`;
   });
 }
@@ -1694,10 +1694,12 @@ async function friendsNow() {
 }
 async function vFriends() {
   if (!srv()) return noServer();
-  const n = Scene.nav;
-  view.innerHTML = `<h1>Amici</h1><p class="sub">Chi sta ascoltando cosa su ${esc(srv().name)}, in tempo reale.</p><div id="fl"></div>
+  const n = Scene.nav, live = Presence.on();
+  view.innerHTML = `<h1>Amici</h1><p class="sub">${live ? 'Chi ascolta cosa' : 'Chi sta ascoltando cosa'} su ${esc(srv().name)}, in tempo reale.</p>${live
+    ? `<h2 class="pf-h">In ascolto ora</h2><div class="pnow" id="presNow" data-pres></div><h2>Attività</h2><div class="pfeed" id="presFeed" data-pres></div>` : '<div id="fl"></div>'}
     <h2>Jam vicine</h2><div id="fj"><p class="sub">Cerco…</p></div>`;
-  const paint = async () => {
+  // con la presenza (stesso canale di Live) tutto arriva da solo; senza, getNowPlaying ogni 15 secondi
+  const paint = live ? async () => Presence.paintView() : async () => {
     const list = await friendsNow(); const box = $('#fl'); if (!box) return;
     S.lastList = list;
     box.innerHTML = list.length ? list.map((f, i) => `<div class="list-item" style="cursor:default">
@@ -2597,6 +2599,7 @@ function vSettings() {
   ${grp('profilo', 'Profilo', 'nome nick sincronizzazione dispositivi', `<div class="panel stack"><label class="f">Il tuo nome nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
     <label class="check"><input type="checkbox" data-pb="sync" ${P.sync ? 'checked' : ''}><span>Stesse statistiche e impostazioni su tutti i dispositivi<small>Storico d'ascolto e preferenze vengono salvati sul server, legati al tuo utente. Chi gestisce il server può vederli. Volume e modalità compatibile restano di ogni dispositivo.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="live" ${P.live !== false ? 'checked' : ''}><span>Un solo dispositivo suona, gli altri lo comandano<small>Se avvii la musica qui, sugli altri tuoi dispositivi si ferma e il lettore mostra cosa suona qui. Da "Dove suona" nel lettore la sposti dove vuoi.</small></span></label>
+    ${Presence.on() ? `<label class="check"><input type="checkbox" id="pShare" ${Presence.share ? 'checked' : ''}><span>Mostra agli altri cosa ascolto e cosa faccio<small>Gli utenti di questo server vedono il brano che ascolti e le tue attività (download, caricamenti, playlist pubbliche, Jam). Spento, non compari; tu vedi comunque gli altri.</small></span></label>` : ''}
     <label class="f">Nome di questo dispositivo<input type="text" id="pDev" value="${esc(P.deviceName)}" placeholder="${esc(Live.name())}" maxlength="30"></label></div>`)}
 
   ${grp('server', 'Server musicali', 'navidrome subsonic account accesso password indirizzo rete lan', `<p class="sub">Qualsiasi server compatibile Subsonic: Navidrome, Gonic, Airsonic, Ampache.</p>
@@ -2657,6 +2660,10 @@ function vSettings() {
   $('#setQ').oninput = e => settingsFilter(e.target.value);
   $('#pNick').onchange = e => { P.nick = e.target.value.trim(); savePrefs(); };
   $('#pDev').onchange = e => { P.deviceName = e.target.value.trim(); savePrefs(); Live.connect(); };
+  if ($('#pShare')) $('#pShare').onchange = async e => {
+    try { Presence.share = (await srvApi(srv(), '/api/live/privacy', { method: 'PUT', body: JSON.stringify({ share: e.target.checked }) })).share; toast(Presence.share ? 'Gli altri vedono cosa ascolti.' : 'Non compari più agli altri.'); }
+    catch { e.target.checked = Presence.share; toast('Non riesco a salvare: riprova.'); }
+  };
   view.querySelectorAll('[data-p]').forEach(el => el.onchange = () => { P[el.dataset.p] = el.value; savePrefs(); fillSelectors(); });
   view.querySelectorAll('[data-pb]').forEach(el => el.onchange = () => {
     P[el.dataset.pb] = el.checked; savePrefs();
@@ -2983,7 +2990,8 @@ function moreSheet() {
   const cur = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
   const items = NAV.filter(([h]) => !TABS.includes(h));
   if (matchMedia('(any-hover:hover)').matches) items.push(['tasti', 'Scorciatoie da tastiera', 'more']);
-  d.innerHTML = `<div class="head"><b>Altre sezioni</b></div>${items.map(([h, l, i]) => `<a class="mi ${h === cur ? 'on' : ''}" href="#/${h}" ${h === cur ? 'aria-current="page"' : ''}>${ic(i)}${l}</a>`).join('')}`;
+  const dot = h => h === 'amici' && Presence.on() && Presence.playingCount() ? '<i class="dot pdot" aria-label="qualcuno sta ascoltando"></i>' : '';
+  d.innerHTML = `<div class="head"><b>Altre sezioni</b></div>${items.map(([h, l, i]) => `<a class="mi ${h === cur ? 'on' : ''}" href="#/${h}" ${h === cur ? 'aria-current="page"' : ''}>${ic(i)}${l}${dot(h)}</a>`).join('')}`;
   d.querySelectorAll('a').forEach(a => a.onclick = () => d.close());
   closeOutside(d); d.showModal();
 }
@@ -3437,7 +3445,7 @@ const Live = {
   stop() { clearTimeout(this.retry); clearInterval(this.dog); this.es?.close(); this.es = null; this.devices.clear(); this.states.clear(); this.target = null; this.sent = null; this.paint(); },
   connect() {
     const was = this.target; this.stop(); this.want = was;
-    if (!this.on()) return;
+    if (!this.on()) return Presence.clear();
     const s = srv(), hb = this.hb();
     const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&token=${encodeURIComponent(s.session)}${hb ? '&hb=1' : ''}`);
     this.last = Date.now();
@@ -3468,7 +3476,9 @@ const Live = {
     const now = Date.now(), before = this.track()?.id;
     if (m.type === 'ping') return;
     if (m.type === 'kicked') return this.stop();  // un'altra scheda di questo dispositivo ha preso il canale
+    if (m.type === 'presence' || m.type === 'activity') return Presence.recv(m);  // gli altri utenti del server
     if (m.type === 'hello') {
+      Presence.hello(m);
       this.devices = new Map(arr(m.devices).map(d => [d.device, d.name]));
       this.states = new Map(arr(m.states).map(s => [s.device, { ...s, recvAt: now }]));
       const p = arr(m.states).find(s => s.playing && !s.solo);
@@ -3613,6 +3623,185 @@ const Live = {
     // altrimenti è solo la scelta dell'uscita: la prossima riproduzione partirà lì
   }
 };
+
+/* ================= chi ascolta cosa sul server: presenza e attività (capacità "presenza") =================
+   Arrivano sullo stesso canale di Live (/api/live), a tutti gli utenti del server: "presence" quando qualcuno
+   cambia brano, mette play o pausa o salta; "activity" per download, caricamenti, playlist pubbliche e Jam.
+   Fra un messaggio e l'altro l'avanzamento si stima qui. Chi spegne la condivisione non arriva proprio (server).
+   I disegni stanno dove serve: barra laterale, storie della Home, puntino su Amici, segni su righe e intestazioni. */
+const pkey = e => e.user + '|' + e.device;
+const pname = e => e.user === srv()?.user ? 'Tu' : e.name || e.user;
+const pavatar = (e, cls = '') => `<span class="pav ${cls}" style="--pav:${tileColor(e.user)}" aria-hidden="true">${esc(([...String(e.name || e.user || '?')][0] || '?').toUpperCase())}</span>`;
+const peq = on => `<span class="peq${on ? ' on' : ''}" aria-hidden="true"></span>`;
+const ago = ms => { const s = (Date.now() - ms) / 1000; return s < 60 ? 'adesso' : s < 3600 ? `${Math.floor(s / 60)} min fa` : s < 86400 ? `${Math.floor(s / 3600)} h fa` : `${Math.floor(s / 86400)} g fa`; };
+// elenco con chiavi: aggiorna, aggiunge, toglie e riordina i figli senza rifare tutto, così AutoAnimate anima solo ciò che cambia
+function keyed(box, items) {
+  const old = new Map([...box.children].filter(c => c.dataset.k).map(c => [c.dataset.k, c]));
+  let prev = null;
+  for (const it of items) {
+    let el = old.get(it.k); old.delete(it.k);
+    if (!el) { el = document.createElement(it.tag || 'div'); el.dataset.k = it.k; }
+    if (el.className !== (it.cls || '')) el.className = it.cls || '';
+    if (el._h !== it.html) { el.innerHTML = it.html; el._h = it.html; }
+    for (const [a, v] of Object.entries(it.attrs || {})) if (el.getAttribute(a) !== v) el.setAttribute(a, v);
+    const want = prev ? prev.nextSibling : box.firstChild;
+    if (el !== want) box.insertBefore(el, want);
+    prev = el;
+  }
+  old.forEach(el => el.remove());
+}
+const Presence = {
+  map: new Map(), acts: [], share: true, skew: 0, t: null, tick: null,
+  // solo con il canale dal vivo aperto verso un server che la conosce; altrimenti restano getNowPlaying e il banner di prima
+  on() { return !!Live.es && !!srv()?.me?.caps?.includes('presenza'); },
+  clear() { this.map.clear(); this.acts = []; this.changed(); },
+  hello(m) {
+    if (!('presence' in m)) return;
+    const now = Date.now();
+    this.skew = m.now ? now - m.now * 1000 : 0;
+    this.map = new Map(arr(m.presence).map(e => [pkey(e), { ...e, recvAt: now }]));
+    this.acts = arr(m.activity); this.share = m.share !== false; this.changed();
+  },
+  recv(m) {
+    if (m.type === 'presence') {
+      if (m.gone) this.map.delete(pkey(m.gone));
+      else if (m.entry) this.map.set(pkey(m.entry), { ...m.entry, recvAt: Date.now() });
+    } else if (m.hide) this.acts = this.acts.filter(a => a.user !== m.hide);
+    else if (m.item) this.acts = [m.item, ...this.acts.filter(a => a.id !== m.item.id)].slice(0, 50);
+    this.changed();
+  },
+  changed() { clearTimeout(this.t); this.t = setTimeout(() => this.paint(), 50); },
+  pos(e) { const p = (e.position || 0) + (e.playing ? (Date.now() - e.recvAt) / 1000 * (e.rate || 1) : 0); return e.duration ? Math.min(p, e.duration) : p; },
+  // il brano come quelli della libreria; senza un server noto si assume quello in uso (la presenza arriva da lì)
+  track(e) { const w = e.track || {}, s = S.servers.find(x => absUrl(x.url) === w.serverUrl) || srv(); return norm(w, s?.id); },
+  // una voce per persona: il dispositivo che suona, altrimenti l'ultimo messo in pausa (da meno di 10 minuti).
+  // Questo dispositivo non c'è mai; gli altri propri dispositivi solo mentre suonano
+  people() {
+    const me = srv()?.user, by = new Map(), now = Date.now();
+    for (const e of this.map.values()) {
+      if (e.user === me && (e.device === S.device || !e.playing)) continue;
+      if (!e.playing && now - e.recvAt + (e.since || 0) * 1000 > 600000) continue;
+      // suona ma il brano è finito da un pezzo senza notizie: dispositivo chiuso, il server lo toglierà a breve
+      if (e.playing && e.duration && (e.position || 0) + (now - e.recvAt) / 1000 * (e.rate || 1) > e.duration + 20) continue;
+      const k = e.user === me ? pkey(e) : e.user, c = by.get(k);
+      if (!c || e.playing > c.playing || e.playing === c.playing && e.recvAt - (e.since || 0) * 1000 > c.recvAt - (c.since || 0) * 1000) by.set(k, e);
+    }
+    return [...by.values()].sort((a, b) => b.playing - a.playing || pname(a).localeCompare(pname(b)));
+  },
+  playingCount() { return this.people().filter(e => e.playing).length; },
+  listen(e) {
+    const t = this.track(e); if (!t?.id) return;
+    // dallo stesso punto, se suona qui; come telecomando o in una Jam si parte dall'inizio
+    if (Jam.role || Live.remote()) return setQueue([t], 0);
+    S.queue = [t]; playIndex(0, { startAt: e.playing ? this.pos(e) : 0 });
+    toast(`Ascolti con ${pname(e)}.`);
+  },
+  open(e) { const t = this.track(e); location.hash = t.albumId ? '#/album/' + encodeURIComponent(t.albumId) : t.artistId ? '#/artista/' + encodeURIComponent(t.artistId) : '#/amici'; },
+  async openAct(a) {
+    const l = a.link || {};
+    if (l.playlist) location.hash = '#/playlist/' + encodeURIComponent(l.playlist);
+    else if (l.amici) location.hash = '#/amici';
+    else if (l.album) {
+      // l'album appena scaricato o caricato si cerca per nome: l'id lo decide Navidrome quando lo vede
+      let r = []; try { r = arr((await api('search3', { query: l.album, albumCount: 10, artistCount: 0, songCount: 0 })).searchResult3?.album); } catch {}
+      const x = r.find(x => cleanTxt(x.name) === cleanTxt(l.album) && (!l.artist || cleanTxt(x.artist || '').includes(cleanTxt(l.artist)))) || r[0];
+      if (x) location.hash = '#/album/' + encodeURIComponent(x.id); else toast('Non è ancora in libreria: riprova fra poco.');
+    }
+  },
+  sheet(k) {
+    const e = this.map.get(k); if (!e) return;
+    const t = this.track(e), d = $('#dlg'); d.className = 'sheet';
+    d.innerHTML = `<div class="head">${pavatar(e, 'l')}<span class="grow" style="min-width:0"><b style="display:block">${esc(pname(e))}</b><small style="color:var(--muted)">${e.playing ? 'Sta ascoltando' : 'In pausa'}${e.devName ? ' · ' + esc(e.devName) : ''}</small></span></div>
+      <div class="pcard" data-pk="${esc(k)}"><span class="pic">${imgTag(t.coverArt, 120, t.serverId)}</span><span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small><span class="pbar"><i></i></span></span></div>
+      <button class="mi" data-x="listen">${ic('headphones')}Ascolta anche tu</button>
+      ${t.albumId ? `<button class="mi" data-x="album">${ic('album')}<span class="grow" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Apri l'album «${esc(t.album || t.title)}»</span></button>` : ''}
+      ${t.artistId ? `<button class="mi" data-x="artist">${ic('artist')}Vai a ${esc(t.artist)}</button>` : ''}`;
+    d.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
+      d.close(); const x = b.dataset.x;
+      if (x === 'listen') this.listen(e); else location.hash = x === 'album' ? '#/album/' + encodeURIComponent(t.albumId) : '#/artista/' + encodeURIComponent(t.artistId);
+    });
+    this.progress(); closeOutside(d); d.showModal();
+  },
+  // avanzamento e orari relativi: si muovono da soli, senza ridisegnare gli elenchi
+  progress() {
+    $$('[data-pk]').forEach(el => { const e = this.map.get(el.dataset.pk), b = el.querySelector('.pbar i'); if (e && b) b.style.transform = `scaleX(${e.duration ? Math.min(1, this.pos(e) / e.duration) : 0})`; });
+    $$('[data-at]').forEach(el => { const s = ago(+el.dataset.at); if (el.textContent !== s) el.textContent = s; });
+  },
+  paint() {
+    const on = this.on(), ppl = on ? this.people() : [], playing = ppl.filter(e => e.playing);
+    // computer: "In ascolto ora" nella barra laterale, sopra le playlist
+    const side = $('#sidePres');
+    if (side) {
+      side.hidden = !ppl.length;
+      if (ppl.length && !side.firstElementChild) side.innerHTML = '<h3>In ascolto ora</h3><div class="plist"></div>', window.autoAnimate?.(side.lastChild);
+      if (ppl.length) keyed(side.lastChild, ppl.map(e => { const t = this.track(e); return { k: pkey(e), cls: 'prow' + (e.playing ? '' : ' paused'), html:
+        `<button class="pgo" data-pact="open">${pavatar(e)}<span class="grow"><b>${esc(pname(e))}${peq(e.playing)}</b><small>${e.playing ? '' : 'In pausa · '}${esc(t.title)} · ${esc(t.artist)}</small></span></button>
+        <button class="icon-btn" data-pact="listen" aria-label="Ascolta anche tu" title="Ascolta anche tu">${ic('headphones')}</button>`, attrs: { 'data-pk': pkey(e) } }; }));
+    }
+    // puntino su Amici: nella barra laterale e, sul telefono, su "Altro" (Amici sta lì)
+    $$('#nav a[data-r="amici"], #tabMore').forEach(a => { const d = a.querySelector(':scope>.dot'); if (playing.length && !d) a.insertAdjacentHTML('beforeend', '<i class="dot pdot" aria-hidden="true"></i>'); else if (!playing.length && d) d.remove(); });
+    this.paintView(ppl, playing);
+    this.progress();
+    // ogni secondo l'avanzamento; ogni 30 secondi un giro intero (chi è in pausa da troppo sparisce)
+    clearInterval(this.tick); this.tick = null; let n = 0;
+    if (ppl.length || this.acts.length) this.tick = setInterval(() => { if (document.visibilityState !== 'visible') return; this.progress(); if (++n % 30 === 0) this.paint(); }, 1000);
+  },
+  // quello che sta dentro la pagina aperta: storie in Home, pagina Amici, segni su righe e intestazioni
+  paintView(ppl = this.on() ? this.people() : [], playing = ppl.filter(e => e.playing)) {
+    const st = $('#presStories');
+    if (st) {
+      if (this.on()) $('#friendsStrip')?.replaceChildren();
+      st.hidden = !ppl.length; st._aa ||= window.autoAnimate?.(st) || 1;
+      keyed(st, ppl.map(e => { const t = this.track(e); return { k: pkey(e), tag: 'button', cls: 'story' + (e.playing ? ' on' : ''), attrs: { 'data-pact': 'sheet', 'data-pk': pkey(e), 'aria-label': `${pname(e)}: ${e.playing ? 'ascolta' : 'in pausa su'} ${t.title}` }, html:
+        `<span class="ring">${pavatar(e, 'l')}<span class="scov">${imgTag(t.coverArt, 64, t.serverId)}</span></span><b>${esc(pname(e))}</b><small>${esc(t.title)}</small>` }; }));
+    }
+    const now = $('#presNow'), feed = $('#presFeed');
+    [now, feed].forEach(b => { if (b) b._aa ||= window.autoAnimate?.(b) || 1; });
+    if (now) keyed(now, ppl.length ? ppl.map(e => { const t = this.track(e); return { k: pkey(e), cls: 'pnow-row' + (e.playing ? '' : ' paused'), attrs: { 'data-pk': pkey(e) }, html:
+      `<button class="pgo" data-pact="open">${pavatar(e, 'm')}<span class="grow"><b>${esc(pname(e))}${peq(e.playing)}<small> · ${e.playing ? '' : 'in pausa · '}${esc(e.devName || '')}</small></b>
+        <span class="ptrack"><span class="pic">${imgTag(t.coverArt, 80, t.serverId)}</span><span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small></span></span><span class="pbar"><i></i></span></span></button>
+      <button class="btn sm" data-pact="listen">${ic('headphones')} Ascolta</button>` }; })
+      : [{ k: 'vuoto', cls: 'empty', html: 'Nessuno sta ascoltando in questo momento.' }]);
+    if (feed) keyed(feed, this.acts.length ? this.acts.map(a => ({ k: a.id, cls: 'pact' + (a.link ? ' go' : ''), attrs: a.link ? { 'data-pact': 'act', role: 'link', tabindex: '0' } : {}, html:
+      `${pavatar(a, 's')}<span class="grow"><span><b>${esc(a.user === srv()?.user ? 'Tu' : a.name || a.user)}</b> ${esc(a.text)}</span><small data-at="${Math.round(a.at * 1000 + this.skew)}"></small></span>${ic({ download: 'down', upload: 'up', playlist: 'list', jam: 'jam' }[a.kind] || 'friends')}` }))
+      : [{ k: 'vuoto', cls: 'empty', html: 'Ancora niente. Qui compaiono download, caricamenti, playlist condivise e Jam degli amici.' }]);
+    // segni sui contenuti: chi ascolta proprio questo brano, album o artista
+    const sid = S.active, here = playing.map(e => [e, this.track(e)]).filter(([, t]) => t.serverId === sid);
+    $$('#view .song[data-tid]').forEach(row => {
+      const who = here.filter(([, t]) => t.id === row.dataset.tid).map(([e]) => e), sm = row.querySelector('.t small'), m = sm?.querySelector(':scope>.pmark');
+      const sig = who.map(pkey).join();
+      if (!sm || (m?.dataset.sig || '') === sig) return;
+      m?.remove();
+      if (who.length) sm.insertAdjacentHTML('afterbegin', `<span class="pmark" data-pres data-sig="${esc(sig)}">${who.slice(0, 3).map(e => pavatar(e, 'xs')).join('')}${esc(who.map(pname).join(', '))}</span>`);
+    });
+    const hero = $('#view .phero-txt'), [r, id] = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
+    if (hero) {
+      const who = r === 'album' ? here.filter(([, t]) => t.albumId === id) : r === 'artista' ? here.filter(([, t]) => t.artistId === id) : [];
+      const sig = who.map(([e, t]) => pkey(e) + t.id).join(), m = hero.querySelector(':scope>.pmark-h');
+      if ((m?.dataset.sig || '') !== sig) {
+        m?.remove();
+        if (who.length) {
+          const [e, t] = who[0], names = who.map(([x]) => pname(x)), many = names.length > 1;
+          hero.insertAdjacentHTML('beforeend', `<button class="pmark-h" data-pres data-sig="${esc(sig)}" data-pact="sheet" data-pk="${esc(pkey(e))}">${who.slice(0, 3).map(([x]) => pavatar(x, 's')).join('')}${peq(true)}<span><b>${esc(many ? names.slice(0, -1).join(', ') + ' e ' + names.at(-1) : names[0])}</b> ${names[0] === 'Tu' && !many ? 'stai' : many ? 'stanno' : 'sta'} ascoltando${many ? '' : ` «${esc(t.title)}»`}</span></button>`);
+        }
+      }
+    }
+  }
+};
+// le viste si ridisegnano spesso (liste dal vivo, pagine nuove): i segni si rimettono da soli, ignorando i propri cambiamenti
+new MutationObserver(ms => {
+  if (!Presence.map.size || ms.every(m => m.target.closest?.('[data-pres]') || [...m.addedNodes, ...m.removedNodes].every(n => n.nodeType !== 1 || n.hasAttribute('data-pres')))) return;
+  cancelAnimationFrame(Presence.raf); Presence.raf = requestAnimationFrame(() => Presence.paintView());
+}).observe(view, { childList: true, subtree: true });
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-pact]'); if (!el) return;
+  const k = el.closest('[data-pk]')?.dataset.pk, p = Presence.map.get(k), act = el.dataset.pact;
+  e.stopPropagation();
+  if (act === 'act') { const a = Presence.acts.find(x => x.id === el.dataset.k); if (a) Presence.openAct(a); return; }
+  if (!p) return;
+  if (act === 'listen') Presence.listen(p); else if (act === 'open') Presence.open(p); else Presence.sheet(k);
+}, true);
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches?.('[data-pact="act"]')) e.target.click(); });
 
 /* ================= controlli del lettore e avvio ================= */
 function wirePlayer() {
