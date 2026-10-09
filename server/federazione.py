@@ -10,6 +10,7 @@ Armony - federazione: server Armony collegati fra loro (docs/FEDERAZIONE.md).
                                      percorsi. Solo le righe cambiate dopo la versione v
     cerca, vicini                    ricerca e mappa inoltrate agli amici degli amici (ttl, rid contro i cicli)
     file/<id>, cover/<id>, info/<id> il brano (Range), la copertina, dimensione e sha256; ?via=a,b a catena
+    radio, radio/<id>, ora           Jam Radio: le definisce radio.py su questo blueprint (stesse firme)
   /api/fed/*             gestione, solo amministratori: impostazioni, inviti, collegamenti
   /api/rete/*            per gli utenti: cerca, stream, cover, mappa; copia (permesso "download")
 
