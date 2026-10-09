@@ -2898,7 +2898,7 @@ function nativeBack() {
    nell'elenco e gli si può mandare la musica di proposito.
    La Jam (più persone insieme) resta separata: con una Jam aperta questo modulo non interviene. */
 const Live = {
-  es: null, devices: new Map(), states: new Map(), target: null, sent: null, tick: null, retry: null,
+  es: null, devices: new Map(), states: new Map(), target: null, sent: null, tick: null, retry: null, dog: null, last: 0, beatAt: 0, fails: 0, want: null,
   name() { return P.deviceName || (NATIVE ? 'Telefono' : /Android|iPhone|iPad|Mobile/.test(navigator.userAgent) ? 'Telefono (browser)' : 'Computer'); },
   on() { const s = srv(); return P.live !== false && !!s?.session && !!s.me?.caps?.includes('live'); },
   st() { return this.target ? this.states.get(this.target) || null : null; },
@@ -2908,25 +2908,52 @@ const Live = {
   playing() { return !!this.st()?.playing; },
   pos() { const s = this.st(); if (!s) return 0; const p = (s.position || 0) + (s.playing ? (Date.now() - s.recvAt) / 1000 * (s.rate || 1) : 0); return s.duration ? Math.min(p, s.duration) : p; },
   dur() { return this.st()?.duration || 0; },
+  // il server manda ping e riceve battiti (livehb): solo allora il cane da guardia ha senso
+  hb() { return !!srv()?.me?.caps?.includes('livehb'); },
+  stop() { clearTimeout(this.retry); clearInterval(this.dog); this.es?.close(); this.es = null; this.devices.clear(); this.states.clear(); this.target = null; this.sent = null; this.paint(); },
   connect() {
-    clearTimeout(this.retry); this.es?.close(); this.es = null; this.devices.clear(); this.states.clear(); this.target = null; this.sent = null; this.paint();
+    const was = this.target; this.stop(); this.want = was;
     if (!this.on()) return;
-    const s = srv();
-    const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&token=${encodeURIComponent(s.session)}`);
-    es.onmessage = e => { try { this.recv(JSON.parse(e.data)); } catch {} };
-    es.onopen = () => { this.sent = null; this.publish(); };
-    // EventSource si ricollega da solo; se il server rifiuta (sessione scaduta) chiude, e si riprova più tardi
-    es.onerror = () => { if (es.readyState === EventSource.CLOSED && this.es === es) this.retry = setTimeout(() => this.connect(), 30000); };
+    const s = srv(), hb = this.hb();
+    const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&token=${encodeURIComponent(s.session)}${hb ? '&hb=1' : ''}`);
+    this.last = Date.now();
+    es.onmessage = e => { this.last = Date.now(); try { this.recv(JSON.parse(e.data)); } catch {} };
+    es.onopen = () => { this.fails = 0; this.last = Date.now(); this.sent = null; this.publish(); };
+    // EventSource si ricollega da solo dopo un errore di rete; se il server rifiuta (sessione scaduta) chiude:
+    // si rifà l'accesso con tok/salt e si riprova, sempre più piano
+    es.onerror = () => { if (es.readyState === EventSource.CLOSED && this.es === es) { clearInterval(this.dog); this.retry = setTimeout(() => this.relogin(), Math.min(60000, 5000 * ++this.fails)); } };
+    // cane da guardia: un canale mezzo morto (app uccisa, rete cambiata, schermo spento) resta "aperto" per sempre.
+    // Il battito va a tempo, non a giri: in sottofondo i timer possono scattare anche solo una volta al minuto
+    if (hb) this.dog = setInterval(() => { if (Date.now() - this.last > 40000) this.connect(); else if (Date.now() - this.beatAt > 25000) this.beat(); }, 10000);
+  },
+  async relogin() { await syncSessions(); this.connect(); },
+  // battito per il server; 404 = non ha più il nostro canale, 401 = sessione scaduta
+  beat() {
+    this.beatAt = Date.now();
+    srvApi(srv(), '/api/live/beat', { method: 'POST', body: JSON.stringify({ device: S.device }) })
+      .catch(e => /404/.test(e.message) ? this.connect() : /401/.test(e.message) ? this.relogin() : 0);
+  },
+  // ritorno in primo piano, rete di nuovo su, app riaperta: se il canale non è sicuramente vivo ci si ricollega subito
+  wake(force) {
+    if (P.live === false || !srv()?.me?.caps?.includes('live')) return;
+    const ok = this.es?.readyState === EventSource.OPEN && (!this.hb() || Date.now() - this.last < 20000);
+    if (ok && !force) return this.hb() && this.beat();
+    this.es && this.es.readyState !== EventSource.CLOSED ? this.connect() : this.relogin();
   },
   recv(m) {
     const now = Date.now(), before = this.track()?.id;
+    if (m.type === 'ping') return;
+    if (m.type === 'kicked') return this.stop();  // un'altra scheda di questo dispositivo ha preso il canale
     if (m.type === 'hello') {
       this.devices = new Map(arr(m.devices).map(d => [d.device, d.name]));
       this.states = new Map(arr(m.states).map(s => [s.device, { ...s, recvAt: now }]));
       const p = arr(m.states).find(s => s.playing && !s.solo);
-      if (p && Engine.el.paused && !Jam.role && !P.solo) this.target = p.device;
-    } else if (m.type === 'join') this.devices.set(m.device, m.name);
-    else if (m.type === 'gone') {
+      // dopo un riaggancio si torna telecomando di chi suona, o di chi si comandava prima
+      if (Engine.el.paused && !Jam.role && !P.solo) this.target = p ? p.device : this.devices.has(this.want) ? this.want : null;
+    } else if (m.type === 'join') {
+      // anche dopo un fantasma: è una sessione nuova, lo stato vecchio non vale più
+      this.devices.set(m.device, m.name); this.states.delete(m.device);
+    } else if (m.type === 'gone') {
       const name = this.devices.get(m.device); this.devices.delete(m.device); this.states.delete(m.device);
       if (this.target === m.device) { this.target = null; toast(`${name || 'Il dispositivo'} si è scollegato.`); }
     } else if (m.type === 'state') {
@@ -3120,7 +3147,9 @@ async function boot() {
   Jam.init();
   route();
   setTimeout(resolvePending, 8000);
-  addEventListener('online', () => { HistSync.run(); if (!Live.es) Live.connect(); });
+  addEventListener('online', () => { HistSync.run(); Live.wake(true); });
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
+  window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
   syncSessions().then(async () => { Live.connect(); notifyUpdate(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche)/.test(location.hash)) route(); });
 }
