@@ -263,6 +263,12 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.14.0 (2026-10-09)**: riaggancio automatico fra dispositivi (battito, ping,
+niente musica mandata a un'app chiusa male); sul telefono barra sopra tasti e
+gesti, lettore che si riduce e sparisce con la tastiera, nome delle cuffie;
+discografia completa dell'artista da Deezer; equalizzatore automatico e
+protezione dai gracchi.
+
 **0.13.0 (2026-10-09)**: nuova disposizione in stile Spotify (Home con accesso
 rapido e mix, Cerca con riquadri e ricerche recenti, libreria a schede,
 intestazioni con il colore della copertina, playlist nella barra laterale),

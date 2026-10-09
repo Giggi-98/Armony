@@ -54,13 +54,14 @@ In alternativa: un dominio con Caddy davanti alla porta 8080 (HTTPS automatico),
 - **Sei livelli di qualità**: dall'originale (FLAC compreso) a Opus 32 kbps. Puoi impostare una qualità diversa automatica quando sei su rete mobile.
 - **Dissolvenza tra i brani** da 0 a 12 secondi. Il brano successivo viene precaricato, quindi i passaggi sono praticamente senza pause.
 - **Normalizzazione del volume** (ReplayGain) per brano o per album: niente più salti di volume tra una canzone e l'altra.
-- **Equalizzatore a 10 bande** con preimpostazioni, tra cui "Altoparlante del telefono" e "Cuffiette piccole".
+- **Equalizzatore a 10 bande** con preimpostazioni, tra cui "Altoparlante del telefono" e "Cuffiette piccole", oppure **Automatico**: ascolta lo spettro di ogni brano e lo corregge piano piano verso un suono bilanciato (al massimo ±6 dB, ricomincia a ogni canzone). Nel dialogo vedi le barre muoversi da sole.
+- **Niente gracchi**: quando l'equalizzatore alza qualcosa, il volume prima dell'equalizzatore si abbassa di quel tanto, e un limitatore in fondo ferma i picchi oltre 0 dB. È sempre acceso e non cambia il suono quando non serve (con l'equalizzatore che alza molto il volume complessivo cala un po': alzalo). Con la modalità compatibile è spento.
 - **Volume notte**: comprime la dinamica, così i passaggi forti non svegliano nessuno e quelli piano si sentono.
 - **Velocità** da 0,75× a 2×, senza alterare l'intonazione.
 - **Timer di spegnimento** con sfumata finale, oppure "a fine brano".
 - **Più server** contemporaneamente. La coda può mescolare brani di server diversi.
 - **Continua su un altro dispositivo**: la coda viene salvata sul server, così apri Armony sul PC e riprendi dal punto esatto.
-- **Un dispositivo suona, gli altri lo comandano.** Se avvii la musica sul telefono e stava suonando sul PC, il PC si ferma e il suo lettore mostra cosa suona sul telefono: pausa, avanti, indietro e la barra comandano il telefono, e viceversa. Il pulsante con l'altoparlante nel lettore ("Dove suona") elenca i tuoi dispositivi collegati: tocca quello su cui vuoi la musica e si sposta lì dallo stesso punto; se lo scegli prima di avviare un album, l'album parte lì. Nello stesso foglio puoi sganciare un dispositivo ("suona per conto suo"): PC e telefono suonano cose diverse senza fermarsi a vicenda. Vale per i dispositivi collegati allo stesso utente; si spegne in Impostazioni → Profilo, dove dai anche un nome al dispositivo.
+- **Un dispositivo suona, gli altri lo comandano.** Se avvii la musica sul telefono e stava suonando sul PC, il PC si ferma e il suo lettore mostra cosa suona sul telefono: pausa, avanti, indietro e la barra comandano il telefono, e viceversa. Il pulsante con l'altoparlante nel lettore ("Dove suona") elenca i tuoi dispositivi collegati: tocca quello su cui vuoi la musica e si sposta lì dallo stesso punto; se lo scegli prima di avviare un album, l'album parte lì. Nello stesso foglio puoi sganciare un dispositivo ("suona per conto suo"): PC e telefono suonano cose diverse senza fermarsi a vicenda. Vale per i dispositivi collegati allo stesso utente; si spegne in Impostazioni → Profilo, dove dai anche un nome al dispositivo. Se l'app si chiude male, il telefono perde la rete o resta a lungo con lo schermo spento, Armony si riaggancia da solo appena riapri l'app o torna la connessione, senza ricaricare. Un dispositivo sparito senza salutare viene tolto dall'elenco entro un paio di minuti; se gli mandi la musica e non risponde, la musica resta dove sei.
 - **La barra ondeggia** mentre suona, come nei lettori di Android, e torna dritta in pausa.
 
 ### Scoperta
@@ -103,6 +104,9 @@ Salva album, playlist o singoli brani sul telefono, nella qualità che preferisc
 - Copertina e metadati inclusi. **SponsorBlock** taglia intro, parti parlate e sponsor dai video musicali.
 - La libreria si aggiorna da sola e i video si guardano dentro l'app.
 
+### Discografia completa
+Aprendo un artista vedi tutta la sua discografia, divisa in Album, Singoli ed EP e Compilation, dalla più recente (l'elenco arriva da Deezer). Gli album che hai sono le copertine normali; quelli che non hai sono attenuati con la scritta "Non in libreria": toccali per vedere le tracce e "Scarica l'album" (arrivano nella stessa cartella delle tracce mancanti). Appena scaricato, l'album diventa normale nella pagina dell'artista. Anche gli artisti simili che non hai si possono aprire, con la loro discografia. Serve il permesso di scaricare.
+
 ### Album completi
 Aprendo un album, le tracce che non hai compaiono al loro posto in grigio (la scaletta completa arriva da Deezer); "Scarica" ne prende una, "Scarica le N mancanti" tutte, e arrivano nello stesso album con copertina e numero di traccia.
 
@@ -133,6 +137,8 @@ Si installa come app ("Aggiungi a schermata Home"). Controlli dalla schermata di
 
 Sul telefono le sezioni principali sono in basso, sotto il lettore; le altre sono in "Altro". Il server in uso e la qualità si cambiano dal pulsante in alto (in fondo alla barra laterale sul computer). Le impostazioni sono divise in gruppi richiudibili, con una casella di ricerca: scrivi "tema" o "qualità" e restano solo le voci che ti servono.
 
+Mentre scorri una pagina verso il basso il lettore si fa piccolo, una riga con il brano, ▶ e ⏭: torna intero quando risali o arrivi in cima. Quando scrivi (per esempio in Cerca) lettore e barra si tolgono di mezzo e tornano chiudendo la tastiera.
+
 La **Home** si apre con l'accesso rapido agli album che ascolti, i mix "Fatti per te" e gli scaffali (ascoltati di recente, aggiunti di recente, da riscoprire); "Mostra tutto" porta all'elenco completo. **Cerca** mostra le ricerche recenti e i riquadri colorati per raccolte, generi e decenni; mentre scrivi compaiono il risultato migliore, i brani, gli artisti e gli album. Sul computer la barra laterale elenca anche le tue playlist. Ogni album, artista e playlist ha la stessa intestazione: copertina grande, il colore della copertina sullo sfondo, ▶ per ascoltare e le altre azioni nel tasto ⋯.
 
 Se nel sistema è attivo «Riduci movimento», Armony lo rispetta: niente dischi che girano né elementi in volo, solo dissolvenze.
@@ -143,7 +149,7 @@ Se nel sistema è attivo «Riduci movimento», Armony lo rispetta: niente dischi
 In Impostazioni → Utenti → Registrazione inserisci una volta utente e password dell'amministratore di Navidrome (restano sul server, mai sul telefono). Con "Con invito" crei un codice e lo mandi (link o QR): l'amico apre il link, o nell'app scrive indirizzo del server e codice, sceglie nome e password ed entra subito, come utente normale. "Aperta" fa registrare chiunque raggiunga il server; "Chiusa" la spegne. Chi ha già un account sceglie "Accedi". L'amministratore resta uno solo.
 
 ## App Android
-Armony per Android è la stessa app che apri nel browser, con in più ciò che il browser non dà: la musica continua a schermo spento, i comandi stanno nella notifica e nella schermata di blocco, i tasti delle cuffie funzionano, e il tasto indietro non la chiude mentre suona.
+Armony per Android è la stessa app che apri nel browser, con in più ciò che il browser non dà: la musica continua a schermo spento, i comandi stanno nella notifica e nella schermata di blocco, i tasti delle cuffie funzionano, e il tasto indietro non la chiude mentre suona. La barra in basso sta sempre sopra i tasti o la barra dei gesti di Android. Se colleghi cuffie Bluetooth (o con filo), l'app lo dice e "Dove suona" mostra il loro nome, per esempio "Qui · WH-1000XM4". Non serve nessun permesso in più.
 
 **Installarla.** Sul telefono apri la pagina delle release del progetto su GitHub (`https://github.com/Giggi-98/Armony/releases`), scarica `armony-vX.Y.Z.apk` e aprilo. Android chiede di consentire l'installazione da quella fonte (il browser): consentilo una volta. Al primo avvio inserisci indirizzo, utente e password del server, come nel browser. Al primo play l'app chiede di mostrare le notifiche: senza, la musica continua ma i comandi non si vedono.
 

@@ -27,6 +27,38 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-09 — Dal vivo: battito e ping al posto del commento SSE, e niente musica mandata ai fantasmi
+
+**Contesto:** una connessione mezza morta (app uccisa, cambio rete, schermo spento) restava "aperta" per sempre: il commento SSE non arriva al codice del client e il server non si accorge di un TCP mezzo aperto. In più, aprendo il PC subito dopo aver chiuso male il telefono mentre suonava, il PC diventava telecomando del telefono morto e la coda finiva lì.
+**Scelta:** per i client che lo chiedono (`hb=1`, capacità `livehb`) il server manda un ping come dato e riceve un battito (`/api/live/beat`) ogni ~30 s. Il client si ricollega dopo 40 s di silenzio e subito su online, ritorno visibile e resume dell'app; con la sessione scaduta rifà l'accesso con tok/salt. Il server toglie dopo 120 s senza battito un dispositivo e chiude le connessioni vecchie dello stesso dispositivo quando si ricollega. Se dopo "suona qui la coda", play o pausa il dispositivo scelto non manda il suo stato entro 5 s (o sparisce), il client lo toglie e suona da sé.
+**Alternative scartate:** solo il cane da guardia del client (il server terrebbe i fantasmi); keepalive TCP (minuti, non configurabile dal client); un ping a tutti senza `hb` (gli APK vecchi non lo conoscono); controllare anche "avanti" (un dispositivo vivo può metterci più di 5 s a caricare il brano: falsi allarmi).
+**Conseguenze:** una richiesta ogni ~30 s per dispositivo collegato. Due schede dello stesso browser condividono l'id: resta collegata l'ultima, l'altra si riaggancia quando torna visibile. Fino a 5 s di silenzio prima che la musica torni qui.
+**Da rivedere se:** Android congela la WebView in sottofondo oltre i 120 s mentre suona (allora il battito va mandato dal servizio nativo).
+
+## 2026-10-09 — Telefono: spazi delle barre misurati dall'app, lettore che si riduce, pillole dentro il lettore
+
+**Contesto:** su molte WebView `env(safe-area-inset-bottom)` vale 0 e la barra in basso finiva contro i tasti o i gesti. Il lettore restava in mezzo durante la navigazione e con la tastiera aperta. Le pillole sopra il lettore coprivano il contenuto. Mancava il nome delle cuffie.
+**Scelta:** un plugin `ArmonyInsets` misura quanto barre e tastiera si sovrappongono alla WebView; sta sul genitore della WebView e lascia gli insets com'erano, così SystemBars di Capacitor resta l'unico a ridimensionarla. Le misure entrano nel `max()` di `--sat`/`--sab`, più 8 px sotto la barra delle sezioni. Scorrendo verso il basso il lettore si riduce a una riga e torna salendo; con la tastiera aperta sparisce. Le pillole stanno in una riga dentro il lettore. L'uscita audio arriva da `getAudioDevicesForAttributes` (Android 13+) o da `getDevices` con precedenza; `getProductName()` non richiede permessi.
+**Alternative scartate:** `insetsHandling:'native'` o un listener sulla DecorView (avrebbero sostituito quello di Capacitor); chiedere BLUETOOTH_CONNECT (serve solo per l'indirizzo); pillole nell'intestazione (lontane dal lettore); lettore a una riga sempre (ribalterebbe la voce sul lettore a due righe senza motivo); leggere il nome delle cuffie nel browser del PC (servirebbe il permesso del microfono).
+**Conseguenze:** lo spazio in fondo alle pagine resta quello del lettore grande. La riga delle pillole aggiunge 36 px quando c'è.
+**Da rivedere se:** tutte le WebView supportate danno `env()` corretti (allora il plugin si può togliere), o la riga delle pillole si rivela troppo alta sui telefoni piccoli.
+
+## 2026-10-09 — Discografia completa dell'artista da Deezer, schede "fantasma"
+
+**Contesto:** dalla pagina artista si vuole vedere e scaricare tutto ciò che l'artista ha pubblicato, e navigare fra artisti simili anche fuori dalla libreria.
+**Scelta:** `GET /api/discografia` cerca l'artista su Deezer e lo accetta solo con nome normalizzato identico (fra gli omonimi il più seguito); restituisce le uscite con `record_type` e gli artisti simili. Il client abbina gli album della libreria per titolo senza edizione (parentesi, "- …", deluxe, remaster) e mostra il resto come schede attenuate; l'album fantasma (`#/album-dz/<id>`) si scarica con `/api/import`. Gli artisti simili non in libreria hanno una pagina solo-Deezer (`#/artista-dz/<id>`) che rimanda a quella della libreria appena l'artista c'è.
+**Alternative scartate:** primo risultato di Deezer per nome (omonimi, tribute band); numero di tracce per ogni uscita (una richiesta per album, troppe col limite di Deezer); MusicBrainz (1 richiesta/s, release da scegliere).
+**Conseguenze:** il nome di ogni artista aperto va a Deezer; edizioni con titoli molto diversi restano fantasma anche se le hai; "Scarica l'album" può riscaricare brani che hai sotto un altro album.
+**Da rivedere se:** Deezer chiude l'API pubblica.
+
+## 2026-10-09 — EQ automatico e protezione dai gracchi: misura prima dell'EQ, modalità a sé, margine + limitatore
+
+**Contesto:** richiesta di un equalizzatore che si regoli da solo sul brano e di niente gracchi quando EQ, normalizzazione e volume sommano guadagno.
+**Scelta:** lo spettro si misura prima dell'EQ (misurarlo dopo creerebbe un anello in cui l'EQ corregge sé stesso), mediato su qualche secondo e confrontato con una curva fissa e indicativa (rosa fino a 250 Hz, poi −2 dB/ottava come la media dei mix commerciali); correzioni lente, entro ±6 dB. "Automatico" è una modalità alternativa alle preimpostazioni, non sommata (sommarle raddoppierebbe la curva). Contro il clipping: un margine pari al picco reale della curva dell'EQ (calcolato con `getFrequencyResponse`, perché le bande vicine si sommano) e un `DynamicsCompressor` come limitatore a −1 dB, con la compensazione automatica del browser tolta a mano.
+**Alternative scartate:** una curva per genere (i tag spesso mancano o sono sbagliati); un limitatore in AudioWorklet (un file in più nella shell e costo sui telefoni economici).
+**Conseguenze:** quando l'EQ alza, il volume complessivo cala (tutto a +12: circa 9 dB; automatico: 2–5 dB). A pagina nascosta l'analisi si ferma e restano le ultime correzioni.
+**Da rivedere se:** un browser cambia la formula della compensazione del compressore, o servono picchi fra campioni sotto −1 dB.
+
 ## 2026-10-09 — Nuova disposizione: un solo carattere, AutoAnimate nel repo, tempo reale a intervalli
 
 **Contesto:** richiesta di rifare disposizione ed elenchi in stile Spotify:
