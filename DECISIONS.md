@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-09 — Jam Radio: stazione a orario sul server, elenco preparato dal client
+
+**Contesto:** stazioni che girano all'infinito a cui sintonizzarsi, anche dai server collegati, tutti allo stesso punto.
+**Scelta:** la stazione è un elenco con le durate più un istante d'inizio (SQLite, migrazione 6); la posizione si calcola dall'ora del server, a fine elenco si rimescola con un seme per giro. L'elenco lo prepara il client con le sue radio. Ascoltatori in memoria, confermati ogni minuto, mandati sul canale `/api/live`; fra server rotte firmate nuove (`proto` invariato) e scarto degli orologi stimato a ogni salto con `/fed/v1/ora`; audio dal proxy della rete. Client allineato con `SrvClock` della Jam: salto oltre 0,5 s, velocità ±5% sotto. Modulo `server/radio.py` come `federazione.py`. Pagina a sé (`#/radio`) raggiungibile da Jam e dalla Home.
+**Alternative scartate:** un dispositivo che fa da host (la radio morirebbe con lui); trasmettere l'audio dal server (banda e transcodifica continue); un canale SSE nuovo (un thread di waitress in più per dispositivo); il server che calcola l'elenco (doppione delle radio del client); una sezione dentro la pagina Jam (con una Jam aperta la pagina è della Jam).
+**Conseguenze:** gli ascoltatori remoti si aggiornano al più ogni minuto; i brani copiati in `federati/` dentro una stazione non si sentono da un altro server; con le durate di Navidrome arrotondate al secondo un brano può essere tagliato o finire un attimo prima del cambio.
+**Da rivedere se:** le stazioni diventano tante o con molti ascoltatori remoti, o si vuole proporre e votare i brani della radio.
+
 ## 2026-10-09 — Indirizzo pubblico del server deciso dall'amministratore, non per dispositivo
 
 **Contesto:** link condivisi, inviti, QR dell'app e indirizzo per i server collegati usavano l'"Indirizzo pubblico per i link" di ogni dispositivo, o in mancanza l'indirizzo con cui quel dispositivo raggiunge il server (in casa un nome locale come `gigi.econnet`, irraggiungibile da fuori).

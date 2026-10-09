@@ -263,6 +263,9 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.17.0 (2026-10-09)**: Jam Radio, stazioni a orario sul server a cui ci si
+sintonizza, anche dai server collegati. 0.16.3: indirizzo pubblico del server.
+
 **0.16.1–0.16.2 (2026-10-09)**: informazioni dell'artista nell'intestazione;
 link fisso e QR dell'ultima app Android dal server (`/app.apk`); Casuale che
 accoda tutta la playlist; README e installazione da zero verificata.

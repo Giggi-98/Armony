@@ -24,6 +24,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 **Insieme agli amici**
 - **Jam**: ascoltate la stessa musica nello stesso momento, ognuno dal suo telefono; proposte, voti, reazioni. Cifrata da un capo all'altro.
 - **Amici dal vivo**: chi sta ascoltando cosa sul server, in tempo reale, e cosa fa (download, playlist, Jam).
+- **Jam Radio**: stazioni che girano all'infinito sul server; ti sintonizzi e senti lo stesso punto degli altri, tipo Discord. Anche quelle dei server collegati.
 - Gli amici si creano un account da soli, con un invito.
 
 **La libreria**
