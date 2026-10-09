@@ -399,12 +399,16 @@ function albumGrid(albums, opts = {}) {
 }
 // elenco di brani (.tracklist): su schermo largo a colonne con intestazione (#, titolo, album, durata),
 // su telefono miniatura, titolo e artista. Le righe restano .song: albumGaps vi inserisce le tracce mancanti
+// ogni elenco disegnato tiene i suoi brani: un tocco usa l'elenco della riga, "Riproduci"/"Casuale" quello principale
+// della pagina. Prima si usava solo l'ultimo elenco disegnato, e un elenco corto disegnato dopo accorciava la coda
+const Lists = new Map(); let listSeq = 0;
 function songList(tracks, opts = {}) {
   S.lastList = tracks;
+  const lid = ++listSeq; Lists.set(lid, tracks); if (Lists.size > 40) Lists.delete(Lists.keys().next().value);
   if (!tracks.length) return `<div class="empty">${opts.empty || 'Nessun brano.'}</div>`;
   const cur = currentTrack();
   const art = opts.art !== false, alb = opts.showAlbum !== false;
-  return `<div class="songs tracklist${alb ? '' : ' noalb'}${opts.queue ? ' q' : ''}">
+  return `<div class="songs tracklist${alb ? '' : ' noalb'}${opts.queue ? ' q' : ''}" data-l="${lid}">
     <div class="th${art ? '' : ' noart'}" aria-hidden="true"><span class="n">#</span><span class="tt">Titolo</span>${alb ? '<span class="al">Album</span>' : ''}<span class="d">${ic('clock')}</span><span></span></div>${tracks.map((t, i) => `
     <div class="song ${art ? '' : 'noart'} ${cur && key(cur) === key(t) ? 'now' : ''}" data-act="${opts.queue ? 'qplay' : 'play'}" data-i="${i}" data-tid="${esc(t.id)}">
       <span class="n">${opts.queue ? i + 1 : (opts.numbers ? (t.track || i + 1) : i + 1)}</span>
@@ -439,7 +443,13 @@ function noServer() {
     <button class="btn${ph ? '' : ' primary'}" data-act="addsrv" ${local ? `data-url="${esc(location.origin)}"` : ''}>${ph ? 'Collegati a un server' : 'Aggiungi server'}</button>
     <button class="btn" data-act="importset">Importa impostazioni da un amico</button>
     <a class="btn" href="#/jam">Entra in una Jam</a>
-  </div></div>`;
+  </div></div>${local ? `<div class="row" style="justify-content:center;margin-top:var(--s5)"><a class="btn sm" href="./app.apk">${ic('down')} App Android</a><button class="btn sm" id="welQr">QR code</button></div>` : ''}`;
+  // il QR del benvenuto: stesso indirizzo di questa pagina, quindi raggiungibile dal telefono come lo è dal browser
+  $('#welQr')?.addEventListener('click', e => {
+    e.preventDefault(); const d = $('#dlg2'), url = location.origin + '/app.apk';
+    d.innerHTML = `<h3>App Android</h3><p class="sub">Inquadra il codice con la fotocamera del telefono.</p><div id="welQrBox" style="margin:var(--s4) 0;display:grid;place-items:center"></div><div class="code" style="font-size:.8rem">${esc(url)}</div><div class="row"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
+    closeOutside(d); d.showModal(); qrInto($('#welQrBox'), url).catch(() => {});
+  });
 }
 
 // link d'invito (<server>/#/invito/<codice>): apre "Crea un account" con indirizzo e codice già compilati
@@ -523,6 +533,7 @@ function lMerge(songs, opts) {
     box.append(el);
   });
   keep.forEach(list => list.forEach(el => el.remove()));
+  box.dataset.l = tmp.querySelector('.songs').dataset.l;  // l'elenco ora è quello nuovo
 }
 
 /* ================= viste: libreria ================= */
@@ -2645,7 +2656,8 @@ function vSettings() {
 
   ${access().admin && srv()?.session ? grp('utenti', 'Utenti', 'permessi caricamento download disconnetti amministratore', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div><h3 style="margin-top:var(--s5)">Registrazione</h3><div id="regBox"><p class="sub">Caricamento…</p></div>') : ''}
   ${access().admin && netOk() ? grp('rete', 'Librerie collegate', 'federazione rete server amici collegare invito codice sicurezza', '<p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare subito o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>') : ''}
-  ${window.ARMONY_APP ? grp('app', 'App Android', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div>') : ''}
+  ${window.ARMONY_APP ? grp('app', 'App Android', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div><div id="apkBox"></div>')
+    : grp('app', 'App Android', 'apk app android telefono scarica installa qr', '<div class="panel" id="apkBox"><p class="sub">Controllo…</p></div>')}
   ${access().admin ? grp('aggiornamenti', 'Aggiornamenti', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>') : ''}
 
   ${grp('aspetto', 'Aspetto', 'tema chiaro scuro automatico colori', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`)}
@@ -2674,7 +2686,7 @@ function vSettings() {
   });
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  refreshSpazio();
+  refreshSpazio(); refreshApk();
   if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); }
   if (window.ARMONY_APP) AppUpdate.paint();
   Local.paint();
@@ -2749,6 +2761,27 @@ async function refreshUpdate(force) {
 /* ================= registrazione degli amici (solo amministratori) ================= */
 const fmtCode = c => String(c).replace(/^(.{4})(.+)$/, '$1-$2');
 const inviteLink = c => `${absUrl(srv()?.shareBase || srv()?.url || location.origin)}/#/invito/${fmtCode(c)}`;
+// l'ultima app Android: il server rimanda sempre all'APK più recente (/app.apk), così link e QR non cambiano mai.
+// Per il QR serve un indirizzo che il telefono raggiunga: quello pubblico dei link, se c'è, altrimenti quello del server
+const apkBase = () => { const s = dlSrv(); return s ? (s.shareBase || absUrl(s.url)).replace(/\/+$/, '') : ''; };
+async function refreshApk() {
+  const box = $('#apkBox'); if (!box) return;
+  const s = dlSrv(); let a = null;
+  // si chiede direttamente: un server vecchio risponde 404 e il link va alla pagina delle release
+  if (s?.url) try { const r = await fetch(absUrl(s.url) + '/api/app'); if (r.ok) a = await r.json(); } catch {}
+  const url = a?.apk ? apkBase() + '/app.apk' : 'https://github.com/Giggi-98/Armony/releases/latest';
+  if ($('#apkBox') !== box) return;
+  box.innerHTML = `${window.ARMONY_APP ? '<h3 style="margin:var(--s5) 0 var(--s1)">Passala a un amico</h3>' : ''}
+    <p class="sub">${window.ARMONY_APP ? 'Fagli inquadrare il codice: scarica l\'ultima versione dell\'app.' : `L'app per Android${a?.version ? ` (ultima versione: <b>${esc(a.version)}</b>)` : ''}: musica a schermo spento, comandi nella notifica, anche senza server. Il link porta sempre all'ultima versione.`}</p>
+    <div class="row"><a class="btn primary" href="${esc(url)}">${ic('down')} Scarica l'app</a><button class="btn" id="apkQr">QR code</button></div>`;
+  $('#apkQr').onclick = () => {
+    const d = $('#dlg2');
+    d.innerHTML = `<h3>App Android</h3><p class="sub">Inquadra il codice con la fotocamera del telefono: si scarica l'ultima versione. Android chiede di consentire l'installazione dal browser una volta sola.</p>
+      <div id="apkQrBox" style="margin:var(--s4) 0;display:grid;place-items:center"></div><div class="code" style="font-size:.8rem">${esc(url)}</div>
+      <div class="row"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
+    closeOutside(d); d.showModal(); qrInto($('#apkQrBox'), url).catch(() => { $('#apkQrBox').innerHTML = '<p class="sub">Il QR non si è caricato (serve internet): usa il link qui sotto.</p>'; });
+  };
+}
 async function qrInto(box, text) {
   // stessa libreria del QR della Jam, caricata solo quando serve
   if (!window.QRCode) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; sc.onload = res; sc.onerror = rej; document.head.append(sc); });
@@ -3043,7 +3076,9 @@ function speedDialog() {
 /* ================= azioni (delegazione eventi) ================= */
 view.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || !view.contains(el)) return;
-  const act = el.dataset.act, i = +el.dataset.i, id = el.dataset.id, list = S.lastList;
+  const act = el.dataset.act, i = +el.dataset.i, id = el.dataset.id;
+  const lst = el.closest('.songs[data-l]') || view.querySelector('#lList .songs[data-l]') || view.querySelector('.songs[data-l]');
+  const list = (lst && Lists.get(+lst.dataset.l)) || S.lastList;
   e.stopPropagation();
   try {
     switch (act) {
@@ -3525,7 +3560,7 @@ const Live = {
     // il browser può bloccare l'audio partito senza un tocco su questa pagina; l'app no
     setTimeout(() => { if (Engine.el.paused && !this.target) toast('Il browser ha bloccato l\'avvio: premi play per ascoltare qui.', 6000); }, 1500);
   },
-  pack(q, i, pos) { const from = Math.max(0, i - 50); return { queue: q.slice(from, from + 300).map(wire), index: i - from, position: pos }; },
+  pack(q, i, pos) { const from = Math.max(0, i - 50); return { queue: q.slice(from, from + 1000).map(wire), index: i - from, position: pos }; },
   // la coda di questo dispositivo va a un altro, che riparte dallo stesso punto; qui si diventa telecomando
   async give(to) {
     if (!S.queue[S.index]) return;

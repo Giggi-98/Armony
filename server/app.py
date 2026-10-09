@@ -8,6 +8,7 @@ Armony - server di supporto.
                         dai client con la chiave della stanza: non può leggerli né falsificarli
   /api/lan/*            scoperta di altri server Armony e Jam vicine via multicast UDP
   /api/info            pubblica: nome, versione, livello di API e capacità del server
+  /app.apk, /api/app    pubblici: l'ultima app Android pubblicata su GitHub (rimando all'APK) e la sua versione
   /api/login, /api/logout, /api/me   accesso con le credenziali Navidrome (token + sale
                         Subsonic); la sessione va nell'intestazione X-Token
   /api/users            permessi per utente (solo amministratori)
@@ -56,7 +57,7 @@ import uuid
 import mutagen
 import requests
 import yt_dlp
-from flask import Flask, Response, abort, g, jsonify, request, send_from_directory, stream_with_context
+from flask import Flask, Response, abort, redirect, g, jsonify, request, send_from_directory, stream_with_context
 from yt_dlp.postprocessor.metadataparser import MetadataParserPP
 
 import db
@@ -87,7 +88,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "app"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
@@ -152,6 +153,43 @@ failed = {}  # ip -> [istanti dei tentativi falliti]
 @app.get("/api/info")
 def info():
     return jsonify(name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS, armony=True)
+
+
+# ultima app Android: l'APK sta nelle release di GitHub; /app.apk rimanda sempre a quella più recente,
+# così il link (e il suo QR) non cambia mai. Un'ora di cache: l'API senza token ha 60 richieste l'ora
+apk_cache = {"at": 0, "version": None, "url": None}
+
+
+def latest_apk():
+    if REPO and time.time() - apk_cache["at"] > 3600:
+        try:
+            r = http.get(f"https://api.github.com/repos/{REPO}/releases/latest", timeout=10)
+            r.raise_for_status()
+            j = r.json()
+            a = next((x for x in j.get("assets", []) if x.get("name", "").endswith(".apk")), None)
+            if a:
+                apk_cache.update(version=j.get("tag_name", "").lstrip("v"), url=a["browser_download_url"])
+        except Exception:  # noqa: BLE001 - si riprova al giro dopo, intanto vale l'ultimo trovato
+            pass
+        apk_cache["at"] = time.time()
+    return apk_cache
+
+
+@app.get("/api/app")
+def app_info():
+    a = latest_apk()
+    page = f"https://github.com/{REPO}/releases/latest" if REPO else None
+    return jsonify(version=a["version"], apk="/app.apk" if a["url"] else None, page=page)
+
+
+@app.get("/app.apk")
+def app_apk():
+    a = latest_apk()
+    if a["url"]:
+        return redirect(a["url"])
+    if REPO:
+        return redirect(f"https://github.com/{REPO}/releases/latest")
+    return "App Android non disponibile: manca ARMONY_REPO nella configurazione del server.", 404
 
 
 @app.post("/api/login")
@@ -811,7 +849,7 @@ def live_cmd():
     if not present:
         return jsonify(error="Quel dispositivo non è più collegato."), 404
     value = d.get("value")
-    if not isinstance(value, (int, float, dict)) or len(json.dumps(value)) > 300_000:
+    if not isinstance(value, (int, float, dict)) or len(json.dumps(value)) > 600_000:  # una coda di 1000 brani
         value = None
     live_put(u, {"type": "cmd", "cmd": cmd, "value": value, "from": str(d.get("from") or "")[:40]}, only=to)
     return jsonify(ok=True)
