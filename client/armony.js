@@ -80,6 +80,7 @@ const I = {
   speaker: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="14" r="4"/><path d="M12 6h.01"/>',
   phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
   laptop: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/>',
+  headphones: '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3zM3 19a2 2 0 0 0 2 2h1v-6H3z"/>',
   home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   lib: '<path d="M4 4v16M9 4v16M14 5l5 15"/>',
   artist: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
@@ -1474,7 +1475,10 @@ function paintButtons() {
   NativeMedia.sync(); Live.publish();
 }
 let seeking = false;
-const rangeFill = el => { if (!el) return; el.style.setProperty('--p', ((el.value - (el.min || 0)) / ((el.max || 100) - (el.min || 0)) * 100) + '%'); if (el.id === 'seek') Wave.draw(); };
+const rangeFill = el => {
+  if (!el) return; const p = ((el.value - (el.min || 0)) / ((el.max || 100) - (el.min || 0)) * 100) + '%'; el.style.setProperty('--p', p);
+  if (el.id === 'seek') { Wave.draw(); $('#player').style.setProperty('--pp', p); }  // linea sottile del lettore piccolo
+};
 /* barra di avanzamento a onda, come i controlli multimediali di Android: la parte ascoltata è un'onda
    morbida che scorre mentre suona, somma di tre sinusoidi con lunghezze e velocità che non si ripetono
    insieme; in pausa si spegne in una linea dritta. Il disegno gira solo mentre serve. */
@@ -3082,6 +3086,64 @@ function nativeBack() {
   });
 }
 
+/* ================= telefono: barre di sistema, tastiera, lettore che si fa piccolo, cuffie =================
+   Tutto passa da attributi e variabili su <html>; le regole stanno in index.html (sezione del telefono).
+   Nell'app gli spazi veri delle barre e della tastiera li misura ArmonyInsets (ArmonyInsetsPlugin.java),
+   l'uscita audio la dice ArmonyMedia. Nel browser restano solo tastiera e lettore piccolo. */
+const Phone = {
+  out: null, nat: null, seen: false, full: 0, fullW: 0, ready: false,
+  init() {
+    const de = document.documentElement, plug = NATIVE ? window.Capacitor?.Plugins : null;
+    const ins = plug?.ArmonyInsets;
+    if (ins) {
+      const set = e => { if (!e) return; this.nat = e; de.style.setProperty('--nat-sat', (e.top || 0) + 'px'); de.style.setProperty('--nat-sab', (e.bottom || 0) + 'px'); this.viewport(); };
+      ins.addListener('insets', set); ins.get().then(set).catch(() => {});
+    }
+    const am = plug?.ArmonyMedia;
+    if (am?.output) {
+      am.addListener('output', o => this.output(o)); am.output().then(o => this.output(o)).catch(() => {});
+      setTimeout(() => this.ready = true, 3000);  // all'avvio niente avviso: le cuffie erano già lì
+    }
+    // tastiera: sparisce il lettore (con la barra delle sezioni) finché si scrive
+    const touch = matchMedia('(pointer:coarse)');
+    addEventListener('focusin', e => { if (touch.matches && this.editable(e.target)) { this.seen = false; this.kb(true); } });
+    addEventListener('focusout', () => setTimeout(() => { if (!this.editable(document.activeElement) && !this.nat?.ime) this.kb(false); }, 50));
+    addEventListener('resize', () => this.viewport());
+    window.visualViewport?.addEventListener('resize', () => this.viewport());
+    this.viewport();
+    // lettore piccolo: scendendo diventa una riga, salendo o in cima torna intero (le regole valgono solo ≤860 px)
+    let y0 = scrollY;
+    addEventListener('scroll', () => {
+      const y = scrollY, d = y - y0;
+      if (y < 40) this.mini(false); else if (d > 12) this.mini(true); else if (d < -12) this.mini(false); else return;
+      y0 = y;
+    }, { passive: true });
+  },
+  editable: el => !!el?.matches?.('input:not([type=range],[type=checkbox],[type=radio],[type=file],[type=button],[type=submit]),textarea,[contenteditable=""],[contenteditable=true]'),
+  kb(on) { document.documentElement.toggleAttribute('data-kb', on); if (on) this.mini(false); },
+  mini(on) { document.documentElement.toggleAttribute('data-mini', on); },
+  // tastiera aperta = la pagina si è accorciata mentre si scrive (o l'app dice che c'è); --kb è lo spazio
+  // da lasciare in fondo quando la tastiera copre la pagina invece di accorciarla
+  viewport() {
+    const vv = window.visualViewport, h = Math.min(innerHeight, vv ? vv.height : innerHeight);
+    if (innerWidth !== this.fullW) { this.fullW = innerWidth; this.full = 0; }
+    this.full = Math.max(this.full, h);
+    const over = vv ? Math.max(0, innerHeight - vv.height - vv.offsetTop) : 0;
+    document.documentElement.style.setProperty('--kb', Math.max(over, this.nat?.kb || 0) + 'px');
+    const open = !!this.nat?.ime || this.full - h > 150 && this.editable(document.activeElement);
+    if (open) { this.seen = true; this.kb(true); }
+    else if (this.seen) { this.seen = false; this.kb(false); }  // chiusa col tasto indietro, il campo resta a fuoco
+  },
+  // uscita audio (solo app): { kind: bluetooth | wired | usb | speaker, name }
+  output(o) {
+    const was = this.out; this.out = o && o.kind !== 'speaker' ? o : null;
+    if (this.out && this.ready && (!was || was.name !== this.out.name)) toast(this.out.kind === 'bluetooth' ? `Cuffie collegate: ${this.short()}` : `${this.label()}: la musica esce da lì.`, 2600);
+    Live.pill();
+  },
+  short() { return this.out?.name || (this.out?.kind === 'usb' ? 'USB' : 'Cuffie'); },
+  label() { const o = this.out; return !o ? '' : o.kind === 'bluetooth' ? `Cuffie Bluetooth${o.name ? ': ' + o.name : ''}` : o.kind === 'wired' ? 'Cuffie con filo' : `Audio USB${o.name ? ': ' + o.name : ''}`; }
+};
+
 /* ================= dal vivo: un solo dispositivo suona, gli altri sono telecomandi (/api/live) =================
    Tutti i dispositivi dello stesso utente tengono aperto un canale SSE col server. Chi suona pubblica brano,
    play/pausa e posizione; quando un dispositivo comincia a suonare gli altri si fermano e diventano telecomandi:
@@ -3215,9 +3277,10 @@ const Live = {
   pill() {
     const pill = $('#livePill'); if (!pill) return;
     const remote = this.remote();
-    pill.hidden = !this.devices.size;
+    const hp = !remote && Phone.out;  // cuffie di questo telefono (solo app)
+    pill.hidden = !this.devices.size && !hp;
     pill.classList.toggle('on', remote);
-    pill.innerHTML = `${ic('speaker')}<span>${esc(remote ? this.devices.get(this.target) || '…' : P.solo ? 'Per conto suo' : 'Qui')}</span>`;
+    pill.innerHTML = `${ic(hp ? 'headphones' : 'speaker')}<span>${esc(remote ? this.devices.get(this.target) || '…' : (P.solo ? 'Per conto suo' : 'Qui') + (hp ? ' · ' + Phone.short() : ''))}</span>`;
     pill.setAttribute('aria-label', remote ? `In riproduzione su ${this.devices.get(this.target)}: scegli dove suona` : 'Dove suona');
   },
   paint() {
@@ -3231,7 +3294,7 @@ const Live = {
     const d = $('#dlg'); d.className = 'sheet';
     const here = !this.remote(), mine = { track: S.queue[S.index] && wire(S.queue[S.index]), playing: !Engine.el.paused, solo: P.solo };
     const row = (id, name, st, cur) => `<button class="mi${cur ? ' on' : ''}" data-dev="${esc(id)}">${ic(id === S.device ? (NATIVE || /Android|iPhone|Mobile/.test(navigator.userAgent) ? 'phone' : 'laptop') : 'speaker')}
-      <span class="grow"><b>${esc(name)}${id === S.device ? ' · questo' : ''}</b><small>${st?.track ? `${st.playing ? 'Suona' : 'In pausa'}: ${esc(st.track.title)}` : 'Pronto'}${st?.solo ? ' · per conto suo' : ''}</small></span>${cur ? ic('check') : ''}</button>`;
+      <span class="grow"><b>${esc(name)}${id === S.device ? ' · questo' : ''}</b><small>${id === S.device && Phone.out ? esc(Phone.label()) + ' · ' : ''}${st?.track ? `${st.playing ? 'Suona' : 'In pausa'}: ${esc(st.track.title)}` : 'Pronto'}${st?.solo ? ' · per conto suo' : ''}</small></span>${cur ? ic('check') : ''}</button>`;
     d.innerHTML = `<div class="head"><span style="min-width:0"><b style="display:block">Dove suona</b><small style="color:var(--muted)">La musica si sposta sul dispositivo che scegli, dallo stesso punto.</small></span></div>
       ${row(S.device, this.name(), mine, here)}${[...this.devices].map(([id, n]) => row(id, n, this.states.get(id), !here && this.target === id)).join('')}
       <label class="check" style="padding:12px 14px 6px;border-top:1px solid var(--line);margin-top:6px"><input type="checkbox" id="liveSolo" ${P.solo ? 'checked' : ''}><span>Questo dispositivo suona per conto suo<small>Sganciato: non si ferma quando suona un altro tuo dispositivo e non lo ferma. Potete ascoltare cose diverse insieme.</small></span></label>`;
@@ -3335,7 +3398,7 @@ async function boot() {
   addEventListener('offline', () => toast('Sei offline: puoi ascoltare i brani salvati.'));
   navigator.connection?.addEventListener?.('change', fillSelectors);
   if ('serviceWorker' in navigator && /^https?:/.test(location.protocol) && !NATIVE) navigator.serviceWorker.register('sw.js').catch(() => {});
-  NativeMedia.init(); if (NATIVE) { nativeBack(); AppUpdate.init(); }
+  NativeMedia.init(); Phone.init(); if (NATIVE) { nativeBack(); AppUpdate.init(); }
   Jam.init();
   route();
   setTimeout(resolvePending, 8000);
