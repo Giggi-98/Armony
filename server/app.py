@@ -1042,20 +1042,21 @@ def health():
 
 
 # ------------------------------------------------------------------ spazio su disco
-# contare i file di una libreria grande costa: si conta in un thread, al massimo ogni 10 minuti
+# contare i file di una libreria grande costa: si conta in un thread, al massimo ogni 2 minuti
 spazio_cache = {"at": 0, "dati": None, "busy": False}
 
 
 def cartella(path):
-    n = tot = 0
+    n = songs = tot = 0
     for root, _dirs, files in os.walk(path):
         for f in files:
             try:
                 tot += os.path.getsize(os.path.join(root, f))
                 n += 1
+                songs += f.rsplit(".", 1)[-1].lower() in UPLOAD_AUDIO  # copertine e testi non sono brani
             except OSError:
                 pass
-    return {"bytes": tot, "files": n}
+    return {"bytes": tot, "files": n, "songs": songs}
 
 
 def conta_spazio():
@@ -1069,7 +1070,7 @@ def conta_spazio():
 @app.get("/api/spazio")
 def spazio():
     d = shutil.disk_usage(MUSIC_DIR)
-    if time.time() - spazio_cache["at"] > 600 and not spazio_cache["busy"]:
+    if time.time() - spazio_cache["at"] > 120 and not spazio_cache["busy"]:
         spazio_cache["busy"] = True
         threading.Thread(target=conta_spazio, daemon=True).start()
     c = spazio_cache["dati"] or {}

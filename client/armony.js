@@ -453,11 +453,12 @@ function vInvite(code) {
 const navStack = [location.hash];
 addEventListener('hashchange', () => { if (navStack.at(-2) === location.hash) navStack.pop(); else navStack.push(location.hash); if (navStack.length > 50) navStack.shift(); });
 function goBack() { if (navStack.length > 1) history.back(); else location.hash = '#/libreria'; }
-function lPhero({ kind, title, art = '', round = false, meta = '', tile = '', ph }) {
+// aside: riquadro a destra dell'intestazione, solo su schermo largo (CSS)
+function lPhero({ kind, title, art = '', round = false, meta = '', tile = '', ph, aside = '' }) {
   const url = ph ? coverUrl(ph, 300) : '';
   if (url) Glow.colors(url).then(c => { const el = $('#view .phero'); if (el && Glow.usable(c)) el.style.setProperty('--ph', Glow.tone(c.c1, .55, c.neutral)); });
   return `<header class="phero${round ? ' round' : ''}"${tile.startsWith('#') ? ` style="--ph:${tile}"` : ''}><button class="ph-back" data-act="goback" aria-label="Indietro" title="Indietro">${ic('chevl')}</button><div class="phero-art${tile ? ' tile' : ''}"${tile ? ` style="--tile:${tile}"` : ''}>${art}</div>
-    <div class="phero-txt"><span class="phero-kind">${kind}</span><h1 class="phero-title">${esc(title)}</h1>${meta ? `<p class="phero-meta">${meta}</p>` : ''}</div></header>`;
+    <div class="phero-txt"><span class="phero-kind">${kind}</span><h1 class="phero-title">${esc(title)}</h1>${meta ? `<p class="phero-meta">${meta}</p>` : ''}</div>${aside ? `<div class="ph-aside">${aside}</div>` : ''}</header>`;
 }
 // barra azioni: play grande, poi icone; il resto nel foglio "⋯" (lMore)
 let lMoreItems = [];
@@ -635,11 +636,14 @@ async function vArtist(id) {
   Glow.show(coverUrl(a.coverArt || arr(a.album)[0]?.coverArt, 300), 'album');
   const albums = arr(a.album), sim = arr(info?.similarArtist).filter(x => x.id);
   const img = info?.largeImageUrl ? `<img src="${esc(info.largeImageUrl)}" alt="" onerror="this.remove()">` : imgTag(a.coverArt, 500);
-  view.innerHTML = lPhero({ kind: 'Artista', title: a.name, ph: a.coverArt, art: img, round: true, meta: `${albums.length} album${top.length ? ` · ${top.length} brani popolari` : ''}` }) +
+  const aside = bio ? `<h3>Informazioni</h3><p class="lbio" id="phBio">${esc(bio)}</p>${bio.length > 320 ? '<button class="lmorebtn" id="phBioMore">Leggi tutto</button>' : ''}` : '';
+  view.innerHTML = lPhero({ kind: 'Artista', title: a.name, ph: a.coverArt, art: img, round: true, aside, meta: `${albums.length} album${top.length ? ` · ${top.length} brani popolari` : ''}` }) +
     lActionBar({ play: { act: 'artistall', data: { id }, label: 'Riproduci tutto' }, shuffle: { act: 'artistradio', data: { id, name: a.name }, icon: 'radio', label: 'Radio dell\'artista' }, offline: false, addpl: false }) +
     (top.length ? `<h2>Popolari</h2><div class="ltop" id="lTop">${songList(top)}</div>${top.length > 5 ? `<button class="lmorebtn" id="lTopMore">Mostra altri</button>` : ''}` : '') +
     `<div id="lDisco">${discoHtml(albums, early?.[0])}</div><div id="lSim">${simHtml(sim, early?.[0], early?.[1])}</div>` +
-    (bio ? `<h2>Informazioni</h2><p class="lbio">${esc(bio.slice(0, 700))}${bio.length > 700 ? '…' : ''}</p>` : '');
+    (bio ? `<div class="bio-bottom"><h2>Informazioni</h2><p class="lbio">${esc(bio.slice(0, 700))}${bio.length > 700 ? '…' : ''}</p></div>` : '');
+  const bm = $('#phBioMore');
+  if (bm) bm.onclick = () => { const on = $('#phBio').classList.toggle('all'); bm.textContent = on ? 'Mostra meno' : 'Leggi tutto'; };
   const more = $('#lTopMore');
   if (more) more.onclick = () => { const t = $('#lTop'); t.classList.toggle('all'); more.textContent = t.classList.contains('all') ? 'Mostra meno' : 'Mostra altri'; };
   const got = early || await dzP; if (!got || stale(n)) return;
@@ -1010,6 +1014,7 @@ async function vPlaylist(id) {
       !srv().local && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: p.name } },
       { act: 'exportpl', label: 'Esporta (M3U, JSON, CSV)', icon: 'down', data: { id } },
       { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
+      !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
       { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
     `<div id="lList">${songList(songs, empty)}</div>`;
   view.dataset.pl = id;
@@ -2320,7 +2325,15 @@ async function importPlaylist() {
       // in attesa: solo ciò che serve a riconoscerli quando arrivano in libreria
       const slim = it => ({ title: it.title, artist: it.artist, artists: it.artists, album: it.album, duration: it.duration, isrc: it.isrc });
       const pend = store.get('pending', []);
-      for (const rp of report) if (rp.pid && rp.miss.length) pend.push({ pid: rp.pid, sid: S.active, name: rp.title, items: rp.miss.map(slim), created: Date.now() });
+      // una sola nota per playlist: reimportare lo stesso CSV non deve aggiungere i brani più volte
+      const kOf = it => it.isrc || cleanTxt((it.artists?.[0] || it.artist || '') + ' ' + it.title);
+      for (const rp of report) if (rp.pid && rp.miss.length) {
+        let e = pend.find(x => x.pid === rp.pid && x.sid === S.active);
+        if (!e) pend.push(e = { pid: rp.pid, sid: S.active, name: rp.title, items: [], created: Date.now() });
+        const have = new Set(e.items.map(kOf));
+        for (const it of rp.miss.map(slim)) if (!have.has(kOf(it))) { have.add(kOf(it)); e.items.push(it); }
+        e.created = Date.now();
+      }
       store.set('pending', pend);
       d.close(); toast(`${r.added} download in coda${r.skipped ? `, ${r.skipped} già in coda` : ''}. Li aggiungo alle playlist quando sono pronti.`); location.hash = '#/scarica';
     } catch (e) { toast(e.message); }
@@ -2338,7 +2351,14 @@ async function resolvePending() {
       if (budget-- <= 0) { still.push(it); continue; }
       try { const m = await matchTrack(it, s); m ? ids.push(m.id) : still.push(it); } catch { still.push(it); }
     }
-    if (ids.length) { try { await addSongsToPlaylist(p.pid, ids, p.sid); added += ids.length; } catch { still.push(...p.items.filter((_, i) => i < ids.length)); } }
+    if (ids.length) {
+      try {
+        const have = new Set(arr((await api('getPlaylist', { id: p.pid }, s)).playlist?.entry).map(x => x.id));
+        const add = [...new Set(ids)].filter(x => !have.has(x));
+        if (add.length) await addSongsToPlaylist(p.pid, add, p.sid);
+        added += add.length;
+      } catch { still.push(...p.items.filter((_, i) => i < ids.length)); }
+    }
     p.items = still;
   }
   pend = pend.filter(p => p.items.length && Date.now() - p.created < 14 * 864e5); store.set('pending', pend);
@@ -2687,7 +2707,7 @@ async function refreshSpazio() {
   if (s?.session && s.me?.caps?.includes('spazio')) {
     try {
       const d = await srvApi(s, '/api/spazio'), m = d.music?.bytes || 0, v = d.videos?.bytes || 0;
-      srvHtml = `<div><h3>Server ${esc(s.name)}</h3><p class="sub">${bytes(d.used)} occupati su ${bytes(d.total)}${d.music ? ` · ${d.music.files} file di musica` : ''}${d.counting && !d.music ? ' · sto contando la musica…' : ''}</p>
+      srvHtml = `<div><h3>Server ${esc(s.name)}</h3><p class="sub">${bytes(d.used)} occupati su ${bytes(d.total)}${d.music ? ` · ${(d.music.songs ?? d.music.files).toLocaleString('it-IT')} ${d.music.songs != null ? 'brani' : 'file di musica'}` : ''}${d.counting && !d.music ? ' · sto contando la musica…' : ''}</p>
         ${spazioBar(d.total, [{ v: m, l: 'Musica', c: 'var(--accent)' }, { v: v, l: 'Video', c: 'var(--sage)' }, { v: Math.max(0, d.used - m - v), l: 'Altro', c: 'var(--muted)' }], d.free)}</div>`;
       if (d.counting && !d.music) setTimeout(refreshSpazio, 4000);
     } catch { srvHtml = `<div><h3>Server ${esc(s.name)}</h3><p class="sub">Il server non risponde.</p></div>`; }
@@ -3094,6 +3114,17 @@ view.addEventListener('click', async e => {
           <div class="row"><button class="btn primary" id="eSave">Salva</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div></div>`;
         $('#eSave').onclick = async () => { await api('updatePlaylist', { playlistId: id, name: $('#eName').value.trim() || m.name, comment: $('#eCom').value, public: $('#ePub').checked }); d.close(); route(); };
         d.showModal(); break;
+      }
+      case 'dedupepl': {
+        // la playlist si riscrive con i brani che esistono, ognuno una volta: spariscono anche le voci di file non più in libreria
+        const p = (await api('getPlaylist', { id })).playlist, all = arr(p?.entry), seen = new Set(), keep = all.filter(x => !seen.has(x.id) && seen.add(x.id));
+        const dead = Math.max(0, (p?.songCount || 0) - all.length), dup = all.length - keep.length;
+        if (!dup && !dead) { toast('Nessun doppione in questa playlist.'); break; }
+        if (!confirm(`Togliere ${dup} doppioni${dead ? ` e ${dead} voci di brani non più in libreria` : ''}? Restano ${keep.length} brani, nello stesso ordine.`)) break;
+        const ids = keep.map(x => x.id);
+        await api('createPlaylist', { playlistId: id, songId: ids.slice(0, 200) }, srv(), true);
+        if (ids.length > 200) await addSongsToPlaylist(id, ids.slice(200), S.active);
+        toast(`Fatto: ${keep.length} brani.`); emit('playlists'); route(); break;
       }
       case 'delpl': if (confirm('Eliminare questa playlist? I brani restano in libreria.')) { await api('deletePlaylist', { id }); location.hash = '#/playlist'; } break;
       case 'upclear': Up.list = Up.list.filter(u => ['in coda', 'in corso'].includes(u.status)); upRender(); break;
