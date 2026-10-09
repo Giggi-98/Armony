@@ -17,7 +17,8 @@ armony/
 ├── .env.example         password e nome del server: copialo in .env
 ├── VERSION              versione installata
 ├── musica/              ← i vostri file musicali
-└── video/               ← i video scaricati
+├── video/               ← i video scaricati
+└── federati/            ← brani copiati dai server collegati
 ```
 
 ## Installazione
@@ -69,7 +70,7 @@ In alternativa: un dominio con Caddy davanti alla porta 8080 (HTTPS automatico),
 - **Visualizzatore** circolare attorno al disco.
 - **Radio da un brano o da un artista**, basata su brani simili, genere e popolarità.
 - **Mix pronti**: casuale, preferiti, "Riscoperte" (brani che non ascolti da almeno due mesi), per decennio, per genere.
-- **Amici**: chi sta ascoltando cosa in tempo reale, con un tasto per ascoltarlo anche tu.
+- **Amici, dal vivo**: vedi chi sta ascoltando cosa sul server mentre succede. Sul computer c'è "In ascolto ora" nella barra laterale; sul telefono le "storie" in cima alla Home (anello ambra = sta suonando) e un puntino su Altro. Se qualcuno ascolta proprio il brano, l'album o l'artista che hai aperto, lo vedi accanto al titolo. Nella pagina Amici c'è anche **Attività**: download, caricamenti, playlist pubbliche e Jam degli amici, in tempo reale. "Ascolta anche tu" fa partire lo stesso brano dallo stesso punto. Le Jam private si annunciano solo come "ha avviato una Jam" e le playlist private non compaiono. Per non comparire spegni Impostazioni → Profilo → «Mostra agli altri cosa ascolto e cosa faccio»: gli altri li vedi comunque. Serve "Un solo dispositivo suona, gli altri lo comandano" acceso.
 - Biografie, artisti simili e brani più popolari nella pagina di ogni artista.
 
 ### Jam: ascoltare insieme
@@ -124,7 +125,7 @@ Dal menu di un brano ("Elimina dal server") o dalla pagina dell'album ("Elimina 
 - Serve il permesso di caricamento, attivo per tutti finché l'amministratore non lo toglie. Limite di 1 GB per file. Tieni aperta la pagina finché il caricamento non finisce.
 
 ### Playlist, importazione ed esportazione
-- Playlist condivise con tutti gli utenti del server, con descrizione.
+- Playlist condivise con tutti gli utenti del server, con descrizione. **Togli doppioni** (nel menu ⋯ della playlist) toglie i brani ripetuti e le voci di file non più in libreria, così il numero di brani torna giusto.
 - **Importa da Spotify**: esporta le tue playlist con Exportify (exportify.app) e importa i CSV, anche tutti insieme: ogni file diventa una playlist (se esiste già, vi si aggiungono solo i brani mancanti, quindi si può rifare). Armony riconosce i brani che hai già da titolo, artisti e durata, poi **cerca, scarica e aggiunge da solo i mancanti** appena sono pronti, una volta sola anche se stanno in più playlist. I brani scaricati arrivano già ordinati: titolo, tutti gli artisti, album, artista dell'album, data d'uscita, numero di traccia, generi, etichetta e copertina (dal CSV, completati con Deezer), in `Spotify/<artista>/<album>/<NN - titolo>`; la ricerca online guarda i primi risultati e sceglie il migliore (durata più vicina, audio ufficiale di YouTube Music, niente live o cover non richiesti), e scarica comunque il migliore anche se la durata non coincide al secondo. Funziona anche con M3U e JSON.
 - **In tempo reale**: con una playlist o un album aperti, i brani appena aggiunti o scaricati compaiono da soli (subito se li aggiungi tu, entro 20 secondi se arrivano da un altro dispositivo o da un download).
 - Esporta in M3U, JSON o CSV.
@@ -147,6 +148,11 @@ In Impostazioni → **Spazio** vedi quanto è pieno il disco del server in uso (
 Se nel sistema è attivo «Riduci movimento», Armony lo rispetta: niente dischi che girano né elementi in volo, solo dissolvenze.
 
 "In riproduzione", album e artisti prendono la luce dei colori della copertina; se un brano non ha testo, al suo posto compaiono i prossimi brani.
+
+## Collegare i server degli amici
+Se anche un amico ha Armony, potete collegare i vostri server: in Cerca, sotto i tuoi risultati, compare "Nella rete" con i brani che hanno loro, e anche gli amici dei vostri amici. Li ascolti subito (passano dal tuo server) e con "Copia" li metti nella tua libreria, nella cartella `federati/` (in Navidrome è la libreria "Dalla rete"). La pagina **Rete** mostra la mappa: il tuo server, quelli collegati e quelli che si vedono passando da loro, con quanti brani hanno.
+
+Per collegare: in Impostazioni → Librerie collegate (serve l'amministratore di Navidrome inserito in Utenti → Registrazione) uno dei due crea un invito e lo manda all'altro, che lo incolla in "Incolla un invito". Chi ha creato l'invito accetta la richiesta: prima confrontate il codice di sicurezza (cinque simboli), che deve essere uguale sui due schermi. I due server devono raggiungersi: stessa rete, Tailscale o un indirizzo HTTPS. Lì scegli anche se la tua libreria è visibile agli amici degli amici e quanto lontano cercare.
 
 ## Far entrare un amico
 In Impostazioni → Utenti → Registrazione inserisci una volta utente e password dell'amministratore di Navidrome (restano sul server, mai sul telefono). Con "Con invito" crei un codice e lo mandi (link o QR): l'amico apre il link, o nell'app scrive indirizzo del server e codice, sceglie nome e password ed entra subito, come utente normale. "Aperta" fa registrare chiunque raggiunga il server; "Chiusa" la spegne. Chi ha già un account sceglie "Accedi". L'amministratore resta uno solo.
@@ -191,4 +197,4 @@ Navidrome funziona anche con app già pronte, collegate allo stesso server e all
 **I link condivisi non si aprono da fuori.** Nelle impostazioni del server, sotto "Avanzate", inserisci l'indirizzo pubblico del server.
 
 ## Una nota sui diritti
-Scaricare da YouTube va contro i suoi termini di servizio, e condividere musica protetta tra persone diverse non rientra nella copia privata, anche senza scopo di lucro. Il download è perfetto per musica libera, registrazioni vostre e contenuti che gli autori distribuiscono gratuitamente. Valutate voi come usarlo.
+Scaricare da YouTube va contro i suoi termini di servizio, e condividere musica protetta tra persone diverse non rientra nella copia privata, anche senza scopo di lucro. Il download è perfetto per musica libera, registrazioni vostre e contenuti che gli autori distribuiscono gratuitamente. Valutate voi come usarlo. Lo stesso vale per i brani ascoltati o copiati dai server collegati.

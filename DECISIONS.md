@@ -27,6 +27,30 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-09 — Federazione, fase "mappa": ricerca fra amici degli amici e ascolto a distanza prima della copia
+
+**Contesto:** l'utente vuole una mappa live delle librerie sue e degli amici: server sempre collegati, ognuno di un proprietario, ricerca dei brani già presenti sui server agganciati, ascolto subito e copia a richiesta.
+**Scelta:** ribalta «niente condivisione transitiva» e «l'ascolto a distanza nella fase 3» di *Federazione: forma generale* (2026-10-08). La ricerca e l'ascolto passano di server in server fino a N salti (predefinito 2), ma ogni server sceglie se la sua libreria è visibile agli amici degli amici (predefinito sì), non inoltra mai per nodi non collegati e ogni risultato dice da chi passa. I file copiati restano fuori dal catalogo (niente ricondivisione dei file). Ogni nodo espone un catalogo leggero (niente percorsi) con le differenze per versione; i vicini lo tengono in cache, la ricerca oltre i vicini si inoltra (ttl, rid, 3 s). Ascolto tramite il proprio server, a catena, con Range; copia di singoli brani in `federati/<server>/` verificata con sha256. Firme Ed25519 anche sulle risposte JSON. Codice in `server/federazione.py`, primo modulo separato da `app.py` (cambia la scelta implicita "server in un file", come previsto da `docs/FEDERAZIONE.md` §10). Una sola libreria Navidrome "Dalla rete".
+**Alternative scartate:** copiare i cataloghi di tutti gli amici degli amici (dati di chi non conosco su ogni server, aggiornamenti a cascata); restare ai soli collegamenti diretti (non dà la mappa chiesta); ascolto direttamente dal client verso il server dell'amico (CORS, credenziali in giro, niente amici degli amici); catalogo letto dal DB di Navidrome (meno stabile fra versioni); una libreria Navidrome per server (permessi per utente e per libreria da gestire subito, senza abbonamenti che li richiedano).
+**Conseguenze:** un server acceso fa da passaggio per l'audio degli amici dei suoi amici (banda e thread di waitress); un server spento si vede nella mappa ma i suoi brani non si ascoltano; i cataloghi in cache possono essere indietro fino a 10 minuti; la musica copiata la vedono tutti gli utenti del server. Il nuovo volume `federati/` nel compose fa ricreare anche Navidrome al primo aggiornamento. Con "Questo telefono" in uso la rete passa dal server di backup.
+**Da rivedere se:** la rete supera qualche decina di server o i passaggi pesano sulla banda di chi sta in mezzo (allora: collegamenti diretti a richiesta, o niente audio a catena oltre un salto); serve visibilità per utente.
+
+## 2026-10-09 — Presenza e attività sul canale dal vivo, privacy decisa dal server
+
+**Contesto:** si vuole vedere ovunque nell'app chi sul server ascolta cosa e cosa fa, in tempo reale; prima c'era solo getNowPlaying a intervalli nella pagina Amici.
+**Scelta:** presenza (`presence`) e attività (`activity`) viaggiano sullo stesso SSE `/api/live` di ogni dispositivo, mandate a tutti gli utenti collegati; il server inoltra la presenza solo a un cambio di brano, a play/pausa o a un salto oltre 8 s, il client stima l'avanzamento. Attività in memoria (ultime 50), raggruppate se ravvicinate. Preferenza "mostra agli altri" in `settings` (`nascondi:<utente>`), applicata dal server. Playlist solo se pubbliche (verificate con getPlaylist come l'utente); Jam solo "ha avviato una Jam", col nome solo se visibile.
+**Alternative scartate:** un secondo canale SSE (un thread di waitress in più per dispositivo); getNowPlaying a intervalli (ritardo, niente attività); filtro della privacy nel client di chi guarda (i dati arriverebbero comunque); la preferenza dentro `/api/prefs` (non arriva al server se la sincronizzazione è spenta); una migrazione nuova (collisione con i lavori in parallelo).
+**Conseguenze:** senza "Un solo dispositivo suona…" (Live spento) non si vede né si è visti. Un dispositivo chiuso male resta "in ascolto" fino a 45 s (fino a 120 s col solo battito). Attività perse al riavvio del server. Spegnere la privacy cancella le proprie attività recenti.
+**Da rivedere se:** i dispositivi collegati diventano tanti che inoltrare a tutti pesa, o serve uno storico delle attività che sopravviva al riavvio.
+
+## 2026-10-09 — Brani in attesa di una playlist: una nota per playlist, controllo all'arrivo
+
+**Contesto:** reimportando lo stesso CSV (dopo la risistemazione della libreria) ogni importazione lasciava la sua nota "aggiungi questi brani quando arrivano": all'arrivo i brani entravano tre volte (Aether GG: 714 voci, 332 brani diversi).
+**Scelta:** le note in attesa si uniscono per playlist e server, senza ripetere un brano; all'arrivo si aggiunge solo ciò che la playlist non ha. Per le playlist già sporche, "Togli doppioni" la riscrive (`createPlaylist` con `playlistId`) con i brani esistenti, una volta ciascuno, nello stesso ordine; spariscono anche le voci di file non più in libreria, che Navidrome contava nel totale.
+**Alternative scartate:** pulizia automatica senza chiedere (una playlist può contenere ripetizioni volute); togliere i doppioni con `songIndexToRemove` (gli indici di Navidrome includono le voci di file spariti, che getPlaylist non restituisce).
+**Conseguenze:** "Togli doppioni" toglie anche le ripetizioni volute.
+**Da rivedere se:** serve distinguere le ripetizioni volute da quelle accidentali.
+
 ## 2026-10-09 — App senza server: «Questo telefono» come server locale, file serviti dal WebViewClient
 
 **Contesto:** l'app Android deve funzionare senza server; il server diventa la copia.

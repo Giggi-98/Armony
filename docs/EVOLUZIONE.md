@@ -263,6 +263,11 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.16.0 (2026-10-09)**: federazione fase "mappa" (server collegati, ricerca
+"Nella rete" anche fra amici degli amici, ascolto tramite il proprio server,
+copia in `federati/`, pagina Rete); presenza e attività dal vivo; playlist
+senza doppioni; Spazio conta i brani; informazioni dell'artista a destra.
+
 **0.15.0 (2026-10-09)**: app Android anche senza server (musica del telefono,
 playlist e statistiche locali, copia automatica sul server). 0.14.1–0.14.2:
 cuffie (pausa allo stacco), Risincronizza, Spazio, coda dei download
