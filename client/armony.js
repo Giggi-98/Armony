@@ -428,46 +428,62 @@ function vInvite(code) {
 }
 
 /* ================= viste: libreria ================= */
+// ---- Home e Cerca: accesso rapido, mix, scaffali; Sfoglia con riquadri colorati ----
+// tavolozza dei riquadri: colori saturi che reggono testo bianco, scelti per nome (lo stesso nome ha sempre lo stesso colore)
+const TILE_HUES = ['#d1345b', '#2d46b9', '#8d4fc2', '#c2560a', '#16825d', '#2f7fd6', '#c93b1d', '#3f7f98', '#a0522d', '#5b3fd1', '#b8457f', '#1f8a8a', '#7a3fa0', '#b07a12', '#386641', '#c0392b'];
+const tileHue = name => TILE_HUES[[...String(name)].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % TILE_HUES.length];
+// titolo di sezione con "Mostra tutto" verso la libreria con l'ordinamento giusto
+const secHead = (title, sort) => `<div class="hsec"><h2>${title}</h2>${sort ? `<button class="hsec-more" data-act="showall" data-sort="${sort}">Mostra tutto</button>` : ''}</div>`;
 async function vHome() {
   if (!srv()) return noServer();
   const s = srv();
   if (!navigator.onLine) { location.hash = '#/offline'; return; }
   const n = Scene.nav;
-  const [nw, rnd, freq, recent, genres] = await Promise.all([
+  const [nw, rnd, freq, recent] = await Promise.all([
     api('getAlbumList2', { type: 'newest', size: 18 }),
-    api('getAlbumList2', { type: 'random', size: 12 }),
-    api('getAlbumList2', { type: 'frequent', size: 14 }).catch(() => null),
-    api('getAlbumList2', { type: 'recent', size: 14 }).catch(() => null),
-    api('getGenres').catch(() => null)
+    api('getAlbumList2', { type: 'random', size: 18 }),
+    api('getAlbumList2', { type: 'frequent', size: 18 }).catch(() => null),
+    api('getAlbumList2', { type: 'recent', size: 18 }).catch(() => null)
   ]);
   if (stale(n)) return;
-  const g = arr(genres?.genres?.genre).sort((a, b) => b.songCount - a.songCount).slice(0, 18);
+  const L = x => arr(x?.albumList2?.album);
   const hour = new Date().getHours();
   const hello = hour < 6 ? 'Buonanotte' : hour < 13 ? 'Buongiorno' : hour < 18 ? 'Buon pomeriggio' : 'Buonasera';
-  view.innerHTML = `<h1>${hello}, ${esc(P.nick || s.user)}</h1><p class="sub">Stai ascoltando da ${esc(s.name)}.</p>
+  // accesso rapido: gli ultimi ascoltati, completati con i più ascoltati e i nuovi, senza doppioni
+  const seen = new Set(), quick = [...L(recent), ...L(freq), ...L(nw)].filter(a => !seen.has(a.id) && seen.add(a.id)).slice(0, 8);
+  // decennio più presente fra gli album più ascoltati, per il suo mix
+  const byDec = L(freq).concat(L(recent)).reduce((m, a) => { if (a.year) { const d = Math.floor(a.year / 10) * 10; m[d] = (m[d] || 0) + 1; } return m; }, {});
+  const dec = Object.entries(byDec).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const mix = (act, title, sub, icon, hue, extra = '') => `<button class="hmix" data-act="${act}" ${extra} style="--h1:${hue}">
+    <span class="hmix-art">${ic(icon)}<b>${title}</b></span><span class="hmix-t"><b>${title}</b><small>${sub}</small></span></button>`;
+  view.innerHTML = `<h1 class="hhello">${hello}, ${esc(P.nick || s.user)}</h1>
     <div id="resume"></div><div id="friendsStrip"></div>
-    <div class="row" style="margin-bottom:6px">
-      <button class="btn primary" data-act="radio">${ic('shuffle')} Mix casuale</button>
-      <button class="btn" data-act="mixfav">${ic('heart')} Mix preferiti</button>
-      <button class="btn" data-act="mixforgot">${ic('radio')} Riscoperte</button>
-      <a class="btn" href="#/jam">${ic('jam')} Avvia una Jam</a>
+    ${quick.length ? `<div class="quick">${quick.map(a => `<div class="qk" data-act="album" data-id="${esc(a.id)}" role="link" tabindex="0">
+      <span class="qk-art">${imgTag(a.coverArt, 160)}</span><b>${esc(a.name)}</b>
+      <button class="qk-play" data-act="playalb" data-id="${esc(a.id)}" aria-label="Riproduci ${esc(a.name)}">${ic('play', true)}</button></div>`).join('')}</div>` : ''}
+    ${secHead('Fatti per te')}
+    <div class="hgrid shelf">
+      ${mix('radio', 'Mix casuale', 'Ottanta brani a caso da tutta la libreria', 'shuffle', '#d1345b')}
+      ${mix('mixfav', 'I tuoi preferiti', 'I brani col cuore, mescolati', 'heart', '#8d4fc2')}
+      ${mix('mixforgot', 'Riscoperte', 'Quello che non senti da almeno due mesi', 'radio', '#16825d')}
+      ${dec ? mix('decademix', `Anni ${String(dec).slice(2)}`, 'Il decennio che ascolti di più', 'album', '#c2560a', `data-y="${dec}"`) : ''}
+      <a class="hmix" href="#/jam" style="--h1:#2d46b9"><span class="hmix-art">${ic('jam')}<b>Jam</b></span><span class="hmix-t"><b>Avvia una Jam</b><small>Ascoltate insieme, ognuno dal suo telefono</small></span></a>
     </div>
-    ${arr(recent?.albumList2?.album).length ? `<h2>Ascoltati di recente</h2>${albumGrid(arr(recent.albumList2.album), { strip: true })}` : ''}
-    <h2>Aggiunti di recente</h2>${albumGrid(arr(nw.albumList2.album), { strip: true })}
-    ${arr(freq?.albumList2?.album).length ? `<h2>I più ascoltati</h2>${albumGrid(arr(freq.albumList2.album), { strip: true })}` : ''}
-    ${g.length ? `<h2>Generi</h2><div class="chips">${g.map(x => `<a class="chip" href="#/genere/${encodeURIComponent(x.value)}">${esc(x.value)} <small>${x.songCount}</small></a>`).join('')}</div>` : ''}
-    <h2>Per decennio</h2><div class="chips">${[1960, 1970, 1980, 1990, 2000, 2010, 2020].map(d => `<a class="chip" href="#/decennio/${d}">Anni ${String(d).slice(2)}</a>`).join('')}</div>
-    <h2>Da riscoprire</h2>${albumGrid(arr(rnd.albumList2.album))}`;
+    ${L(recent).length ? secHead('Ascoltati di recente', 'recent') + albumGrid(L(recent), { strip: true }) : ''}
+    ${secHead('Aggiunti di recente', 'newest')}${albumGrid(L(nw), { strip: true })}
+    ${L(freq).length ? secHead('I più ascoltati', 'frequent') + albumGrid(L(freq), { strip: true }) : ''}
+    ${secHead('Da riscoprire', 'random')}${albumGrid(L(rnd), { strip: true })}`;
   wireStrips();
   QSync.check().then(q => {
     if (!q || !$('#resume')) return;
-    $('#resume').innerHTML = `<div class="banner"><span class="grow">Stavi ascoltando <b>${esc(q.current.title)}</b> su un altro dispositivo${q.by ? ` (${esc(q.by)})` : ''}.</span>
-      <button class="btn primary" data-act="resumeq">Riprendi da ${fmt(q.position)}</button></div>`;
-    $('#resume').querySelector('button').onclick = () => { S.queue = q.tracks; playIndex(q.index, { startAt: q.position }); $('#resume').innerHTML = ''; };
+    $('#resume').innerHTML = `<div class="hbanner">${q.current.coverArt ? `<span class="hb-art">${imgTag(q.current.coverArt, 96, q.current.serverId)}</span>` : ''}
+      <span class="grow"><small>Su un altro dispositivo${q.by ? ` (${esc(q.by)})` : ''}</small><b>${esc(q.current.title)}</b></span>
+      <button class="btn sm primary" id="resumeBtn">${ic('play', true)} Riprendi da ${fmt(q.position)}</button></div>`;
+    $('#resumeBtn').onclick = () => { S.queue = q.tracks; playIndex(q.index, { startAt: q.position }); $('#resume').innerHTML = ''; };
   });
   friendsNow().then(list => {
     const box = $('#friendsStrip'); if (!box || !list.length) return;
-    box.innerHTML = `<div class="banner"><span class="grow">${list.slice(0, 3).map(f => `<b>${esc(f.username)}</b> sta ascoltando ${esc(f.title)}`).join(', ')}${list.length > 3 ? ` e altri ${list.length - 3}` : ''}.</span><a class="btn sm" href="#/amici">Vedi</a></div>`;
+    box.innerHTML = `<a class="hbanner" href="#/amici">${ic('friends')}<span class="grow"><small>Amici in ascolto</small><b>${list.slice(0, 2).map(f => `${esc(f.username)}: ${esc(f.title)}`).join(' · ')}${list.length > 2 ? ` e altri ${list.length - 2}` : ''}</b></span>${ic('chevr')}</a>`;
   });
 }
 async function vLibrary(tab = 'artisti') {
@@ -608,26 +624,80 @@ async function vDecade(y) {
   view.innerHTML = `<h1>Anni ${String(y).slice(2)}</h1><p class="sub">${al.length} album dal ${y} al ${y + 9}.</p>
     <div class="row" style="margin-bottom:18px"><button class="btn primary" data-act="decademix" data-y="${y}">${ic('shuffle')} Mix del decennio</button></div>${albumGrid(al)}`;
 }
+// ricerche recenti (solo su questo dispositivo): si salvano quando si apre o si ascolta un risultato
+const recentQ = {
+  get: () => store.get('searches', []),
+  add(q) { q = q.trim(); if (q.length < 2) return; store.set('searches', [q, ...this.get().filter(x => x.toLowerCase() !== q.toLowerCase())].slice(0, 12)); },
+  del(q) { store.set('searches', this.get().filter(x => x !== q)); }
+};
 async function vSearch() {
   if (!srv()) return noServer();
-  view.innerHTML = `<h1>Cerca</h1><p class="sub">Su ${esc(srv().name)}. Se un brano non c'è, puoi cercarlo online e scaricarlo.</p>
-    <input type="search" id="q" placeholder="Titolo, artista, album" autofocus aria-label="Cerca"><div id="res"></div>`;
+  const n = Scene.nav;
+  view.innerHTML = `<h1 class="hhello">Cerca</h1>
+    <label class="hsearch">${ic('search')}<input type="search" id="q" placeholder="Cosa vuoi ascoltare?" aria-label="Cerca brani, artisti, album" enterkeyhint="search" autocomplete="off"></label>
+    <div id="res"></div>`;
   let t;
   const q = $('#q'); q.value = sessionStorage.getItem('armony:q') || '';
+  if (!NATIVE && matchMedia('(pointer:fine)').matches) q.focus();
+  const L1 = r => arr(r?.albumList2?.album)[0];
+  const tile = (label, attrs, k) => `<a class="htile" ${attrs} data-k="${esc(k)}" style="--th:${tileHue(label)}" ${attrs.startsWith('href') ? '' : 'role="link" tabindex="0"'}><b>${esc(label)}</b><span class="ht-art"></span></a>`;
+  // aprire o ascoltare un risultato salva la ricerca fra le recenti
+  $('#res').addEventListener('click', e => {
+    if (q.value.trim().length >= 2 && e.target.closest('[data-act="album"],[data-act="artist"],[data-act="play"],[data-act="playalb"],[data-act="artistall"]')) recentQ.add(q.value);
+  }, true);
+  const browse = async () => {
+    const rq = recentQ.get();
+    const fixed = [['Aggiunti di recente', 'newest', 'newest'], ['Più ascoltati', 'frequent', 'frequent'], ['Preferiti', 'starred', null], ['A caso', 'random', 'random']];
+    $('#res').innerHTML = `${rq.length ? `<div class="hsec"><h2>Ricerche recenti</h2></div><div class="hrecent">${rq.map(x => `<span class="hrq"><button class="hrq-t" data-q="${esc(x)}">${ic('search')}<span>${esc(x)}</span></button><button class="hrq-x" data-rm="${esc(x)}" aria-label="Togli ${esc(x)} dalle ricerche recenti">${ic('close')}</button></span>`).join('')}</div>` : ''}
+      <div class="hsec"><h2>Sfoglia tutto</h2></div><div class="htiles" id="tiles">${fixed.map(([l, k, sort]) => tile(l, sort ? `data-act="showall" data-sort="${sort}"` : 'href="#/preferiti"', k)).join('')}</div>`;
+    $('#res').querySelectorAll('[data-q]').forEach(b => b.onclick = () => { q.value = b.dataset.q; run(); });
+    $('#res').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { recentQ.del(b.dataset.rm); browse(); });
+    // copertine dei riquadri fissi, poi generi e decenni con almeno un album
+    const cover = (k, al) => { const el = [...$$('#tiles .htile')].find(x => x.dataset.k === k)?.querySelector('.ht-art'); if (el && al?.coverArt) el.innerHTML = imgTag(al.coverArt, 200); };
+    fixed.forEach(([, k]) => api('getAlbumList2', { type: k, size: 1 }).then(r => cover(k, L1(r))).catch(() => {}));
+    const [gs, ...decs] = await Promise.all([api('getGenres').catch(() => null),
+      ...[1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020].map(y => api('getAlbumList2', { type: 'byYear', fromYear: y, toYear: y + 9, size: 1 }).then(r => [y, L1(r)]).catch(() => [y, null]))]);
+    if (stale(n) || q.value.trim().length >= 2 || !$('#tiles')) return;
+    const genres = arr(gs?.genres?.genre).filter(g => g.albumCount).sort((a, b) => b.songCount - a.songCount).slice(0, 16);
+    $('#tiles').insertAdjacentHTML('beforeend', genres.map(g => tile(g.value, `href="#/genere/${encodeURIComponent(g.value)}"`, 'g:' + g.value)).join('')
+      + decs.filter(([, a]) => a).map(([y]) => tile(`Anni ${String(y).slice(2)}`, `href="#/decennio/${y}"`, 'd:' + y)).join(''));
+    decs.forEach(([y, a]) => cover('d:' + y, a));
+    genres.forEach(g => api('getAlbumList2', { type: 'byGenre', genre: g.value, size: 1 }).then(r => cover('g:' + g.value, L1(r))).catch(() => {}));
+  };
   const run = async () => {
     const v = q.value.trim(); sessionStorage.setItem('armony:q', v);
-    if (v.length < 2) { $('#res').innerHTML = ''; return; }
+    if (v.length < 2) return browse();
     try {
-      if (!$('#res').children.length) $('#res').innerHTML = `<div class="sk-page" style="margin-top:18px">${SK.row.repeat(6)}</div>`;
+      if (!$('#res .hres')) $('#res').innerHTML = `<div class="sk-page" style="margin-top:18px">${SK.row.repeat(6)}</div>`;
       const r = (await api('search3', { query: v, songCount: 60, albumCount: 18, artistCount: 12 })).searchResult3;
-      const ar = arr(r.artist), al = arr(r.album), so = arr(r.song).map(x => norm(x));
-      $('#res').innerHTML =
-        (ar.length ? `<h2>Artisti</h2><div class="chips">` + ar.map(a => `<a class="chip" href="#/artista/${encodeURIComponent(a.id)}">${esc(a.name)}</a>`).join('') + '</div>' : '') +
-        (al.length ? `<h2>Album</h2>${albumGrid(al, { strip: true })}` : '') +
-        `<h2>Brani</h2>${so.length ? listActions() : ''}${songList(so, { empty: `Nessun brano trovato. <a href="#/scarica/cerca/${encodeURIComponent(v)}">Cerca "${esc(v)}" online</a>` })}`;
+      if (q.value.trim() !== v || stale(n)) return;  // nel frattempo si è scritto altro o cambiato pagina
+      const ar = arr(r.artist), al = arr(r.album), so = arr(r.song).map(x => norm(x)), V = cleanTxt(v);
+      if (!ar.length && !al.length && !so.length) {
+        $('#res').innerHTML = `<div class="empty hres"><h3>Nessun risultato per "${esc(v)}"</h3><p>Controlla come l'hai scritto, oppure cercalo online e scaricalo.</p>
+          <a class="btn primary" href="#/scarica/cerca/${encodeURIComponent(v)}">${ic('down')} Cerca "${esc(v)}" online</a></div>`;
+        return;
+      }
+      // risultato migliore: l'artista se il nome coincide con la ricerca, altrimenti il primo album, altrimenti il primo brano
+      const bestA = ar.find(a => cleanTxt(a.name) === V) || (ar[0] && cleanTxt(ar[0].name).startsWith(V) ? ar[0] : null);
+      const best = bestA ? { kind: 'Artista', name: bestA.name, img: imgTag(bestA.coverArt, 200), round: true, open: `data-act="artist" data-id="${esc(bestA.id)}"`, play: `data-act="artistall" data-id="${esc(bestA.id)}"` }
+        : al[0] ? { kind: 'Album', name: al[0].name, sub: al[0].artist, img: imgTag(al[0].coverArt, 200), open: `data-act="album" data-id="${esc(al[0].id)}"`, play: `data-act="playalb" data-id="${esc(al[0].id)}"` }
+        : { kind: 'Brano', name: so[0].title, sub: so[0].artist, img: imgTag(so[0].coverArt, 200, so[0].serverId), open: 'data-act="play" data-i="0"', play: 'data-act="play" data-i="0"' };
+      const top = so.slice(0, 4);
+      $('#res').innerHTML = `<div class="hres"><div class="hbest-wrap">
+        <section><div class="hsec"><h2>Risultato migliore</h2></div>
+          <div class="hbest" ${best.open} role="link" tabindex="0"><span class="hbest-art ${best.round ? 'round' : ''}">${best.img}</span>
+            <b>${esc(best.name)}</b><span class="hbest-meta">${best.sub ? `${esc(best.sub)} · ` : ''}<span class="hbest-kind">${best.kind}</span></span>
+            <button class="hbest-play" ${best.play} aria-label="Riproduci ${esc(best.name)}">${ic('play', true)}</button></div></section>
+        ${top.length ? `<section class="hbest-songs"><div class="hsec"><h2>Brani</h2>${so.length > 4 ? `<button class="hsec-more" id="allSongs">Mostra tutti (${so.length})</button>` : ''}</div><div id="songsBox">${songList(top)}</div></section>` : ''}
+        </div>
+        ${ar.length ? `<div class="hsec"><h2>Artisti</h2></div><div class="hgrid shelf">${ar.map(a => `<div class="hart" data-act="artist" data-id="${esc(a.id)}" role="link" tabindex="0"><span class="hart-img">${imgTag(a.coverArt, 300)}</span><b>${esc(a.name)}</b><small>Artista</small></div>`).join('')}</div>` : ''}
+        ${al.length ? `<div class="hsec"><h2>Album</h2></div>${albumGrid(al, { strip: true })}` : ''}</div>`;
+      wireStrips($('#res'));
+      $('#allSongs')?.addEventListener('click', e => { $('#songsBox').innerHTML = listActions() + songList(so); e.target.remove(); $('#res .hbest-wrap').classList.add('open'); });
     } catch (e) { $('#res').innerHTML = `<p class="sub">${esc(e.message)}</p>`; }
   };
-  q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 280); });
+  q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 260); });
+  q.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(t); run(); } });
   run();
 }
 async function vPlaylists() {
@@ -2432,6 +2502,8 @@ view.addEventListener('click', async e => {
   try {
     switch (act) {
       case 'album': location.hash = '#/album/' + encodeURIComponent(id); break;
+      case 'playalb': { const r = (await api('getAlbum', { id })).album; setQueue(arr(r.song).map(x => norm(x)), 0); break; }
+      case 'showall': sessionStorage.setItem('armony:asort', { recent: 'newest', newest: 'newest', frequent: 'frequent', random: 'random', starred: 'starred' }[el.dataset.sort] || 'newest'); location.hash = '#/libreria/album'; break;
       case 'artist': location.hash = '#/artista/' + encodeURIComponent(id); break;
       case 'openpl': location.hash = '#/playlist/' + encodeURIComponent(id); break;
       case 'play': setQueue(list, i); break;
