@@ -53,4 +53,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- aggiornamento dall'app: Android chiede comunque conferma all'utente (ArmonyUpdatePlugin.java) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- "Musica del telefono": chiesto solo quando la si attiva (ArmonyLibraryPlugin.java) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 </manifest>

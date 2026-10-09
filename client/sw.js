@@ -1,6 +1,6 @@
 /* Armony: rende l'app apribile anche senza rete. Musica e API non passano di qui. */
-const V = 'armony-v3';
-const SHELL = ['./', 'index.html', 'armony.js', 'jam.js', 'manifest.json', 'icon.svg', 'vendor/auto-animate.min.js'];
+const V = 'armony-v4';
+const SHELL = ['./', 'index.html', 'armony.js', 'jam.js', 'telefono.js', 'manifest.json', 'icon.svg', 'vendor/auto-animate.min.js'];
 self.addEventListener('install', e => e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 const put = (req, res) => { if (res.ok) { const c = res.clone(); caches.open(V).then(x => x.put(req, c)); } return res; };

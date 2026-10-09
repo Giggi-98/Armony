@@ -75,7 +75,7 @@ async function relayCode(a, b) {
 // un account sul server della Jam: serve per ascoltare "tramite il server" (ognuno scarica la musica da lì)
 const hasAccount = base => !!base && S.servers.some(s => absUrl(s.url) === absUrl(base) && (s.tok || s.pass));
 const serverLabel = base => { try { return new URL(base).host; } catch { return 'quel server'; } };
-const signalBase = () => (S.dl.url || absUrl(srv()?.url || '') || (!NATIVE && /^https?:/.test(location.protocol) ? location.origin : '')).replace(/\/+$/, '');
+const signalBase = () => (S.dl.url || (srv()?.url ? absUrl(srv().url) : '') || (!NATIVE && /^https?:/.test(location.protocol) ? location.origin : '')).replace(/\/+$/, '');
 
 /* ================= segnalazione tramite server (messaggi cifrati) ================= */
 class Signal {

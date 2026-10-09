@@ -156,7 +156,7 @@ const S = {
   device: store.get('device', null) || (() => { const d = 'armony-' + uid(5).toLowerCase(); store.set('device', d); return d; })(),
   lastList: [], me: {}
 };
-if (!S.servers.find(s => s.id === S.active)) S.active = S.servers[0]?.id || null;
+if (S.active !== 'telefono' && !S.servers.find(s => s.id === S.active)) S.active = S.servers[0]?.id || null;
 // credenziali Subsonic: si conserva token + sale, mai la password (che negli URL sarebbe leggibile)
 const subsonicCreds = pass => { const salt = uid(12); return { tok: md5(pass + salt), salt }; };
 function migrateCreds(list) {
@@ -168,13 +168,15 @@ migrateCreds(S.servers); store.set('servers', S.servers);
 // codice di accesso separato, usato solo finché il server non ha una sessione (server Armony 0.2 o precedenti)
 Object.defineProperty(S, 'dl', {
   get() {
-    const s = srv(); if (s?.session) return { url: absUrl(s.url), token: s.session };
+    const s = dlSrv(); if (s?.session) return { url: absUrl(s.url), token: s.session };
     const l = store.get('downloader', null); return l?.url && l?.token ? l : { url: '', token: '' };
   }
 });
-const access = () => srv()?.session ? srv().me || {} : S.dl.token ? { admin: true, upload: true, download: true } : {};
+const access = () => dlSrv()?.session ? dlSrv().me || {} : S.dl.token ? { admin: true, upload: true, download: true } : {};
+// con "Questo telefono" in uso download e caricamenti vanno al server del backup (telefono.js)
+const dlSrv = () => srv()?.local ? Local.target() : srv();
 if (P.theme !== 'auto') document.documentElement.dataset.theme = P.theme;
-const srv = id => S.servers.find(s => s.id === (id || S.active));
+const srv = id => (id || S.active) === 'telefono' ? (Local.on() ? Local.srv : undefined) : S.servers.find(s => s.id === (id || S.active));
 const key = t => t.serverId + ':' + t.id;
 const hex = s => [...new TextEncoder().encode(s)].map(b => b.toString(16).padStart(2, '0')).join('');
 const onMobileData = () => { const c = navigator.connection; return !!c && (c.type === 'cellular' || c.saveData); };
@@ -195,6 +197,7 @@ const apiBase = (s, method) => absUrl(s.url) + '/rest/' + method;
 const apiUrl = (s, method, params) => apiBase(s, method) + '?' + apiParams(s, params);
 async function api(method, params, s = srv(), post = false) {
   if (!s) throw new Error('Nessun server configurato. Aggiungine uno in Impostazioni.');
+  if (s.local) return Local.api(method, params);
   let r;
   try {
     r = post ? await fetch(apiBase(s, method), { method: 'POST', body: apiParams(s, params) })
@@ -217,8 +220,8 @@ const norm = (x, sid = S.active) => ({
 });
 // coverBust: dopo aver cambiato una copertina, l'indirizzo cambia e il browser non mostra quella vecchia dalla cache
 let coverBust = 0;
-const coverUrl = (coverArt, size = 300, sid) => { const s = srv(sid); return coverArt && s ? apiUrl(s, 'getCoverArt', { id: coverArt, size, ...(coverBust ? { v: coverBust } : {}) }) : ''; };
-const streamUrl = (t, q = activeQuality()) => apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params });
+const coverUrl = (coverArt, size = 300, sid) => { const s = srv(sid); return coverArt && s ? s.local ? Local.cover(coverArt, size) : apiUrl(s, 'getCoverArt', { id: coverArt, size, ...(coverBust ? { v: coverBust } : {}) }) : ''; };
+const streamUrl = (t, q = activeQuality()) => srv(t.serverId)?.local ? Local.stream(t.id) : apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params });
 const imgTag = (coverArt, size, sid) => { const u = coverUrl(coverArt, size, sid); return u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : ''; };
 
 /* ================= accesso ad Armony (sessione per utente, permessi dal ruolo Navidrome) ================= */
@@ -367,7 +370,7 @@ async function route() {
     console.error(e);
     if (stale(n)) return;
     view.innerHTML = `<div class="empty"><h3>Qualcosa non ha funzionato</h3><p>${esc(e.message)}</p>
-      <div class="row" style="justify-content:center"><button class="btn" onclick="route()">Riprova</button><a class="btn" href="#/impostazioni">Impostazioni</a>${Offline.keys.size ? '<a class="btn" href="#/offline">Ascolta offline</a>' : ''}</div></div>`;
+      <div class="row" style="justify-content:center"><button class="btn" onclick="route()">Riprova</button><a class="btn" href="#/impostazioni">Impostazioni</a>${Local.on() && !srv()?.local ? '<button class="btn" data-act="phone" data-do="use">Musica del telefono</button>' : Offline.keys.size ? '<a class="btn" href="#/offline">Ascolta offline</a>' : ''}</div></div>`;
   }
   if (!changed && r !== 'ora' && !stale(n)) window.scrollTo(0, 0);
 }
@@ -418,10 +421,13 @@ const listActions = (extra = '') => `<div class="row acts-row" style="margin-bot
   <button class="btn" data-act="offlineall">${ic('offline')} Offline</button>${extra}</div>`;
 function noServer() {
   const local = /^https?:/.test(location.protocol) && !NATIVE;
+  // nell'app si parte anche senza server, con la musica del telefono (telefono.js)
+  const ph = !!Local.p;
   view.innerHTML = `<h1>Benvenuto in Armony</h1><p class="sub">La musica della vostra compagnia, dai vostri server.</p>
-  <div class="empty"><h3>Collega il primo server</h3><p>Accedi con il tuo utente del server musicale, oppure creane uno se chi lo gestisce ti ha dato un invito.</p>
+  <div class="empty"><h3>${ph ? 'Da dove arriva la musica?' : 'Collega il primo server'}</h3><p>${ph ? 'Ascolta subito i brani che hai sul telefono, anche senza rete. Un server lo colleghi quando vuoi: ci salvi una copia della tua musica e da lì prendi quella degli amici.' : 'Accedi con il tuo utente del server musicale, oppure creane uno se chi lo gestisce ti ha dato un invito.'}</p>
   <div class="row" style="justify-content:center">
-    <button class="btn primary" data-act="addsrv" ${local ? `data-url="${esc(location.origin)}"` : ''}>Aggiungi server</button>
+    ${ph ? `<button class="btn primary" data-act="phone" data-do="on">${ic('phone')} Usa la musica del telefono</button>` : ''}
+    <button class="btn${ph ? '' : ' primary'}" data-act="addsrv" ${local ? `data-url="${esc(location.origin)}"` : ''}>${ph ? 'Collegati a un server' : 'Aggiungi server'}</button>
     <button class="btn" data-act="importset">Importa impostazioni da un amico</button>
     <a class="btn" href="#/jam">Entra in una Jam</a>
   </div></div>`;
@@ -453,7 +459,7 @@ function lActionBar({ play = { act: 'playall' }, shuffle = { act: 'shuffleall' }
     <button class="ab-play" data-act="${play.act}"${d(play)} aria-label="${play.label || 'Riproduci'}" title="${play.label || 'Riproduci'}">${ic('play', true)}</button>
     ${shuffle ? `<button class="icon-btn ab" data-act="${shuffle.act}"${d(shuffle)} aria-label="${shuffle.label || 'Riproduci in ordine casuale'}" title="${shuffle.label || 'Casuale'}">${ic(shuffle.icon || 'shuffle')}</button>` : ''}
     ${star ? `<button class="icon-btn ab${star.on ? ' on' : ''}" data-act="${star.act}"${d(star)} aria-label="${star.on ? 'Togli dai preferiti' : 'Aggiungi ai preferiti'}" title="Preferito">${ic('heart', star.on)}</button>` : ''}
-    ${offline ? `<button class="icon-btn ab" data-act="offlineall" aria-label="Salva per l'offline" title="Offline">${ic('offline')}</button>` : ''}
+    ${offline && !srv()?.local ? `<button class="icon-btn ab" data-act="offlineall" aria-label="Salva per l'offline" title="Offline">${ic('offline')}</button>` : ''}
     ${addpl ? `<button class="icon-btn ab" data-act="addalltopl" aria-label="Aggiungi a una playlist" title="Aggiungi a playlist">${ic('addlist')}</button>` : ''}
     ${extra}${lMoreItems.length ? `<button class="icon-btn ab" data-act="lmore" aria-label="Altre azioni" title="Altro">${ic('more')}</button>` : ''}
   </div>`;
@@ -519,7 +525,8 @@ const secHead = (title, sort) => `<div class="hsec"><h2>${title}</h2>${sort ? `<
 async function vHome() {
   if (!srv()) return noServer();
   const s = srv();
-  if (!navigator.onLine) { location.hash = '#/offline'; return; }
+  if (!navigator.onLine && !s.local) { location.hash = '#/offline'; return; }
+  if (s.local && (await Local.ready, !Local.songs.length)) return Local.emptyHome();
   const n = Scene.nav;
   const [nw, rnd, freq, recent] = await Promise.all([
     api('getAlbumList2', { type: 'newest', size: 18 }),
@@ -538,7 +545,7 @@ async function vHome() {
   const dec = Object.entries(byDec).sort((a, b) => b[1] - a[1])[0]?.[0];
   const mix = (act, title, sub, icon, hue, extra = '') => `<button class="hmix" data-act="${act}" ${extra} style="--h1:${hue}">
     <span class="hmix-art">${ic(icon)}<b>${title}</b></span><span class="hmix-t"><b>${title}</b><small>${sub}</small></span></button>`;
-  view.innerHTML = `<h1 class="hhello">${hello}, ${esc(P.nick || s.user)}</h1>
+  view.innerHTML = `<h1 class="hhello">${hello}${P.nick || s.user ? ', ' + esc(P.nick || s.user) : ''}</h1>
     <div id="resume"></div><div id="friendsStrip"></div>
     ${quick.length ? `<div class="quick">${quick.map(a => `<div class="qk" data-act="album" data-id="${esc(a.id)}" role="link" tabindex="0">
       <span class="qk-art">${imgTag(a.coverArt, 160)}</span><b>${esc(a.name)}</b>
@@ -740,7 +747,7 @@ async function vAlbum(id) {
       meta: `<a href="#/artista/${encodeURIComponent(a.artistId || '')}"><b>${esc(a.artist)}</b></a>${a.year ? ' · ' + a.year : ''}${a.genre ? ' · ' + esc(a.genre) : ''} · ${songs.length} ${songs.length === 1 ? 'brano' : 'brani'}, ${fmtLong(tot)}${discs > 1 ? ' · ' + discs + ' dischi' : ''}` }) +
     lActionBar({ star: { act: 'staralbum', on: a.starred, data: { id, on: a.starred ? 1 : 0 } }, more: [
       { act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' },
-      { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: a.name } },
+      !srv().local && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: a.name } },
       canEdit() && { act: 'editalbum', label: 'Modifica album', icon: 'pen' },
       canDelete() && { act: 'delalbum', label: 'Elimina album dal server', icon: 'trash', danger: true, data: { name: a.name } }] }) +
     `<div id="gapsNote"></div><div id="lList">${songList(songs, opts)}</div>`;
@@ -903,7 +910,7 @@ async function vPlaylists() {
   const n = Scene.nav;
   const pls = arr((await api('getPlaylists')).playlists.playlist);
   if (stale(n)) return;
-  view.innerHTML = `<h1>Playlist</h1><p class="sub">Le playlist condivise si vedono da tutti gli utenti del server.</p>
+  view.innerHTML = `<h1>Playlist</h1><p class="sub">${srv().local ? 'Restano su questo telefono; con la copia sul server attiva finiscono anche lì.' : 'Le playlist condivise si vedono da tutti gli utenti del server.'}</p>
     <div class="lcards">
       <button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
       <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>
@@ -923,7 +930,7 @@ async function vPlaylist(id) {
       meta: `${p.comment ? `<span class="phero-desc">${esc(p.comment)}</span>` : ''}${p.owner ? `<b>${esc(p.owner)}</b> · ` : ''}<span id="lCount">${count(p)}</span>` }) +
     lActionBar({ more: [
       { act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' },
-      { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: p.name } },
+      !srv().local && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: p.name } },
       { act: 'exportpl', label: 'Esporta (M3U, JSON, CSV)', icon: 'down', data: { id } },
       { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
       { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
@@ -982,11 +989,14 @@ const DB = {
   _db: null,
   open() {
     return this._db ||= new Promise((res, rej) => {
-      const r = indexedDB.open('armony', 1);
-      r.onupgradeneeded = () => {
+      const r = indexedDB.open('armony', 2);
+      r.onupgradeneeded = e => {
         const d = r.result;
-        d.createObjectStore('offline', { keyPath: 'key' });
-        d.createObjectStore('history', { keyPath: 'n', autoIncrement: true }).createIndex('ts', 'ts');
+        if (e.oldVersion < 1) {
+          d.createObjectStore('offline', { keyPath: 'key' });
+          d.createObjectStore('history', { keyPath: 'n', autoIncrement: true }).createIndex('ts', 'ts');
+        }
+        if (e.oldVersion < 2) d.createObjectStore('telefono', { keyPath: 'k' });  // telefono.js
       };
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     });
@@ -1009,14 +1019,16 @@ const DB = {
 };
 
 /* ================= offline ================= */
+// un brano salvato offline visto dentro "Questo telefono" ha id "o:<server>:<id>": la chiave è quella di origine
+const offKey = t => t.serverId === 'telefono' && /^o:/.test(t.id) ? t.id.slice(2) : key(t);
 const Offline = {
   keys: new Set(), busy: false,
   async init() { try { (await DB.keys('offline')).forEach(k => this.keys.add(k)); } catch {} },
-  has(t) { return !!t && this.keys.has(key(t)); },
-  async url(t) { try { const r = await DB.get('offline', key(t)); return r ? URL.createObjectURL(r.blob) : null; } catch { return null; } },
+  has(t) { return !!t && this.keys.has(offKey(t)); },
+  async url(t) { try { const r = await DB.get('offline', offKey(t)); return r ? URL.createObjectURL(r.blob) : null; } catch { return null; } },
   async save(tracks) {
-    const todo = tracks.filter(t => !this.has(t));
-    if (!todo.length) return toast('Questi brani sono già disponibili offline.');
+    const todo = tracks.filter(t => !this.has(t) && !srv(t.serverId)?.local);
+    if (!todo.length) return toast(tracks.some(t => srv(t.serverId)?.local) ? 'Questi brani sono già sul telefono.' : 'Questi brani sono già disponibili offline.');
     if (this.busy) return toast('Sto già salvando altri brani, attendi.');
     this.busy = true; navigator.storage?.persist?.();
     let done = 0, fail = 0;
@@ -1041,6 +1053,7 @@ const Offline = {
 /* ================= storico e statistiche ================= */
 const Stats = {
   async add(t) {
+    t = Local.orig(t);
     const ts = Date.now();
     try { await DB.put('history', { ts, hid: `${S.device}:${ts}`, synced: false, key: key(t), id: t.id, serverId: t.serverId, title: t.title, artist: t.artist, artistId: t.artistId, album: t.album, albumId: t.albumId, coverArt: t.coverArt, duration: t.duration || 0, genre: t.genre || '' }); } catch {}
     HistSync.schedule();
@@ -2444,7 +2457,7 @@ function coverPicker(s, ids, album, q) {
   closeOutside(d); d.showModal(); if (q) search();
 }
 function songMenu(t, ctx = {}) {
-  const d = $('#dlg'); d.className = 'sheet';
+  const d = $('#dlg'), phoneT = !!srv(t.serverId)?.local; d.className = 'sheet';
   const items = [
     ['nextup', 'Riproduci dopo', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.splice(S.index + 1, 0, t); persistQueue(); toast('Verrà riprodotto dopo il brano attuale.'); }],
     ['plus', 'Aggiungi alla coda', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.push(t); persistQueue(); toast('Aggiunto alla coda.'); }],
@@ -2453,10 +2466,10 @@ function songMenu(t, ctx = {}) {
     ['radio', 'Avvia una radio da qui', () => radioFrom(t)],
     t.albumId ? ['album', 'Vai all\'album', () => location.hash = '#/album/' + encodeURIComponent(t.albumId)] : null,
     t.artistId ? ['artist', 'Vai all\'artista', () => location.hash = '#/artista/' + encodeURIComponent(t.artistId)] : null,
-    ['share', 'Condividi un link', () => shareItem(t.id, `${t.title} - ${t.artist}`, t.serverId)],
-    Offline.has(t) ? ['trash', 'Togli dall\'offline', async () => { await Offline.remove(key(t)); toast('Rimosso dall\'offline.'); if (location.hash.startsWith('#/offline')) route(); }]
+    !phoneT ? ['share', 'Condividi un link', () => shareItem(t.id, `${t.title} - ${t.artist}`, t.serverId)] : null,
+    phoneT && !Offline.has(t) ? null : Offline.has(t) ? ['trash', 'Togli dall\'offline', async () => { await Offline.remove(offKey(t)); toast('Rimosso dall\'offline.'); if (location.hash.startsWith('#/offline')) route(); }]
       : ['offline', 'Salva per l\'offline', () => Offline.save([t])],
-    ['down', 'Scarica il file originale', () => { const a = document.createElement('a'); a.href = apiUrl(srv(t.serverId), 'download', { id: t.id }); a.download = ''; a.click(); }],
+    phoneT ? null : ['down', 'Scarica il file originale', () => { const a = document.createElement('a'); a.href = apiUrl(srv(t.serverId), 'download', { id: t.id }); a.download = ''; a.click(); }],
     ['lyrics', 'Testo', () => { if (key(currentTrack() || {}) !== key(t)) return toast('Il testo si apre per il brano in riproduzione.'); sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; }],
     ctx.pl != null ? ['trash', 'Togli dalla playlist', async () => { await api('updatePlaylist', { playlistId: view.dataset.pl, songIndexToRemove: ctx.pl }); route(); }] : null,
     canEdit(t.serverId) ? ['pen', 'Modifica informazioni', () => editTrack(t)] : null,
@@ -2492,6 +2505,7 @@ function vSettings() {
     <button class="icon-btn" data-act="delsrv" data-id="${s.id}" aria-label="Rimuovi">${ic('trash')}</button></div>`).join('') || '<p class="sub">Nessun server.</p>'}</div>
   <div class="row" style="margin-top:12px"><button class="btn primary" data-act="addsrv">${ic('plus')} Aggiungi server</button><button class="btn" data-act="lanscan">${ic('wifi')} Cerca sulla rete</button></div>
   <div id="lanRes"></div>`)}
+  ${Local.p ? grp('telefono', 'Questo telefono', 'musica telefono memoria backup copia caricamento wifi', '<div class="panel stack" id="phoneBox"></div>') : ''}
 
   ${grp('spazio', 'Spazio', 'memoria disco spazio occupato libero gb archiviazione', '<div class="panel stack" id="spazioBox"><p class="sub">Calcolo…</p></div>')}
 
@@ -2553,6 +2567,7 @@ function vSettings() {
   refreshSpazio();
   if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); }
   if (window.ARMONY_APP) AppUpdate.paint();
+  Local.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
 }
 // ricerca fra le impostazioni: mostra solo le voci che contengono il testo, e apre i gruppi che ne hanno
@@ -2747,7 +2762,7 @@ function serverDialog(s, preset = {}) {
     delete n.session; delete n.armony; delete n.me;
     try { await armonyLogin(n); } catch (e) { return msg('Armony: ' + e.message); }
     const i = S.servers.findIndex(x => x.id === n.id); if (i >= 0) S.servers[i] = n; else S.servers.push(n);
-    if (!S.active || welcome) S.active = n.id;
+    if (!S.active || welcome || S.active === Local.id) S.active = n.id;
     if (n.session && S.active === n.id) store.set('downloader', null);
     persistServers(); d.close();
     if (location.hash.startsWith('#/invito')) location.hash = '#/home'; else route();
@@ -2780,7 +2795,7 @@ function fillSelectors() {
   const name = srv()?.name || 'Nessun server', q = QUALITIES[P.quality].short;
   $('#ctxBtn').innerHTML = `<span class="grow">${esc(name)}</span><span class="pill">${esc(q)}</span>`;
   $('#ctxBtn').setAttribute('aria-label', `Server e qualità: ${name}, ${q}`);
-  $('#qBadge').textContent = Offline.has(currentTrack()) ? 'Offline' : QUALITIES[activeQuality()].short + (activeQuality() !== P.quality ? ' (mobile)' : '');
+  $('#qBadge').textContent = Offline.has(currentTrack()) ? 'Offline' : srv(currentTrack()?.serverId)?.local ? 'Telefono' : QUALITIES[activeQuality()].short + (activeQuality() !== P.quality ? ' (mobile)' : '');
 }
 function setQuality(q) { P.quality = q; savePrefs(); fillSelectors(); toast(`Qualità: ${QUALITIES[q].label}. Vale dal prossimo brano.`); }
 // server in uso e qualità: dalla riga in fondo alla barra laterale (in alto su telefono)
@@ -2792,7 +2807,7 @@ function closeOutside(d) {
 function ctxDialog() {
   const d = $('#dlg'); d.className = 'sheet';
   d.innerHTML = `<div class="head"><b>Server e qualità</b></div>
-    <p class="sh">Server</p>${S.servers.map(s => `<button class="mi ${s.id === S.active ? 'on' : ''}" data-sid="${s.id}">${ic(s.id === S.active ? 'check' : 'lib')}${esc(s.name)}</button>`).join('')}
+    <p class="sh">Server</p>${(Local.on() ? [Local.srv, ...S.servers] : S.servers).map(s => `<button class="mi ${s.id === S.active ? 'on' : ''}" data-sid="${s.id}">${ic(s.id === S.active ? 'check' : s.local ? 'phone' : 'lib')}${esc(s.name)}</button>`).join('')}
     <button class="mi" data-ctx="srv">${ic('plus')}${S.servers.length ? 'Gestisci i server' : 'Aggiungi un server'}</button>
     <p class="sh">Qualità di ascolto</p>${Object.entries(QUALITIES).map(([k, q]) => `<button class="mi ${k === P.quality ? 'on' : ''}" data-q="${k}">${ic(k === P.quality ? 'check' : 'album')}${q.label}</button>`).join('')}`;
   d.querySelectorAll('[data-sid]').forEach(el => el.onclick = () => { d.close(); if (S.active === el.dataset.sid) return; S.active = el.dataset.sid; persistServers(); route(); });
@@ -2960,10 +2975,11 @@ view.addEventListener('click', async e => {
       case 'sleep': sleepDialog(); break;
       case 'speed': speedDialog(); break;
       case 'eq': eqDialog(); break;
+      case 'phone': await Local.act(el.dataset.do); break;
       case 'addsrv': serverDialog(null, { url: el.dataset.url || '', name: el.dataset.name || '' }); break;
       case 'editsrv': serverDialog(srv(id)); break;
       case 'usesrv': S.active = id; persistServers(); vSettings(); Live.connect(); break;
-      case 'delsrv': if (confirm('Rimuovere questo server da Armony?')) { S.servers = S.servers.filter(s => s.id !== id); if (S.active === id) S.active = S.servers[0]?.id || null; persistServers(); vSettings(); } break;
+      case 'delsrv': if (confirm('Rimuovere questo server da Armony?')) { S.servers = S.servers.filter(s => s.id !== id); if (S.active === id) S.active = S.servers[0]?.id || (Local.on() ? Local.id : null); persistServers(); vSettings(); } break;
       case 'lanscan': {
         $('#lanRes').innerHTML = '<p class="sub">Cerco server Armony sulla rete…</p>';
         const base = S.dl.url || (NATIVE ? '' : location.origin);
@@ -3485,7 +3501,8 @@ async function boot() {
   $('#tabMore').onclick = moreSheet;
   Wave.init();
   Engine.init(); wirePlayer();
-  await Offline.init();
+  await Offline.init(); await Local.init();
+  if (Local.on() && !navigator.onLine && !srv()?.local) S.active = Local.id;  // senza rete suona il telefono
   fillSelectors(); updateNowPlaying(); paintTime();
   const t = S.queue[S.index];
   if (t && (srv(t.serverId) || Offline.has(t))) await Engine.load(t, Engine.cur, { autoplay: false, startAt: store.get('pos', 0) });
@@ -3502,5 +3519,5 @@ async function boot() {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); notifyUpdate(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz)/.test(location.hash)) route(); });
+  syncSessions().then(async () => { Live.connect(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz)/.test(location.hash)) route(); });
 }
