@@ -27,6 +27,26 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-08 — Modifica dei brani e copertine: tag scritti nel file, file fermi, copertine solo da Deezer o caricate
+
+**Contesto:** cambiare titolo, artisti, album, anno, generi, traccia e scegliere
+la copertina dall'app.
+**Scelta:** il server trova il file con `track_paths()` (DB di Navidrome in sola
+lettura, `realpath` dentro MUSIC_DIR) e scrive con mutagen solo i campi
+passati; i file non si spostano, così l'id Navidrome e le playlist restano
+(verificato). Copertina: `{url}` solo dagli host CDN di Deezer, oppure corpo
+JPEG/PNG verificato dai byte iniziali, max 10 MB; per l'album sostituisce
+`cover.jpg` e la incorpora, per un brano la incorpora soltanto. Stesso permesso
+dell'eliminazione («Modifica ed eliminazione»).
+**Alternative scartate:** rinominare o spostare il file (per Navidrome sarebbe
+un brano nuovo: playlist, preferiti e ascolti persi); copertina da qualsiasi
+URL (SSRF); un permesso a parte (due caselle per lo stesso livello di fiducia);
+modifica tramite l'API di Navidrome (non esiste).
+**Conseguenze:** nome e cartella del file restano quelli vecchi; cambiando nome
+o artista di un album, per Navidrome è un album nuovo.
+**Da rivedere se:** Navidrome rende stabili gli id anche dopo lo spostamento dei
+file (allora si possono riordinare le cartelle).
+
 ## 2026-10-08 — Registrazione degli amici: utenti Navidrome creati con le credenziali dell'admin, su invito
 
 **Contesto:** un amico che installa l'app deve potersi creare un account o

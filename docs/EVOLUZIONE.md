@@ -263,6 +263,9 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.12.0 (2026-10-09)**: modifica delle informazioni dei brani e degli album,
+copertine da Deezer o caricate.
+
 **0.11.0 (2026-10-08)**: gli amici si creano un account dall'app (su invito,
 o registrazione aperta); Jam tramite il server con orologio comune.
 

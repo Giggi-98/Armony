@@ -106,8 +106,11 @@ Salva album, playlist o singoli brani sul telefono, nella qualità che preferisc
 ### Album completi
 Aprendo un album, le tracce che non hai compaiono al loro posto in grigio (la scaletta completa arriva da Deezer); "Scarica" ne prende una, "Scarica le N mancanti" tutte, e arrivano nello stesso album con copertina e numero di traccia.
 
+### Modificare brani e copertine
+Dal menu di un brano «Modifica informazioni» (titolo, artisti, album, anno, generi, traccia); dalla pagina dell'album «Modifica album» (nome, artista, anno, genere per tutti i brani). «Cambia copertina» la cerca online o la prende dal telefono o dal computer, per l'album intero o per un solo brano. I file non vengono spostati, quindi playlist e preferiti restano. Serve il permesso «Modifica ed eliminazione» (gli amministratori ce l'hanno sempre).
+
 ### Eliminare brani
-Dal menu di un brano ("Elimina dal server") o dalla pagina dell'album ("Elimina album"). Il file viene cancellato per tutti, dopo una conferma. Gli amministratori possono sempre; agli altri utenti l'amministratore lo abilita in Impostazioni → Utenti → Eliminazione (spento di default).
+Dal menu di un brano ("Elimina dal server") o dalla pagina dell'album ("Elimina album"). Il file viene cancellato per tutti, dopo una conferma. Gli amministratori possono sempre; agli altri utenti l'amministratore lo abilita in Impostazioni → Utenti → «Modifica ed eliminazione» (spento di default).
 
 ### Caricamento dal dispositivo
 - In Scarica → **Dal dispositivo** carichi sul server la musica che hai sul telefono o sul computer: file singoli, cartelle intere o trascinandoli nella pagina.
