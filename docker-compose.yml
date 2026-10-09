@@ -25,6 +25,8 @@ services:
     volumes:
       - ./data/navidrome:/data
       - ./musica:/music:ro
+      # brani copiati dai server collegati: libreria Navidrome a parte ("Dalla rete"), che Armony crea da sola
+      - ./federati:/federati:ro
     restart: unless-stopped
 
   armony:
@@ -47,6 +49,7 @@ services:
     volumes:
       - ./musica:/music
       - ./video:/videos
+      - ./federati:/federati
       - ./client:/app/client:ro
       - ./updates:/updates
       - ./data/armony:/data

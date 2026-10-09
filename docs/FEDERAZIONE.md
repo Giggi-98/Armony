@@ -1,7 +1,10 @@
 # Federazione fra server Armony — documento di progetto
 
-Stato: **progetto approvato**, 2026-10-08. Nulla di questo è implementato.
-Le domande aperte hanno avuto risposta (§13) e sono registrate in
+Stato: **progetto approvato**, 2026-10-08. **Fase "mappa" implementata il
+2026-10-09** (§14): identità, abbinamento, cataloghi, ricerca nella rete anche
+fra amici degli amici, ascolto a distanza e copia di singoli brani. Non ancora
+fatti: offerte e abbonamenti in copia (§7), cioè le fasi 1–2 come erano.
+Le domande aperte hanno avuto risposta (§13, §14) e sono registrate in
 `DECISIONS.md`. Restano da decidere solo dettagli di implementazione, segnati
 *(in implementazione)*.
 
@@ -16,7 +19,10 @@ la propria libreria a quella di un altro**, decidendo:
 - **come** prenderlo: copia fisica dei file, oppure in futuro solo ascolto a distanza.
 
 Fuori obiettivo: una rete pubblica di server sconosciuti, un indice globale,
-la condivisione transitiva (quello che ricevo da A non lo giro a C).
+la ricondivisione dei **file** ricevuti (quello che copio da A non lo offro a C:
+`federati/` non entra mai nel mio catalogo). La **ricerca e l'ascolto** passano
+invece anche fra amici degli amici, con un limite di salti (§14, ribalta la
+scelta del 2026-10-08).
 
 ## 2. Cosa c'è già e cosa si riusa
 
@@ -211,6 +217,7 @@ hash, stato dei giri.
 | **1** | Identità, abbinamento con codice di sicurezza, offerta *tutta la libreria* o *cartelle*, abbonamento in copia, cancellazioni *conserva*, giro manuale, libreria Navidrome per nodo, SQLite, `proto: 1` | Due amici si scambiano librerie intere |
 | **2** | Offerte per artista, album e playlist; regola *rispecchia*; tetto di spazio; giri pianificati; doppioni per metadati; "Collega" dalla scoperta LAN | Scelta fine di cosa sincronizzare |
 | **3** | Ascolto a distanza senza copia: il server locale fa da proxy verso il manifest e i file dell'altro, il client mostra le librerie remote come un server in più | Librerie troppo grandi da copiare |
+| **mappa** *(fatta, 2026-10-09)* | Identità, abbinamento, catalogo leggero per nodo con differenze, ricerca "Nella rete" con amici degli amici, ascolto a distanza tramite il proprio server, copia di singoli brani e album in `federati/`, mappa delle librerie (§14) | La rete di librerie dei miei amici, cercabile e ascoltabile subito |
 
 La fase 3 è l'unica che richiede lavoro nel client oltre alle impostazioni,
 per questo è ultima.
@@ -226,4 +233,94 @@ per questo è ultima.
 | Diritti | Nota estesa in `LEGGIMI.md` e avviso alla prima offerta, confermato una volta |
 
 Fase 0 fatta (2026-10-08): Scarica → Dal dispositivo, `PUT /api/upload`.
-Prossimo passo: fase 1.
+Fase "mappa" fatta (2026-10-09), §14. Prossimo passo: offerte e abbonamenti in
+copia (fase 1 senza la parte già fatta).
+
+## 14. Fase "mappa": rete fra server e ascolto a distanza (2026-10-09)
+
+### Cosa è cambiato rispetto al progetto e perché
+
+Richiesta dell'utente: «i server rimangono collegati tra loro, ogni server
+appartiene a un utente, il collegamento rende possibile cercare canzoni già
+scaricate in un server agganciato alla topologia: una mappatura live delle
+librerie mie e dei miei amici». Risposte date (vincolanti):
+
+| Domanda | Risposta |
+|---|---|
+| Brano trovato sul server di un amico | **Ascoltarlo e copiarlo**: streaming subito tramite il mio server (proxy), e un tasto che lo copia in `federati/<server>/` |
+| Fin dove arriva la rete | **Anche amici degli amici**: la ricerca passa di server in server con un limite di salti |
+| Di chi è un server | Il collegamento resta fra server, creato dall'amministratore (§4); nome del server e proprietario si vedono nella mappa |
+
+Questo **ribalta** due scelte del 2026-10-08: "niente condivisione transitiva"
+(§1, voce *Federazione: forma generale*) e "l'ascolto a distanza nella fase 3"
+(§13). Il motivo: il valore che l'utente chiede è *sapere chi ha cosa* nella
+cerchia di amici e sentirlo subito; la copia dell'intera libreria resta utile,
+ma viene dopo. La ricondivisione dei *file* resta esclusa.
+
+### Come funziona
+
+- **Identità** (§3): `data/armony/identita.key` (Ed25519, file 600), impronta =
+  primi 32 caratteri esadecimali dello SHA-256 della chiave pubblica.
+  `GET /fed/hello` → `{nodo, nome, proprietario, proto: 1, app, pub}`.
+- **Abbinamento** (§5): l'amministratore di A crea un invito `ARF1…`
+  (indirizzo, chiave pubblica, segreto monouso 24 h; sul server resta solo
+  l'hash del segreto). B lo incolla: il server di B controlla che `/fed/hello`
+  di A abbia la stessa chiave, poi manda `/fed/v1/pair` firmato con la sua
+  chiave (che porta nel corpo). A vede una **richiesta** da accettare; i due
+  vedono lo stesso **codice di sicurezza** (cinque simboli dalle due chiavi,
+  come la Jam). Le chiavi restano fissate; scollegare avvisa l'altro, che
+  rifiuta da subito le richieste.
+- **Firme**: ogni richiesta `/fed/v1/*` porta `X-Fed-Node`, `X-Fed-Date`,
+  `X-Fed-To` e `X-Fed-Sig` = Ed25519 su metodo, percorso con query, data,
+  destinatario e SHA-256 del corpo; rifiutata oltre 5 minuti, se destinata a
+  un altro nodo o se viene da un nodo non collegato. Anche le **risposte JSON
+  sono firmate** (legate alla firma della richiesta): un intermediario non può
+  cambiare cataloghi, risultati o impronte. Limite: 600 richieste al minuto per
+  nodo. I file e le copertine non sono firmati: la copia li verifica con
+  dimensione e SHA-256 presi da una risposta firmata.
+- **Catalogo**: ogni nodo legge la propria libreria da Navidrome (`search3`
+  vuota con l'amministratore di Navidrome già usato per la registrazione,
+  limitata alla libreria di `musica/`) e la tiene in `fed_mine` con una
+  versione per riga. `GET /fed/v1/catalogo?since=v` dà solo le righe cambiate
+  e gli id spariti; il catalogo si rilegge quando Navidrome ha scansionato.
+  Campi: id del brano (hash di Navidrome, nessun percorso), titolo, artista,
+  album, artista dell'album, durata, anno, traccia, disco, genere, formato,
+  dimensione. Ogni nodo tiene in cache (`fed_catalog`) i cataloghi dei suoi
+  vicini, aggiornati ogni 10 minuti o col tasto "Aggiorna ora".
+- **Ricerca** (`/api/rete/cerca`): prima la cache dei vicini (millisecondi),
+  poi l'inoltro `POST /fed/v1/cerca` con `ttl` = salti rimasti, un `rid` contro
+  i cicli e l'elenco dei nodi da saltare (chi inoltra e i suoi vicini, già
+  coperti). Ogni nodo risponde dalla sua cache e, se restano salti, inoltra a
+  sua volta. Tempo massimo 3 s in tutto: un nodo spento non rallenta né la
+  ricerca locale (che è separata) né le risposte degli altri. Ogni risultato
+  porta il percorso (`path`: dal mio vicino al nodo che ha il file).
+- **Privacy**: ogni amministratore sceglie se la sua libreria è *visibile agli
+  amici degli amici* (predefinito sì) e *quanti salti* fanno le sue ricerche
+  (predefinito 2, cioè amici e amici degli amici; vale anche come tetto per ciò
+  che inoltra). Un nodo mostra a chi non è collegato direttamente solo i vicini
+  che lo permettono, e non inoltra mai per conto di nodi non collegati a lui.
+- **Ascolto**: `GET /api/rete/stream?r=<percorso>&id=…` (sessione dell'utente)
+  → il mio server chiede `/fed/v1/file/<id>?via=…` al primo nodo del percorso,
+  firmato; ogni nodo passa al successivo; l'ultimo legge da Navidrome. `Range`
+  passa per tutta la catena (206 verificato su due salti), la qualità scelta
+  nel client diventa la conversione di Navidrome del nodo che ha il file.
+  Copertine allo stesso modo, per id del brano.
+- **Copia** (`POST /api/rete/copia`, permesso download): diventa un lavoro
+  della coda dei download. `/fed/v1/info/<id>` dà dimensione e SHA-256 (calcolato
+  dal nodo che ha il file e tenuto in cache in `fed_hash`), poi il file arriva
+  originale in `federati/<server>/<artista>/<album>/` come `.armony-part`,
+  verificato e rinominato. Armony crea la libreria Navidrome **"Dalla rete"**
+  su `/federati` (una sola, con una cartella per server, data a tutti gli
+  utenti) e chiede una scansione.
+
+### Rispetto ai punti aperti del progetto
+
+- Una libreria Navidrome per **tutti** i server collegati, non una per server:
+  basta per tenere separato ciò che è mio da ciò che è ricevuto e per non
+  rioffrirlo; la visibilità per utente e per server (§4) arriverà con gli
+  abbonamenti.
+- Il catalogo viene dall'**API** di Navidrome, non dal suo DB (§7: più stabile
+  fra versioni). Il DB serve solo, in sola lettura, per trovare il file di cui
+  calcolare lo SHA-256 (come per eliminare e modificare i brani).
+- "Collega" dalla scoperta LAN, offerte parziali, abbonamenti, giri pianificati
+  e doppioni per hash prima della copia: non ancora.
