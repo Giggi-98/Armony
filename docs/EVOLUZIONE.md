@@ -263,6 +263,11 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.15.0 (2026-10-09)**: app Android anche senza server (musica del telefono,
+playlist e statistiche locali, copia automatica sul server). 0.14.1–0.14.2:
+cuffie (pausa allo stacco), Risincronizza, Spazio, coda dei download
+raggruppata, tasto indietro, dispositivi agganciati con la stessa coda.
+
 **0.14.0 (2026-10-09)**: riaggancio automatico fra dispositivi (battito, ping,
 niente musica mandata a un'app chiusa male); sul telefono barra sopra tasti e
 gesti, lettore che si riduce e sparisce con la tastiera, nome delle cuffie;
