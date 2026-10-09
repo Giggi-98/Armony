@@ -25,11 +25,13 @@ armony/
 
 Serve un computer Linux sempre acceso con Docker: un Raspberry Pi 4/5, un NAS, un vecchio PC o un VPS.
 
-1. Scarica Armony sul server con `git clone https://github.com/Giggi-98/Armony.git armony` ed entra nella cartella.
+0. Se sul server non c'è Docker: `curl -fsSL https://get.docker.com | sudo sh` e `sudo usermod -aG docker $USER`, poi esci e rientra.
+1. Scarica Armony sul server con `git clone https://github.com/Giggi-98/Armony.git armony`, entra nella cartella e crea le cartelle dei dati con `mkdir -p musica video federati` (prima del primo avvio: altrimenti le crea Docker come root e per copiarci la musica ti servirebbe `sudo`).
 2. Copia `.env.example` in `.env` e cambia `ARMONY_TOKEN` (l'accesso di emergenza dell'amministratore: normalmente non serve), `TURN_PASS` e, se vuoi, `ARMONY_NAME`. Lascia `ARMONY_REPO` com'è: dice ad Armony dove cercare le versioni nuove.
 3. Avvia con `docker compose up -d`, poi abilita il tasto «Aggiorna» con `sudo deploy/install-updater.sh` (una volta sola).
 4. Apri `http://IP-DEL-SERVER:4533` e crea l'amministratore di Navidrome. Da lì crei anche un utente per ogni amico.
 5. Apri `http://IP-DEL-SERVER:8080`. Questa è Armony. Aggiungi il server: l'indirizzo è già compilato, inserisci utente e password di Navidrome. Gli amministratori di Navidrome lo sono anche in Armony (aggiornamenti, permessi degli utenti); gli altri utenti possono ascoltare, scaricare e caricare musica, e l'amministratore può togliere download o caricamento a chi vuole in Impostazioni → Utenti.
+6. In Armony, Impostazioni → Utenti → Registrazione: inserisci una volta utente e password dell'amministratore di Navidrome. Servono per gli inviti agli amici e per collegare il server a quello di altri (restano sul server).
 
 La password non viene salvata sul dispositivo né mandata negli indirizzi: Armony conserva solo un'impronta (token e sale Subsonic).
 
