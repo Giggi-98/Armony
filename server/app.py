@@ -18,7 +18,8 @@ Armony - server di supporto.
   /api/tracks/tags, /api/tracks/cover, /api/cover/search   modifica dei tag e della copertina dei brani
                         (stesso permesso "delete": «Modifica ed eliminazione»); i file non si spostano
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
-  /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi
+  /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi;
+                        /api/live/beat è il battito dei client con hb=1 (capacità "livehb")
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download")
   /api/import           brani da Spotify (Exportify): metadati completati, ricerca per durata, tag e cartelle per album
   /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
@@ -74,7 +75,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "delete", "scaletta", "register", "edit"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 RULES = (("/api/update", "admin"), ("/api/users", "admin"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
@@ -658,6 +659,7 @@ def prefs_put():
 lconns = {}    # utente -> {id connessione: {"device", "name", "q"}}
 lstates = {}   # utente -> {dispositivo: ultimo stato}
 llock = threading.Lock()
+LIVE_BEAT_MAX = 120  # secondi senza battito prima di dare per sparito un dispositivo (Android in sottofondo batte anche 1/min)
 LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat")
 
 
@@ -680,14 +682,28 @@ def live_stream():
     if not ID_RE.match(dev):
         return jsonify(error="Dispositivo non valido"), 400
     name = (request.args.get("name") or "Dispositivo")[:40]
+    # hb=1: il client manda battiti (/api/live/beat) e riceve {"type":"ping"} al posto del commento
+    hb = request.args.get("hb") == "1"
     cid, q = uuid.uuid4().hex, queue.Queue(maxsize=200)
+    me = {"device": dev, "name": name, "q": q, "hb": hb, "seen": time.time()}
     with llock:
-        new = not any(c["device"] == dev for c in lconns.get(u, {}).values())
-        lconns.setdefault(u, {})[cid] = {"device": dev, "name": name, "q": q}
+        old = [c for c in lconns.get(u, {}).values() if c["device"] == dev]
+        if hb:
+            # lo stesso dispositivo si ricollega: le connessioni vecchie sono fantasmi (app uccisa, rete cambiata)
+            # o un'altra scheda dello stesso browser, che riceve "kicked" e non si ricollega da sola
+            for c in old:
+                c["stop"] = True
+                try:
+                    c["q"].put_nowait(json.dumps({"type": "kicked"}))
+                except queue.Full:
+                    pass
+            if old:
+                lstates.get(u, {}).pop(dev, None)  # lo stato era della sessione di prima
+        lconns.setdefault(u, {})[cid] = me
         others = {c["device"]: c["name"] for c in lconns[u].values() if c["device"] != dev}
         hello = json.dumps({"type": "hello", "devices": [{"device": d, "name": n} for d, n in others.items()],
                             "states": [s for d, s in lstates.get(u, {}).items() if d != dev]})
-    if new:
+    if not old or hb:  # dopo un fantasma "join" dice agli altri di dimenticare lo stato vecchio
         live_put(u, {"type": "join", "device": dev, "name": name}, skip=dev)
 
     def gen():
@@ -697,7 +713,12 @@ def live_stream():
                 try:
                     yield f"data: {q.get(timeout=15)}\n\n"
                 except queue.Empty:
-                    yield ": ancora qui\n\n"  # tiene viva la connessione attraverso proxy e NAT
+                    # tiene viva la connessione attraverso proxy e NAT; il ping arriva anche al codice del client
+                    yield 'data: {"type": "ping"}\n\n' if hb else ": ancora qui\n\n"
+                if me.get("stop"):
+                    break  # sostituita da una connessione nuova dello stesso dispositivo
+                if hb and time.time() - me["seen"] > LIVE_BEAT_MAX:
+                    break  # nessun battito: il dispositivo è sparito senza chiudere (TCP mezzo aperto)
         finally:
             with llock:
                 lconns.get(u, {}).pop(cid, None)
@@ -709,6 +730,18 @@ def live_stream():
 
     return Response(stream_with_context(gen()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/live/beat")
+def live_beat():
+    # battito dei client con hb=1; 404 = il server non ha più il loro canale: il client si ricollega
+    u, d = user_or_400(), request.get_json(silent=True) or {}
+    dev, n = str(d.get("device") or ""), 0
+    with llock:
+        for c in lconns.get(u, {}).values():
+            if c["device"] == dev and not c.get("stop"):
+                c["seen"], n = time.time(), n + 1
+    return jsonify(ok=True) if n else (jsonify(error="Canale non aperto"), 404)
 
 
 @app.post("/api/live/state")
