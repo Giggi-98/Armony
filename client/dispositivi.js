@@ -19,8 +19,18 @@ const Disp = {
   can: () => !!window.crypto?.subtle,
   kind: () => NATIVE ? 'app' : /Android|iPhone|iPad|Mobile/.test(navigator.userAgent) ? 'telefono' : 'computer',
   // il nome con cui il dispositivo compare nell'elenco: si cambia da lì
-  name() {
-    if (P.deviceName) return P.deviceName;
+  // ogni dispositivo è un'entità a sé: il nome di base porta il modello (se il browser lo dice) e un codice breve
+  // preso dal suo identificativo, così due telefoni o due Chrome non si confondono nell'elenco. Si calcola una volta
+  async initName() {
+    if (store.get('devName', null)) return;
+    let model = '';
+    try { model = (await navigator.userAgentData?.getHighEntropyValues?.(['model']))?.model || ''; } catch {}
+    if (!model) model = (navigator.userAgent.match(/Android [\d.]+; ([^;)]+?)(?: Build|\))/) || [])[1] || '';
+    if (/^K$/i.test(model)) model = '';  // Chrome nasconde il modello dietro "K"
+    store.set('devName', [this.base(), model, S.device.slice(-4).toUpperCase()].filter(Boolean).join(' · '));
+  },
+  name() { return P.deviceName || store.get('devName', null) || this.base(); },
+  base() {
     if (NATIVE) return 'App Android';
     const u = navigator.userAgent, b = /Edg\//.test(u) ? 'Edge' : /Firefox\//.test(u) ? 'Firefox' : /Chrome\//.test(u) ? 'Chrome' : /Safari\//.test(u) ? 'Safari' : 'Browser';
     const o = /Android/.test(u) ? 'Android' : /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Windows/.test(u) ? 'Windows' : /Mac OS/.test(u) ? 'Mac' : /Linux/.test(u) ? 'Linux' : '';
@@ -82,6 +92,7 @@ const Disp = {
   },
   login(s) { return this.lock(s, () => this.login1(s)); },
   async login1(s) {
+    await this.initName();
     const base = absUrl(s.url);
     if (s.dev && this.can()) { const k = await this.key(s, false); if (k) { const j = await this.signIn(s, k); if (j) return j; } }
     if (!s.tok) throw new Error('Serve la password: modifica il server e reinseriscila.');
@@ -115,6 +126,7 @@ const Disp = {
   // un dispositivo nuovo entra con il codice creato da uno fidato: niente password, arrivano le credenziali Subsonic
   async pair(url, code) {
     if (!this.can()) throw new Error('Per abbinare serve l\'app o Armony aperta con HTTPS.');
+    await this.initName();
     const base = absUrl(url), c = String(code).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
     const info = await fetch(base + '/api/info').then(r => r.ok ? r.json() : null).catch(() => null);
     if (!info?.caps?.includes('dispositivi')) throw new Error(info ? 'Questo server non conosce gli abbinamenti: accedi con utente e password.' : 'Non riesco a raggiungere il server.');
@@ -205,7 +217,7 @@ const Disp = {
     const tags = [d.me ? '<span class="tag acc">questo</span>' : '', !d.keyed && d.state !== 'revocato' ? '<span class="tag">senza chiave</span>' : '', d.rekey ? '<span class="tag">chiave nuova richiesta</span>' : ''].join('');
     const where = d.ip ? ` · ${d.net === 'internet' ? 'da internet' : 'da casa'} ${esc(d.ip)}` : '';
     const sub = d.state === 'attesa' ? `chiesto ${this.ago(d.created)}${where}${d.fp ? ` · codice <b class="fp">${esc(d.fp)}</b>` : ''}`
-      : d.state === 'revocato' ? `revocato ${this.ago(d.revoked)}` : `ultimo accesso ${this.ago(d.seen)}${where}<br>dal ${new Date((d.approved || d.created) * 1000).toLocaleDateString()}${d.by ? ', ' + esc(d.by) : ''}`;
+      : d.state === 'revocato' ? `revocato ${this.ago(d.revoked)}` : `ultimo accesso ${this.ago(d.seen)}${where}<br>dal ${new Date((d.approved || d.created) * 1000).toLocaleDateString()}${d.by ? ', ' + esc(d.by) : ''}${d.fp ? ` · chiave <b class="fp">${esc(d.fp)}</b>` : ''}`;
     const acts = d.state === 'attesa' ? `<button class="btn sm primary" data-dv="approva" data-id="${esc(d.id)}">Approva</button><button class="btn sm" data-dv="revoca" data-id="${esc(d.id)}">Rifiuta</button>`
       : d.state === 'fidato' ? `<button class="icon-btn" data-dv="menu" data-id="${esc(d.id)}" aria-label="Azioni per ${esc(d.name)}">${ic('more')}</button>` : '';
     return `<div class="list-item dv${d.state === 'attesa' ? ' wait' : ''}"><span class="dv-ic">${this.icon(d.kind)}</span>

@@ -242,6 +242,13 @@ label.check small{display:block;color:var(--muted)}
 .tag.acc{background:var(--accent-soft);color:var(--ink)}
 .banner{display:flex;gap:var(--s3) var(--s4);align-items:center;background:var(--accent-soft);border-radius:var(--r-l);padding:var(--s4) var(--s5);margin-bottom:var(--s4);flex-wrap:wrap}
 .banner .grow{flex:1;min-width:200px}
+/* lettura dei QR con la fotocamera: anteprima quadrata con la cornice, foglio dal basso sul telefono */
+dialog.qrscan{width:min(420px,94vw)}
+.qrcam{position:relative;aspect-ratio:1;border-radius:var(--r-l);overflow:hidden;background:#000;margin:var(--s3) 0}
+.qrcam video{width:100%;height:100%;object-fit:cover;display:block}
+.qrframe{position:absolute;inset:16%;border-radius:var(--r-m);box-shadow:0 0 0 999px rgb(0 0 0 / .35);outline:3px solid var(--accent);outline-offset:-3px}
+@media (prefers-reduced-motion:no-preference){.qrframe{animation:qrpulse 1.6s ease-in-out infinite alternate}}
+@keyframes qrpulse{from{outline-color:var(--accent)}to{outline-color:color-mix(in srgb,var(--accent) 40%,transparent)}}
 /* dispositivi e sicurezza (dispositivi.js): elenco, questo dispositivo, schermata di attesa o revoca */
 .dv{cursor:default;align-items:flex-start;padding:var(--s3) var(--s2)}
 .dv .grow small{display:block;line-height:1.45}

@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — QR con la fotocamera nell'app, jsQR nel repo; ogni dispositivo con un nome suo
+
+**Contesto:** per abbinare un telefono si doveva scrivere a mano il codice; i dispositivi avevano nomi uguali ("Telefono", "Chrome su Linux") e sembravano la stessa entità; importando le impostazioni si copiava anche il nome dell'altro dispositivo.
+**Scelta:** `scanQR()` con `getUserMedia` (fotocamera posteriore): `BarcodeDetector` se il browser lo ha, altrimenti jsQR 1.4.0 (Apache 2.0) copiato in `client/vendor/` e caricato solo quando si apre la fotocamera; nell'app basta il permesso CAMERA (la WebView di Capacitor lo chiede da sé). Il QR letto apre la finestra giusta: abbinamento, invito, Jam o indirizzo di un server. Nome di base del dispositivo = tipo/browser, modello se disponibile, ultime 4 lettere del suo identificativo, calcolato una volta; l'importazione non copia le preferenze del singolo dispositivo (`DEVICE_PREFS`).
+**Alternative scartate:** un plugin nativo di scansione (codice nativo in più per una cosa che la WebView fa già); jsQR da CDN (niente offline nell'app, dipendenza esterna); jsQR nella shell del service worker (256 kB caricati a ogni avvio per un uso raro).
+**Da rivedere se:** `BarcodeDetector` arriva su tutte le WebView (allora jsQR si può togliere).
+
 ## 2026-10-10 — Dispositivi con chiave: attesa, abbinamento e revoca immediata
 
 **Contesto:** server esposto su internet (Tailscale Funnel). Le sessioni Armony si potevano revocare, ma `/rest` inoltrava a Navidrome token+sale senza chiedere una sessione: un dispositivo revocato continuava ad ascoltare. `ARMONY_TOKEN` valeva anche da internet; dietro tailscaled tutte le richieste risultavano da 127.0.0.1 (waitress scartava `X-Forwarded-For`), quindi i limiti dei tentativi contavano tutta internet come un solo indirizzo locale.

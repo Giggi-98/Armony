@@ -111,6 +111,7 @@ const I = {
   stats: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   friends: '<circle cx="9" cy="8" r="3.5"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5M16 14.5c3 0 6 1.5 6 4.5"/>',
   jam: '<circle cx="8" cy="15" r="5"/><circle cx="16" cy="9" r="5"/>',
+  qr: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3M21 14v.01M14 21h.01M18 18h3v3h-3z"/>',
   moon: '<path d="M20 14A8 8 0 1 1 10 4a6.5 6.5 0 0 0 10 10z"/>',
   speed: '<path d="M12 13l4-4M4 18a9 9 0 1 1 16 0"/>',
   album: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>',
@@ -464,6 +465,7 @@ function noServer() {
   <div class="row" style="justify-content:center">
     ${ph ? `<button class="btn primary" data-act="phone" data-do="on">${ic('phone')} Usa la musica del telefono</button>` : ''}
     <button class="btn${ph ? '' : ' primary'}" data-act="addsrv" ${local ? `data-url="${esc(location.origin)}"` : ''}>${ph ? 'Collegati a un server' : 'Aggiungi server'}</button>
+    <button class="btn" data-act="scanqr">${ic('qr')} Inquadra un QR</button>
     <button class="btn" data-act="importset">Importa impostazioni da un amico</button>
     <a class="btn" href="#/jam">Entra in una Jam</a>
   </div></div>${local ? `<div class="row" style="justify-content:center;margin-top:var(--s5)"><a class="btn sm" href="${esc(apkUrl())}">${ic('down')} App Android</a><button class="btn sm" id="welQr">QR code</button></div>` : ''}`;
@@ -2979,6 +2981,55 @@ function resetApp() {
   };
   closeOutside(d); d.showModal();
 }
+// leggere un QR con la fotocamera (app e browser con HTTPS): BarcodeDetector se il browser lo ha, altrimenti jsQR
+// (vendor/jsQR.js, caricato solo qui). Restituisce il testo letto, o null se si annulla
+async function scanQR() {
+  if (!navigator.mediaDevices?.getUserMedia) { toast(location.protocol === 'http:' && !NATIVE ? 'La fotocamera funziona solo con HTTPS: apri Armony dal suo indirizzo https.' : 'Questo dispositivo non permette di usare la fotocamera.'); return null; }
+  const d = $('#dlg2'); d.className = 'qrscan';
+  d.innerHTML = `<h3>Inquadra il QR</h3><div class="qrcam"><video playsinline muted></video><span class="qrframe" aria-hidden="true"></span></div>
+    <p class="sub" id="qrMsg">Avvicina il codice: si legge da solo.</p><div class="row"><button class="btn" id="qrStop">Annulla</button></div>`;
+  const video = d.querySelector('video'), msg = $('#qrMsg');
+  let stream, done = false, timer;
+  const stop = () => { done = true; clearTimeout(timer); stream?.getTracks().forEach(t => t.stop()); };
+  return new Promise(async res => {
+    const end = v => { if (done) return; stop(); d.close(); res(v); };
+    d.onclose = () => { d.className = ''; d.onclose = null; stop(); res(null); };
+    $('#qrStop').onclick = () => end(null);
+    d.showModal();
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
+    catch (e) { msg.textContent = e.name === 'NotAllowedError' ? 'Serve il permesso della fotocamera: consentilo e riprova.' : 'Non riesco ad aprire la fotocamera.'; return; }
+    if (done) return stop();
+    video.srcObject = stream; await video.play().catch(() => {});
+    let det = null;
+    try { if ('BarcodeDetector' in window && (await BarcodeDetector.getSupportedFormats()).includes('qr_code')) det = new BarcodeDetector({ formats: ['qr_code'] }); } catch {}
+    if (!det && !window.jsQR) await new Promise((ok, ko) => { const sc = document.createElement('script'); sc.src = 'vendor/jsQR.js'; sc.onload = ok; sc.onerror = ko; document.head.append(sc); }).catch(() => {});
+    const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
+    const tick = async () => {
+      if (done) return;
+      try {
+        if (video.readyState >= 2) {
+          if (det) { const r = await det.detect(video); if (r[0]?.rawValue) return end(r[0].rawValue); }
+          else if (window.jsQR) {
+            const w = Math.min(640, video.videoWidth), h = Math.round(video.videoHeight * w / video.videoWidth); cv.width = w; cv.height = h;
+            cx.drawImage(video, 0, 0, w, h); const r = jsQR(cx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+            if (r?.data) return end(r.data);
+          }
+        }
+      } catch {}
+      timer = setTimeout(tick, 180);
+    };
+    tick();
+  });
+}
+// cosa fare con un QR letto: abbinamento, invito, Jam o indirizzo di un server
+async function useScan(text) {
+  if (!text) return;
+  const t = text.trim(), m = t.match(/^(https?:\/\/[^#\s]*?)\/?#\/(abbina|invito)\/([\w-]+)/i), jam = t.match(/#(\/jam\/entra\/\S+)$/);
+  if (m) return serverDialog(null, { url: m[1].replace(/\/+$/, ''), mode: m[2].toLowerCase() === 'abbina' ? 'codice' : 'crea', code: m[3] });
+  if (jam) { location.hash = '#' + jam[1]; return; }
+  if (/^https?:\/\/\S+$/i.test(t)) return serverDialog(null, { url: t.replace(/[#?].*$/, '').replace(/\/+$/, '') });
+  toast('Questo QR non è di Armony.');
+}
 async function qrInto(box, text) {
   // stessa libreria del QR della Jam, caricata solo quando serve
   if (!window.QRCode) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; sc.onload = res; sc.onerror = rej; document.head.append(sc); });
@@ -3109,7 +3160,7 @@ function serverDialog(s, preset = {}) {
   s = s || { id: uid(8), name: preset.name || '', url: preset.url || '', user: '', shareBase: '' };
   const d = $('#dlg'); d.className = '';
   d.innerHTML = `<h3>${editing ? 'Modifica server' : 'Nuovo server'}</h3><div class="stack">
-    <label class="f">Indirizzo<input type="url" id="sUrl" value="${esc(s.url)}" placeholder="http://192.168.1.10:8080" autocapitalize="none" autocorrect="off" inputmode="url"></label>
+    <label class="f">Indirizzo<span class="row" style="flex-wrap:nowrap;gap:var(--s2)"><input type="url" id="sUrl" value="${esc(s.url)}" placeholder="http://192.168.1.10:8080" autocapitalize="none" autocorrect="off" inputmode="url" style="flex:1;min-width:0"><button type="button" class="icon-btn" id="sScan" aria-label="Inquadra un QR" title="Inquadra un QR">${ic('qr')}</button></span></label>
     <div class="seg" id="sMode" role="radiogroup" aria-label="Accesso" hidden><label><input type="radio" name="smode" value="accedi" checked><span>Accedi</span></label><label id="sCreaL"><input type="radio" name="smode" value="crea"><span>Crea un account</span></label><label id="sCodL" hidden><input type="radio" name="smode" value="codice"><span>Con un codice</span></label></div>
     <div class="stack" id="sLogin">
       <label class="f">Utente<input type="text" id="sUser" value="${esc(s.user)}" autocomplete="username" autocapitalize="none" autocorrect="off"></label>
@@ -3216,6 +3267,8 @@ function serverDialog(s, preset = {}) {
     finally { $('#sSave').disabled = false; }
   };
   $('#sSave').onclick = () => mode() === 'crea' ? create() : mode() === 'codice' ? pairNow() : save(false);
+  // QR di abbinamento, d'invito o di un server: si legge e si riapre questa finestra già compilata
+  $('#sScan').onclick = async () => { const t = await scanQR(); if (t) { d.close(); useScan(t); } };
   d.showModal();
   checkReg();
 }
@@ -3508,6 +3561,7 @@ Deve essere uguale a quello che vede l'altro amministratore.`)) { await dlApi(`/
       case 'fedrm': if (confirm(`Scollegare ${el.dataset.name}? Non vedrete più le vostre librerie; i brani già copiati restano.`)) { await dlApi(`/api/fed/nodes/${el.dataset.id}`, { method: 'DELETE' }); refreshFed(); } break;
       case 'usrrevoke': if (confirm(`${Disp.ok(srv()) ? `Revocare tutti i dispositivi di ${el.dataset.user}? Smettono subito di funzionare e per rientrare servirà un'approvazione.` : `Disconnettere ${el.dataset.user} da tutti i dispositivi? Dovrà rifare l'accesso.`}`)) { await dlApi(`/api/users/${encodeURIComponent(el.dataset.user)}/sessions`, { method: 'DELETE' }); refreshUsers(); } break;
       case 'resetapp': resetApp(); break;
+      case 'scanqr': useScan(await scanQR()); break;
       case 'exportset': {
         const withPw = confirm('Includere le credenziali nel file?\nOK = sì (conservalo al sicuro), Annulla = no');
         // mai la sessione: è di questo dispositivo. Le credenziali sono token + sale, non la password
@@ -3528,7 +3582,10 @@ Deve essere uguale a quello che vede l'altro amministratore.`)) { await dlApi(`/
         if (!S.active) S.active = S.servers[0]?.id;
         if (j.downloader?.token && !S.dl.token) store.set('downloader', j.downloader);  // file di Armony 0.2
         syncSessions();
-        if (j.prefs) { const nick = P.nick; Object.assign(P, j.prefs, { nick: nick || j.prefs.nick }); savePrefs(); }
+        if (j.prefs) {
+          const nick = P.nick, mine = Object.fromEntries(DEVICE_PREFS.map(k => [k, P[k]]));  // nome, volume, sganciato… restano di questo dispositivo
+          Object.assign(P, j.prefs, mine, { nick: nick || j.prefs.nick }); savePrefs();
+        }
         else if (j.quality && QUALITIES[j.quality]) { P.quality = j.quality; savePrefs(); }
         persistServers(); route();
         toast(S.servers.some(s => !s.tok) ? 'Importato. Inserisci le password mancanti con Modifica.' : 'Impostazioni importate.');
