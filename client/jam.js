@@ -71,8 +71,11 @@ const wire = t => t && ({ id: t.id, title: t.title, artist: t.artist, album: t.a
 // near: il server da cui arriva il brano quando è certo (i propri dispositivi collegati allo stesso server)
 const localize = (w, near) => {
   if (!w) return null;
-  const s = S.servers.find(x => absUrl(x.url) === w.serverUrl || (w.pub && x.me?.public === w.pub) || (x.me?.public && x.me.public === w.serverUrl))
-    || (near && w.serverUrl ? srv(near) : null);
+  // a parità di indirizzo vince il server in uso, poi una voce che funziona: una voce revocata o in attesa (resta dopo un
+  // riabbinamento) non ha credenziali, e ogni brano mandato lì verrebbe rifiutato
+  const same = x => absUrl(x.url) === w.serverUrl || (w.pub && x.me?.public === w.pub) || (x.me?.public && x.me.public === w.serverUrl);
+  const n = near ? srv(near) : null;
+  const s = (n && same(n) ? n : null) || S.servers.find(x => same(x) && !x.revoked && !x.pending) || S.servers.find(same) || (w.serverUrl ? n : null);
   return { ...w, serverId: s ? s.id : 'nessuno' };
 };
 async function relayCode(a, b) {

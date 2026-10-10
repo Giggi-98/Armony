@@ -171,8 +171,8 @@ const Disp = {
   },
   gateView(s) {
     view.innerHTML = s.revoked ? `<div class="gate"><span class="gate-ic">${ic('lock')}</span><h1>Questo dispositivo è stato revocato</h1>
-      <p class="sub">L'accesso a ${esc(s.name)} è stato tolto da un tuo dispositivo o dall'amministratore. Per rientrare accedi di nuovo con la password: il dispositivo dovrà essere approvato.</p>
-      <div class="row"><button class="btn primary" data-dg="relog">Accedi di nuovo</button><a class="btn" href="#/impostazioni">Impostazioni</a></div></div>`
+      <p class="sub">L'accesso a ${esc(s.name)} è stato tolto da un tuo dispositivo o dall'amministratore. Per rientrare usa un codice di abbinamento da un dispositivo fidato, o accedi con la password (il dispositivo dovrà essere approvato). Con «Ripristina» riparti da zero.</p>
+      <div class="row"><button class="btn primary" data-dg="code">Ho un codice di abbinamento</button><button class="btn" data-dg="relog">Accedi con la password</button><button class="btn danger" data-dg="reset">Ripristina</button></div></div>`
       : `<div class="gate"><span class="gate-ic">${ic('shield')}</span><h1>In attesa di approvazione</h1>
       <p class="sub">Questo dispositivo è nuovo per ${esc(s.name)}. Chiedi l'approvazione da un tuo dispositivo fidato (Impostazioni → Dispositivi e sicurezza) o all'amministratore.</p>
       ${s.pending === '—' ? '<p class="small gate-wait">Senza HTTPS questo dispositivo non ha una chiave: chi approva lo riconosce dal nome e dall\'indirizzo.</p>'
@@ -181,6 +181,7 @@ const Disp = {
       <div class="row"><button class="btn" data-dg="code">Ho un codice di abbinamento</button><a class="btn" href="#/impostazioni">Impostazioni</a></div></div>`;
     view.querySelector('[data-dg=relog]')?.addEventListener('click', () => serverDialog(s));
     view.querySelector('[data-dg=code]')?.addEventListener('click', () => serverDialog(null, { url: s.url, mode: 'codice' }));
+    view.querySelector('[data-dg=reset]')?.addEventListener('click', () => resetApp());
     if (s.pending) viewInterval(() => this.poll(s), 5000);
   },
   async poll(s) {

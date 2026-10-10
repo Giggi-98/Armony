@@ -1714,7 +1714,7 @@ const AutoEq = {
   }
 };
 const Engine = {
-  decks: [], gains: [], cur: 0, ctx: null, master: null, eq: [], comp: null, analyser: null, pre: null, tap: null, lim: null, shadow: [], dest: null, fading: false, blobUrls: [null, null], scrobbled: null,
+  decks: [], gains: [], cur: 0, ctx: null, master: null, eq: [], comp: null, analyser: null, pre: null, tap: null, lim: null, shadow: [], dest: null, fading: false, blobUrls: [null, null], scrobbled: null, fails: 0,
   init() {
     for (let i = 0; i < 2; i++) {
       const a = document.createElement('audio'); a.preload = 'auto';
@@ -1829,12 +1829,19 @@ const Engine = {
         return;
       }
       if (!off) window.Diag?.report('errore', 'audio', `brano non riproducibile: ${currentTrack()?.title || '?'}`, `codice ${me?.code ?? '?'} ${me?.message || ''}\n${safeUrl(src)}`);
+      // tre brani di fila che non partono: è il server o l'accesso, non i brani. Fermarsi invece di scorrere tutta la coda
+      if (++this.fails >= 3 || sv?.revoked || sv?.pending) {
+        this.fails = 0; this.el.pause();
+        toast(sv?.revoked ? 'Questo server è stato revocato su questo dispositivo: scegli il server giusto in Impostazioni.' : 'Più brani di fila non partono: mi fermo. Controlla la connessione o il server.', 7000);
+        window.Diag?.report('avviso', 'audio', 'riproduzione fermata: più brani di fila non riproducibili', sv ? `${sv.name}${sv.revoked ? ' (revocato)' : ''}` : 'server sconosciuto');
+        return;
+      }
       toast(off ? 'Sei offline e questo brano non è salvato sul dispositivo.' : 'Impossibile riprodurre questo brano, passo al successivo.');
       if (Jam.role !== 'guest' && !Radio.st) setTimeout(() => ctlNext(true), 1500);
       return;
     }
     if (ev === 'timeupdate') { this.tick(); emit('time'); }
-    else if (ev === 'play' || ev === 'playing') { paintButtons(); emit('play'); AutoEq.run(); }
+    else if (ev === 'play' || ev === 'playing') { if (ev === 'playing') this.fails = 0; paintButtons(); emit('play'); AutoEq.run(); }
     else if (ev === 'pause') { paintButtons(); emit('pause'); QSync.schedule(); AutoEq.run(); }
     else if (ev === 'ended') this.ended();
     else if (ev === 'loadedmetadata') emit('time');
@@ -3667,6 +3674,10 @@ function resetApp() {
     if ($('#rsRev')?.checked) for (const s of mine) await srvApi(s, `/api/dispositivi/${encodeURIComponent(s.dev)}/revoca`, { method: 'POST' }).catch(() => {});
     else for (const s of mine) await srvApi(s, '/api/logout', { method: 'POST' }).catch(() => {});
     try { Engine.stop(); } catch {}
+    // da qui niente deve più scrivere: un evento del canale dal vivo o un rinnovo di sessione arrivato durante la pulizia
+    // riscriverebbe i server di prima (è così che una voce revocata restava dopo il ripristino)
+    try { Live.stop(); } catch {}
+    S.servers = []; S.active = null; store.set = () => {};
     try { localStorage.clear(); sessionStorage.clear(); } catch {}
     try { DB._db && (await DB._db).close(); } catch {}
     await new Promise(r => { const q = indexedDB.deleteDatabase('armony'); q.onsuccess = q.onerror = q.onblocked = r; });
@@ -3948,7 +3959,15 @@ function serverDialog(s, preset = {}) {
     msg('Abbino…'); $('#sSave').disabled = true;
     try {
       const n = await Disp.pair(url, code);
-      S.servers.push(n); S.active = n.id; persistServers(); d.close();
+      // riabbinato dopo una revoca: la voce nuova prende il posto (e l'id, così coda e offline restano validi) di quella
+      // morta dello stesso server e utente, invece di restarle accanto
+      const old = S.servers.find(x => !x.local && absUrl(x.url) === absUrl(n.url) && x.user === n.user && (x.revoked || x.pending || !x.tok));
+      if (old) {
+        const k = await DB.get('chiavi', n.id).catch(() => null);
+        if (k) { await DB.put('chiavi', { ...k, k: old.id }); DB.del('chiavi', n.id).catch(() => {}); }
+        n.id = old.id; S.servers[S.servers.indexOf(old)] = n;
+      } else S.servers.push(n);
+      S.active = n.id; persistServers(); d.close();
       location.hash = '#/home'; route(); Live.connect?.();
       toast(`Dispositivo abbinato: benvenuto, ${n.user}.`);
     } catch (e) { msg(e.message); }
