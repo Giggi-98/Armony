@@ -581,8 +581,8 @@ dialog.bio .biotxt{color:var(--ink);opacity:.9;line-height:1.65;font-size:1rem;w
 .ab-play:active{transform:scale(.94)}
 .icon-btn.ab{width:48px;height:48px}
 .icon-btn.ab svg{width:24px;height:24px}
-dialog.sheet .mi.danger{color:var(--danger)}
-dialog.sheet .mi svg{width:20px;height:20px;flex:none}
+:is(dialog.sheet,dialog.drawer) .mi.danger{color:var(--danger)}
+:is(dialog.sheet,dialog.drawer) .mi svg{width:20px;height:20px;flex:none}
 /* schede: artisti tondi, playlist quadrate, due schede speciali in testa alle playlist */
 .lcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--card-min,164px),1fr));gap:var(--s2)}
 .lcard{display:flex;flex-direction:column;min-width:0;padding:var(--s3);border:0;border-radius:var(--r-s);background:none;color:inherit;text-align:left;cursor:pointer;transition:background var(--t-tap) ease,transform var(--t-tap) var(--ease-out)}
@@ -596,6 +596,16 @@ dialog.sheet .mi svg{width:20px;height:20px;flex:none}
 .lcard.round .lcover{border-radius:50%}
 .lcard.special .lcover{background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#c2410c));color:var(--on-accent);box-shadow:none}
 .lcard.special.alt .lcover{background:linear-gradient(135deg,#1e3264,#148a08);color:#fff}
+/* Libreria a elenco (come Spotify sul telefono): copertina piccola, nome e sottotitolo a fianco */
+.lcards.list{display:flex;flex-direction:column;gap:2px}
+.lcards.list .lcard{display:grid;grid-template-columns:56px minmax(0,1fr);grid-template-rows:auto auto;column-gap:var(--s3);align-items:center;padding:var(--s1) var(--s2)}
+.lcards.list .lcover{grid-row:1 / 3;width:56px;margin:0;box-shadow:none}
+.lcards.list .lcover svg{width:24px;height:24px}
+.lcards.list .lcard b{align-self:end}
+.lcards.list .lcard small{align-self:start;-webkit-line-clamp:1}
+.lhead{display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
+.lhead h1{margin-bottom:0}
+.lhead .icon-btn svg{width:26px;height:26px}
 .lcard.special svg{width:34%;height:34%}
 /* lettera dell'indice degli artisti: una riga intera, compatta */
 .lletter{grid-column:1/-1;font:800 1.15rem/1 var(--display);color:var(--accent-text);padding:var(--s4) var(--s3) 0}
@@ -770,7 +780,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px color
 .pill.live.on{background:var(--accent-soft);color:var(--ink)}
 .pill.live.on svg{color:var(--accent-text)}
 /* nome delle cuffie: in ambra, come gli accenti dell'app */
-.pill.live .hp,dialog.sheet .mi .hp{color:var(--accent-text);font-weight:700}
+.pill.live .hp,:is(dialog.sheet,dialog.drawer) .mi .hp{color:var(--accent-text);font-weight:700}
 .pill.live:has(.hp) svg{color:var(--accent-text)}
 
 /* equalizzatore */
@@ -908,14 +918,14 @@ dialog.sheet{padding:10px 8px}
 dialog.sheet .head{display:flex;gap:12px;align-items:center;padding:6px 10px 12px;border-bottom:1px solid var(--line);margin-bottom:6px}
 dialog.sheet .head .pic{width:48px;height:48px;border-radius:8px;overflow:hidden;background:var(--surface2);flex:none}
 dialog.sheet .head img{width:100%;height:100%;object-fit:cover}
-dialog.sheet .mi{display:flex;width:100%;gap:14px;align-items:center;min-height:48px;padding:10px 14px;border:0;background:none;border-radius:var(--r-m);font-weight:500;cursor:pointer;text-align:left;color:inherit;text-decoration:none}
-@media (hover:hover) and (pointer:fine){dialog.sheet .mi:hover{background:var(--surface2)}}
-dialog.sheet .mi.on{background:var(--accent-soft)}
-dialog.sheet .mi svg{width:19px;height:19px;color:var(--muted);flex:none}
-dialog.sheet .mi.danger,dialog.sheet .mi.danger svg{color:var(--danger)}
-dialog.sheet .mi .grow{flex:1;min-width:0}
-dialog.sheet .mi .grow b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-dialog.sheet .mi .grow small{display:block;color:var(--muted);font-size:.84rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+:is(dialog.sheet,dialog.drawer) .mi{display:flex;width:100%;gap:14px;align-items:center;min-height:48px;padding:10px 14px;border:0;background:none;border-radius:var(--r-m);font-weight:500;cursor:pointer;text-align:left;color:inherit;text-decoration:none}
+@media (hover:hover) and (pointer:fine){:is(dialog.sheet,dialog.drawer) .mi:hover{background:var(--surface2)}}
+:is(dialog.sheet,dialog.drawer) .mi.on{background:var(--accent-soft)}
+:is(dialog.sheet,dialog.drawer) .mi svg{width:19px;height:19px;color:var(--muted);flex:none}
+:is(dialog.sheet,dialog.drawer) .mi.danger,:is(dialog.sheet,dialog.drawer) .mi.danger svg{color:var(--danger)}
+:is(dialog.sheet,dialog.drawer) .mi .grow{flex:1;min-width:0}
+:is(dialog.sheet,dialog.drawer) .mi .grow b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+:is(dialog.sheet,dialog.drawer) .mi .grow small{display:block;color:var(--muted);font-size:.84rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 dialog.sheet .sh{margin:12px 12px 4px;font-size:.82rem;color:var(--muted)}
 /* barra in basso personalizzabile (tabsEditor in armony.js): anteprima come la barra vera, poi le righe con le frecce */
 .tbset{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s4);padding-top:var(--s4);border-top:1px solid var(--line)}
@@ -1006,64 +1016,94 @@ aside{view-transition-name:side}
 kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em;background:var(--surface2)}
 
 @media (max-width:860px){
-  /* lettore compatto (due righe) + barra delle sezioni; la safe-area si somma a parte */
-  :root{--player-h:168px}
-  /* con "Dove suona", Jam o timer la loro riga in più */
-  :root:has(#player .extra>.pill:not([hidden],.desk-only)){--player-h:204px}
+  /* come Spotify: mini lettore a una riga, una scheda sopra la barra delle sezioni; la safe-area si somma a parte */
+  :root{--player-h:138px}
+  /* con Jam, radio o timer la loro riga in più */
+  :root:has(#player .extra>.pill:not([hidden],.desk-only,#livePill)){--player-h:172px}
   .app{grid-template-columns:minmax(0,1fr);align-content:start}
   #glow{left:0;--gx:50%;--gy:24%}
   :root[data-glow="album"] #glow{--gx:30%;--gy:10%}
-  /* in alto restano logo e server/qualità; la navigazione scende sotto il pollice */
-  aside{position:relative;top:0;z-index:1;height:auto;flex-direction:row;align-items:center;padding:var(--s2) var(--s4);gap:var(--s3);border-right:0;border-bottom:1px solid var(--line);overflow:visible}
-  .brand{font-size:1.2rem;padding:0}
-  #nav{display:none}
-  .ctx{margin:0 0 0 auto;width:auto;max-width:60%;padding:8px 12px;min-height:44px}
-  /* Cerca a portata anche quando non sta nella barra in basso: in alto a destra, accanto a server e qualità */
+  /* in alto: avatar (menu del profilo con le altre sezioni), marchio, lente e tema; la barra scorre via con la pagina */
+  aside{position:relative;top:0;z-index:1;height:auto;flex-direction:row;align-items:center;padding:var(--s2) var(--s4);gap:var(--s3);border-right:0;border-bottom:0;overflow:visible;min-height:56px}
+  #hMe{position:relative;display:grid;place-items:center;width:40px;height:40px;margin-left:calc(-1 * var(--s1));padding:0;border:0;border-radius:50%;background:none;cursor:pointer;flex:none}
+  #hMe .pav{--sz:32px}
+  #hMe .pdot{top:2px;right:2px}
+  .brand{font-size:1.15rem;padding:0;margin-right:auto}
+  #nav,.ctx{display:none}
   #hSearch{width:44px;height:44px;margin-right:calc(-1 * var(--s1));color:var(--ink)}
   #hSearch svg{width:22px;height:22px}
-  /* nella barra in alto (che scorre via con la pagina), a destra della lente */
-  #themeBtn{position:absolute;top:calc(var(--sat) + var(--s2));right:calc(var(--s4) - var(--s1));width:44px;height:44px;background:none;border:0;box-shadow:none}
+  #themeBtn{position:absolute;top:calc(var(--sat) + 6px);right:calc(var(--s4) - var(--s1));width:44px;height:44px;background:none;border:0;box-shadow:none}
   body:has(#themeBtn:not([hidden])) #hSearch{margin-right:40px}
-  /* due righe: sopra brano e ⏮ ▶ ⏭, sotto casuale, la barra a tutta larghezza e ripeti.
-     Testi, coda e qualità sul telefono stanno in "In riproduzione" e nel pulsante in alto */
-  .player{grid-template-columns:auto minmax(0,1fr) auto auto auto;grid-template-areas:"np np prev play next" "shuf seek seek seek rep" "ex ex ex ex ex" "tabs tabs tabs tabs tabs";gap:0 var(--s1);padding:var(--s2) var(--s2) 0 var(--s4);align-content:end;min-height:0}
-  .np{grid-area:np;min-width:0}
+  /* il lettore in basso: una scheda (copertina, titolo, dispositivo, cuore, ▶) col colore della copertina e una linea
+     d'avanzamento sul bordo inferiore; sotto le sezioni. Il resto dei comandi sta nel lettore a tutto schermo */
+  .player{grid-template-columns:minmax(0,1fr) auto auto auto;grid-template-areas:"np dev star play" "ex ex ex ex" "tabs tabs tabs tabs";gap:0;padding:var(--s2) var(--s2) 0;align-content:end;min-height:0;background:var(--bg);border-top:0;box-shadow:none}
+  .player::before{content:"";grid-area:np / np / np / play;align-self:stretch;margin:0;border-radius:10px;background:linear-gradient(var(--mini,transparent),var(--mini,transparent)),var(--surface2);box-shadow:0 8px 24px -14px rgb(0 0 0 / .7);transition:background .4s ease}
+  .player::after{content:"";grid-area:np / np / np / play;align-self:end;justify-self:start;position:static;height:2px;width:calc(var(--pp,0%) - 16px);max-width:calc(100% - 16px);margin:0 8px 0;border-radius:2px;background:var(--ink);opacity:.9;pointer-events:none}
+  .np{grid-area:np;min-width:0;position:relative;z-index:1;padding:8px 0 8px 8px;gap:10px;touch-action:pan-y}
+  .np .t{will-change:transform}
+  .np b{font-size:.92rem}
+  .np small{font-size:.8rem}
+  .np small .ondev{display:inline-flex;align-items:center;gap:4px;color:var(--accent-text);font-weight:600}
+  .np small .ondev svg{width:13px;height:13px}
+  .disc{width:44px;height:44px;border-radius:6px;background:var(--surface);box-shadow:none}
+  .disc img,.disc .lbl{inset:0;width:100%;height:100%;border-radius:6px}
+  .disc.spin{animation:none}
+  #bDev{grid-area:dev;position:relative;z-index:1;width:40px;height:40px;color:var(--muted)}
+  #bDev.on{color:var(--accent-text)}
+  #bStarM{grid-area:star;position:relative;z-index:1;width:40px;height:40px}
+  #bStarM.on{color:var(--accent-text)}
   .ctrl,.ctrl>.row{display:contents}
-  #bPrev{grid-area:prev}#bPlay{grid-area:play;margin:0 2px}#bNext{grid-area:next}#bShuf{grid-area:shuf}#bRep{grid-area:rep}
-  .seek{grid-area:seek;min-width:0;gap:8px;padding:0 2px;height:var(--hit)}
-  /* lettore piccolo (data-mini, Phone in armony.js): scorrendo verso il basso restano brano, ▶ e ⏭ con una linea
-     sottile d'avanzamento; salendo o in cima alla pagina torna intero. L'altezza cambia dall'alto: il contenuto non salta */
-  #bPrev,#bShuf,#bRep,.seek{transition:height var(--t-move) var(--ease-out),width var(--t-move) var(--ease-out),opacity var(--t-tap) ease}
-  :root[data-mini] :is(#bShuf,#bRep,.seek){height:0;opacity:0;overflow:hidden;pointer-events:none}
-  :root[data-mini] #bPrev{width:0;opacity:0;overflow:hidden;pointer-events:none}
-  .player::after{content:"";position:absolute;left:0;top:-1px;height:2px;width:var(--pp,0%);background:var(--accent);opacity:0;transition:opacity var(--t-move) ease;pointer-events:none}
-  :root[data-mini] .player::after{opacity:1}
-  /* "Dove suona", Jam e timer: una riga dentro il lettore, mai sopra il contenuto; sparisce se sono tutti spenti */
-  .extra{grid-area:ex;justify-content:flex-start;flex-wrap:nowrap;gap:var(--s2);overflow-x:auto;scrollbar-width:none;padding:var(--s1) 0 var(--s2)}
-  .extra:not(:has(>.pill:not([hidden],.desk-only))){display:none}
+  #bPrev,#bNext,#bShuf,#bRep,.seek{display:none}
+  #bPlay{grid-area:play;position:relative;z-index:1;width:44px;height:44px;margin:0 6px 0 0;background:none;color:var(--ink);box-shadow:none}
+  #bPlay svg{width:26px;height:26px}
+  :root[data-mini] .player::after{opacity:.9}
+  /* Jam, radio e timer: una riga sotto la scheda, solo quando ci sono. "Dove suona" è l'icona nella scheda */
+  .extra{grid-area:ex;justify-content:flex-start;flex-wrap:nowrap;gap:var(--s2);overflow-x:auto;scrollbar-width:none;padding:var(--s2) var(--s1) 0}
+  .extra:not(:has(>.pill:not([hidden],.desk-only,#livePill))){display:none}
+  .extra #livePill{display:none}
   .extra .pill{position:relative;min-height:28px;flex:none}
   .extra .pill::after{content:"";position:absolute;inset:-8px -2px}
-  .extra{max-height:44px;transition:max-height var(--t-move) var(--ease-out),padding var(--t-move) var(--ease-out),opacity var(--t-tap) ease}
-  :root[data-mini] .extra{max-height:0;padding:0;opacity:0;pointer-events:none}
   .extra .icon-btn,.extra input[type=range]{display:none}
-  .tabbar{grid-area:tabs;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);margin:var(--s1) calc(-1 * var(--s2)) 0 calc(-1 * var(--s4));border-top:1px solid var(--line);padding-bottom:calc(var(--sab) + var(--s2))}
-  .tabbar a,.tabbar button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:54px;padding:4px 0;border:0;background:none;color:var(--muted);font-size:.72rem;font-weight:500;text-decoration:none;cursor:pointer;position:relative}
-  .tabbar svg{width:22px;height:22px;padding:3px 16px;border-radius:99px;box-sizing:content-box}
-  .tabbar .on{color:var(--ink);font-weight:600}
-  .tabbar .on svg{background:var(--accent-soft)}
-  .tabbar .dot{top:6px;right:calc(50% - 22px)}
+  .tabbar{grid-area:tabs;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);margin:var(--s1) calc(-1 * var(--s2)) 0;padding-bottom:calc(var(--sab) + var(--s1));background:linear-gradient(transparent,var(--bg) 30%)}
+  .tabbar a,.tabbar button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:54px;padding:4px 0;border:0;background:none;color:var(--muted);font-size:.7rem;font-weight:500;text-decoration:none;cursor:pointer;position:relative}
+  .tabbar svg{width:24px;height:24px}
+  .tabbar .on{color:var(--ink);font-weight:700}
+  .tabbar .dot{top:6px;right:calc(50% - 18px)}
+  #bQueueM{display:none}
+  /* "In riproduzione" a tutto schermo, come Spotify: niente intestazione né sezioni; il lettore in basso diventa il
+     pannello dei comandi (posizione, casuale, ⏮ ▶ ⏭, ripeti, dispositivo, coda) e sopra scorrono disco, testi e dettagli */
+  :root[data-r="ora"]{--player-h:196px}
+  :root[data-r="ora"] :is(aside,#themeBtn){display:none}
+  :root[data-r="ora"] main{--pad-t:calc(var(--sat) + var(--s2))}
+  :root[data-r="ora"] .now-acts{display:none}
+  :root[data-r="ora"] .bigdisc{max-width:min(76vw,340px)}
+  :root[data-r="ora"] .player{grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr) auto;grid-template-areas:"seek seek seek seek seek" "shuf prev play next rep" "dev . . . qm";align-items:center;padding:var(--s3) var(--s4) calc(var(--sab) + var(--s2));background:linear-gradient(transparent,var(--bg) 26%)}
+  :root[data-r="ora"] .player::before,:root[data-r="ora"] .player::after,:root[data-r="ora"] :is(.np,#bStarM,.tabbar,.extra){display:none}
+  :root[data-r="ora"] .seek{display:flex;grid-area:seek;height:auto;padding:0 0 var(--s2)}
+  :root[data-r="ora"] :is(#bPrev,#bNext,#bShuf,#bRep){display:grid;place-items:center;width:52px;height:52px}
+  :root[data-r="ora"] :is(#bPrev,#bNext) svg{width:30px;height:30px}
+  :root[data-r="ora"] #bShuf{grid-area:shuf}:root[data-r="ora"] #bPrev{grid-area:prev;justify-self:end}:root[data-r="ora"] #bNext{grid-area:next;justify-self:start}:root[data-r="ora"] #bRep{grid-area:rep}
+  :root[data-r="ora"] #bPlay{width:68px;height:68px;margin:0 var(--s4);background:var(--accent);color:var(--on-accent);box-shadow:var(--shadow-float)}
+  :root[data-r="ora"] #bPlay svg{width:30px;height:30px}
+  :root[data-r="ora"] #bDev{grid-area:dev}
+  :root[data-r="ora"] #bQueueM{display:grid;grid-area:qm;place-items:center;width:40px;height:40px}
+  .np-head.mobile-only{display:flex;align-items:center;gap:var(--s2);margin:0 calc(-1 * var(--s2)) var(--s4)}
+  .np-ctx{flex:1;min-width:0;text-align:center}
+  .np-ctx small{display:block;font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  .np-ctx a,.np-ctx b{display:block;font-weight:700;font-size:.86rem;color:var(--ink);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .np-head .icon-btn svg{width:24px;height:24px}
   .extra .desk-only{display:none}
   /* azioni di album e liste: le prime due con l'etichetta, le altre come icone, tutte su una riga */
   .acts-row{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-right:calc(-1 * var(--s4));padding-right:var(--s4)}
   .acts-row .btn:nth-child(n+3){font-size:0;gap:0;padding:0;width:var(--hit);flex:none}
   .now-acts{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
   .now-acts .btn{flex:none}
-  .disc{width:46px;height:46px}.disc img,.disc .lbl{inset:11px;width:24px;height:24px}
-  .play{width:46px;height:46px}
   main{--pad-t:var(--s5);--pad-x:var(--s4);padding:var(--pad-t) var(--pad-x) var(--s6)}
   h2{margin-top:var(--s6)}
   .panel{padding:var(--s4)}
   .song,.song.noart{grid-template-columns:42px minmax(0,1fr) auto}
+  /* tenere premuto apre il menu del brano: niente selezione del testo né anteprima del link */
+  .song,#npBtn{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   .song.noart{grid-template-columns:minmax(0,1fr) auto}
   .song .n,.song.now .n,.song .d{display:none}  /* anche il brano in corso: il titolo è già in ambra, la colonna non c'è */
   .mobile-only{display:inline-grid}
@@ -1074,6 +1114,17 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   /* maniglia: dice che è un foglio, come nel resto del telefono */
   dialog.sheet::before{content:"";position:absolute;top:8px;left:50%;width:36px;height:4px;margin-left:-18px;border-radius:99px;background:var(--line)}
 }
+/* menu del profilo (telefono): un foglio da sinistra con le sezioni che non stanno nella barra in basso */
+dialog.drawer{margin:0 auto 0 0;height:100%;max-height:100%;width:min(86vw,340px);max-width:none;border:0;border-radius:0 var(--r-xl) var(--r-xl) 0;padding:calc(var(--sat) + var(--s5)) var(--s2) calc(var(--sab) + var(--s4));background:var(--surface);overflow-y:auto;position:fixed}
+dialog.drawer[open]{animation:drin .26s var(--ease-out)}
+@keyframes drin{from{transform:translateX(-100%)}}
+dialog.drawer::backdrop{background:rgb(0 0 0 / .5)}
+dialog.drawer .dr-me{display:flex;align-items:center;gap:var(--s3);padding:0 var(--s3) var(--s4)}
+dialog.drawer .dr-me b{display:block;font-size:1.1rem}
+dialog.drawer .dr-me small,dialog.drawer .mi small{display:block;color:var(--muted);font-size:var(--fs-small);font-weight:500}
+dialog.drawer .dr-sep{height:1px;background:var(--line);margin:var(--s2) var(--s3)}
+dialog.drawer .mi{min-height:52px}
+@media (prefers-reduced-motion:reduce){dialog.drawer[open]{animation:none}}
 /* === P: presenza, chi ascolta cosa sul server (Presence in armony.js) === */
 .pav{--sz:32px;width:var(--sz);height:var(--sz);flex:none;border-radius:50%;display:inline-grid;place-items:center;background:var(--pav);color:#fff;font:700 calc(var(--sz) * .45)/1 var(--body)}
 .pav.xs{--sz:16px}.pav.s{--sz:24px}.pav.m{--sz:44px}.pav.l{--sz:56px}
@@ -1084,7 +1135,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
 .pbar i{display:block;height:100%;background:var(--accent);transform-origin:left;transform:scaleX(0);transition:transform 1s linear}
 .paused .pbar i{background:var(--muted)}
 .pdot{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--bg)}
-dialog.sheet .mi .pdot{position:static;margin-left:auto;box-shadow:none}
+:is(dialog.sheet,dialog.drawer) .mi .pdot{position:static;margin-left:auto;box-shadow:none}
 /* barra laterale: chi ascolta, sopra le playlist */
 #sidePres{display:flex;flex-direction:column;margin:0 -6px;padding:var(--s3) 6px 0;border-top:1px solid var(--line)}
 #sidePres h3{margin:0 12px var(--s2);font-size:var(--fs-small);color:var(--muted)}
@@ -1372,6 +1423,7 @@ details.sosp input[type=checkbox]{width:18px;height:18px;accent-color:var(--acce
 <div id="glow" aria-hidden="true"></div>
 <div class="app">
   <aside>
+    <button class="mobile-only" id="hMe" aria-haspopup="dialog" aria-label="Il tuo profilo e le altre sezioni"></button>
     <a class="brand" href="#/home"><i></i>armony</a>
     <nav id="nav"></nav>
     <div id="sidePres" hidden></div>
@@ -1388,6 +1440,9 @@ details.sosp input[type=checkbox]{width:18px;height:18px;accent-color:var(--acce
     <div class="disc" id="disc"><div class="lbl"></div></div>
     <div class="t"><b id="npT">Niente in riproduzione</b><small id="npA">Scegli un album o una playlist</small></div>
   </button>
+  <button class="icon-btn mobile-only" id="bDev" aria-label="Dove suona" aria-haspopup="dialog"></button>
+  <button class="icon-btn mobile-only" id="bStarM" aria-label="Preferito" hidden></button>
+  <button class="icon-btn mobile-only" id="bQueueM" aria-label="Coda"></button>
   <div class="ctrl">
     <div class="row">
       <button class="icon-btn" id="bShuf" aria-label="Ordine casuale"></button>

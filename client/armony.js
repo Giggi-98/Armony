@@ -77,6 +77,8 @@ function ask(title, value = '', label = '') {
 /* ================= icone ================= */
 const I = {
   pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  chev: '<path d="M6 9l6 6 6-6"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
   speaker: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="14" r="4"/><path d="M12 6h.01"/>',
   phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
   laptop: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/>',
@@ -150,7 +152,7 @@ const savePrefs = () => { store.set('prefs', P); store.set('prefsAt', Date.now()
 const S = {
   servers: store.get('servers', []),
   active: store.get('active', null),
-  queue: store.get('queue', []),
+  queue: store.get('queue', []), ctx: store.get('qctx', null),
   index: store.get('index', -1),
   shuffle: store.get('shuffle', false),
   repeat: store.get('repeat', 'off'),
@@ -423,7 +425,10 @@ async function route() {
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
     statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
   }[r] || vHome;
-  const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav; Scene.hash = location.hash; Scene.r = r;
+  const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav;
+  if (changed && Scene.hash) Scene.back = Scene.r === 'ora' ? Scene.back : Scene.hash;  // dove torna la freccia del lettore
+  Scene.hash = location.hash; Scene.r = r;
+  document.documentElement.dataset.r = r;  // il telefono cambia il lettore in basso su "In riproduzione" (index.html)
   const run = async () => {
     if (stale(n)) return;
     delete view.dataset.pl;
@@ -728,7 +733,7 @@ async function vLibrary(tab) {
   const n = Scene.nav;
   // tempo reale: artisti, album e generi arrivati con un download compaiono da soli (evento 'libreria')
   const live = f => { const on = () => { Bus.removeEventListener('libreria', on); if (!stale(n)) f(); }; Bus.addEventListener('libreria', on); };
-  const tabs = `<h1>Libreria</h1><div class="lpills" role="navigation" aria-label="Sezioni della libreria">${[['playlist', 'Playlist'], ['artisti', 'Artisti'], ['album', 'Album'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>`;
+  const tabs = `<div class="lhead"><h1>Libreria</h1>${can('playlist') ? `<button class="icon-btn" data-act="libplus" aria-label="Crea o importa una playlist">${ic('plus')}</button>` : ''}</div><div class="lpills" role="navigation" aria-label="Sezioni della libreria">${[['playlist', 'Playlist'], ['artisti', 'Artisti'], ['album', 'Album'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>`;
   if (tab === 'playlist') {
     view.innerHTML = tabs + '<div id="plBox"></div>';
     await playlistsInto($('#plBox'), n);
@@ -1228,23 +1233,37 @@ async function vPlaylists() {
   Bus.addEventListener('playlists', again);
 }
 // le playlist come in "La tua libreria" di Spotify: Preferiti fissato in cima, cerca, ordina (recenti, alfabetico, creatore)
+// "+" della Libreria, come Spotify: crea una playlist o importala
+function libPlus() {
+  const d = $('#dlg'); d.className = 'sheet';
+  d.innerHTML = `<button class="mi" id="lpNew">${ic('list')}<span class="grow">Playlist<small>Crea una playlist vuota</small></span></button>
+    <button class="mi" id="lpImp">${ic('down')}<span class="grow">Importa<small>Da Spotify (CSV di Exportify), M3U o JSON</small></span></button>`;
+  $('#lpNew').onclick = async () => { d.close(); const name = await ask('Nuova playlist', '', 'Nome'); if (name) { await api('createPlaylist', { name }); route(); } };
+  $('#lpImp').onclick = () => { d.close(); importPlaylist(); };
+  closeOutside(d); d.showModal();
+}
 async function playlistsInto(box, n) {
   const [pr, st] = await Promise.all([api('getPlaylists'), api('getStarred2').catch(() => null)]);
   if (stale(n) || !box.isConnected) return;
   const pls = arr(pr.playlists.playlist), favs = arr(st?.starred2?.song).length, o = { by: 'recent', ...store.get('plOrd', {}) }, me = srv().user;
   const sortL = [['recent', 'Recenti'], ['alpha', 'Alfabetico'], ['owner', 'Creatore']];
+  // elenco (come Spotify sul telefono) o griglia di copertine; si ricorda su questo dispositivo
+  let mode = store.get('plView', matchMedia('(max-width:860px)').matches ? 'list' : 'grid');
   const paint = q => {
     const Q = cleanTxt(q || ''), cmp = (a, b) => String(a || '').localeCompare(String(b || ''), 'it', { sensitivity: 'base' });
     const l = pls.filter(p => !Q || cleanTxt(`${p.name} ${p.owner || ''}`).includes(Q))
       .sort({ recent: (a, b) => cmp(b.changed || b.created, a.changed || a.created), alpha: (a, b) => cmp(a.name, b.name), owner: (a, b) => (a.owner !== me) - (b.owner !== me) || cmp(a.owner, b.owner) || cmp(a.name, b.name) }[o.by]);
+    const special = can('playlist') && !Q ? `<button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
+        <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>` : '';
+    $('#plCards').className = 'lcards ' + mode;
     $('#plCards').innerHTML = (!Q || cleanTxt('preferiti').includes(Q) ? `<a class="lcard favs" href="#/preferiti"><div class="lcover">${ic('heart', true)}</div><b>Preferiti</b><small>Playlist · ${favs} ${favs === 1 ? 'brano' : 'brani'}</small></a>` : '')
-      + (can('playlist') && !Q ? `<button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
-        <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>` : '')
-      + l.map(lPlCard).join('') + (Q && !l.length ? `<p class="sub">Nessuna playlist con «${esc(q)}».</p>` : '');
+      + (mode === 'grid' ? special : '') + l.map(lPlCard).join('') + (mode === 'list' ? special : '') + (Q && !l.length ? `<p class="sub">Nessuna playlist con «${esc(q)}».</p>` : '');
   };
   box.innerHTML = `<div class="ordbar"><label class="ordq">${ic('search')}<input type="search" id="plQ" placeholder="Cerca nelle playlist" aria-label="Cerca nelle playlist" autocomplete="off"></label>
-    <button class="ordby" id="plOrd"><span>${esc(sortL.find(x => x[0] === o.by)[1])}</span>${ic('sliders')}</button></div><div class="lcards" id="plCards"></div>`;
+    <button class="ordby" id="plOrd"><span>${esc(sortL.find(x => x[0] === o.by)[1])}</span>${ic('sliders')}</button>
+    <button class="icon-btn" id="plView" aria-label="${mode === 'list' ? 'Mostra a griglia' : 'Mostra a elenco'}">${ic(mode === 'list' ? 'grid' : 'list')}</button></div><div class="lcards" id="plCards"></div>`;
   paint('');
+  $('#plView').onclick = e => { mode = mode === 'list' ? 'grid' : 'list'; store.set('plView', mode); e.currentTarget.innerHTML = ic(mode === 'list' ? 'grid' : 'list'); e.currentTarget.setAttribute('aria-label', mode === 'list' ? 'Mostra a griglia' : 'Mostra a elenco'); paint($('#plQ').value); };
   $('#plQ').oninput = e => paint(e.target.value);
   $('#plOrd').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); ctxMenuOrPick([r.left, r.bottom + 4], sortL.map(([v, l]) => [v === o.by ? 'check' : 'more', l, () => { o.by = v; store.set('plOrd', o); $('#plOrd span').textContent = l; paint($('#plQ').value); }]), 'Ordina per'); };
 }
@@ -1977,13 +1996,21 @@ function persistQueue() {
   store.set('queue', S.queue.slice(0, 3000)); store.set('index', S.index);
   clearTimeout(persistQueue.t); persistQueue.t = setTimeout(() => Live.publish(), 300);  // gli altri dispositivi vedono la stessa coda
 }
+// da dove suona la coda ("In riproduzione da PLAYLIST · Nome", come Spotify): la pagina da cui è partita
+const CTX_KIND = { playlist: 'Playlist', album: 'Album', 'album-dz': 'Album', artista: 'Artista', 'artista-dz': 'Artista', preferiti: 'Preferiti',
+  cerca: 'Ricerca', home: 'Home', genere: 'Genere', decennio: 'Decennio', offline: 'Offline', libreria: 'Libreria', statistiche: 'Statistiche', amici: 'Amici' };
+function setCtx() {
+  const r = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
+  S.ctx = r === 'ora' || r === 'coda' ? S.ctx : { kind: CTX_KIND[r] || '', name: ($('#view h1')?.textContent || '').trim().slice(0, 80), hash: location.hash };
+  store.set('qctx', S.ctx);
+}
 function setQueue(tracks, start = 0, shuffle = false) {
   if (Jam.role === 'guest') { tracks[start] && Jam.suggest(tracks[start]); return; }
   if (!tracks.length) return toast('Non ci sono brani da riprodurre.');
   let q = tracks.slice();
   if (shuffle) { q = shuffleArr(q); start = 0; }
   if (Live.remote()) return Live.cmd('transfer', Live.pack(q, start, 0));  // l'uscita scelta è un altro dispositivo
-  S.queue = q; playIndex(start);
+  setCtx(); S.queue = q; playIndex(start);
 }
 async function playIndex(i, o = {}) {
   if (Jam.role === 'guest') return Jam.guestControl('jump', i);
@@ -2045,6 +2072,11 @@ function updateNowPlaying() {
   $('#npT').textContent = t ? t.title : 'Niente in riproduzione';
   $('#npA').textContent = t ? t.artist + (t.album ? ' · ' + t.album : '') : (Jam.role === 'guest' ? 'In attesa dell\'host della Jam' : 'Scegli un album o una playlist');
   $('#disc').innerHTML = t && t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 80, t.serverId))}" alt="" onerror="this.outerHTML='<div class=lbl></div>'">` : '<div class="lbl"></div>';
+  // telecomando: sotto il titolo il dispositivo che suona (come la riga verde di Spotify)
+  if (t && Live.remote()) { $('#npA').innerHTML = `<span class="ondev">${ic('speaker')}${esc(Live.devices.get(Live.target) || 'Altro dispositivo')}</span>`; }
+  // il mini lettore del telefono prende il colore della copertina
+  const mu = t?.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 80, t.serverId) : '';
+  Glow.colors(mu).then(c => { if (!sameTrack(currentTrack(), t)) return; $('#player').style.setProperty('--mini', c && Glow.usable(c) ? Glow.tone(c.c1, .6, c.neutral) : 'transparent'); });
   document.title = t ? `${t.title} · ${t.artist}` : 'Armony';
   Glow.track(t);
   if ('mediaSession' in navigator) {
@@ -2304,7 +2336,11 @@ async function vNow() {
   if (!t) { Glow.off(); view.innerHTML = '<div class="empty"><h3>Niente in riproduzione</h3><p>Scegli qualcosa da ascoltare.</p><a class="btn primary" href="#/home">Vai alla home</a></div>'; return; }
   Glow.show(t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 300, t.serverId) : '', 'ora');
   const tab = sessionStorage.getItem('armony:nowtab') || 'lyr';
-  view.innerHTML = `<div class="now"><div>
+  const cx = Live.remote() ? { kind: 'Su', name: Live.devices.get(Live.target) || '' } : Jam.role ? { kind: 'Jam', name: Jam.room?.name || '' } : Radio.st ? { kind: 'Radio', name: Radio.st.name } : S.ctx || store.get('qctx', null);
+  view.innerHTML = `<div class="now"><div class="np-head mobile-only">
+      <button class="icon-btn" data-act="npclose" aria-label="Chiudi il lettore">${ic('chev')}</button>
+      <div class="np-ctx">${cx?.name ? `<small>${cx.kind ? 'In riproduzione da ' + esc(cx.kind.toLowerCase()) : 'In riproduzione'}</small>${cx.hash ? `<a href="${esc(cx.hash)}">${esc(cx.name)}</a>` : `<b>${esc(cx.name)}</b>`}` : '<small>In riproduzione</small>'}</div>
+      <button class="icon-btn" data-act="nowtools" aria-label="Altre azioni">${ic('more')}</button></div><div>
       <div class="bigdisc ${isPlaying() ? 'spin' : ''}" id="bigdisc"><canvas id="viz" width="640" height="640"></canvas>
         <div class="rec">${t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 600, t.serverId))}" alt="">` : '<div class="lbl"></div>'}</div></div>
       <div class="now-title"><h1>${esc(t.title)}</h1><button class="icon-btn now-star" id="nowStar" aria-label="Preferito"></button></div>
@@ -2399,6 +2435,18 @@ async function vNow() {
     pane.innerHTML = `<div id="origBox"></div><div class="panel">${rows.map(([a, b]) => `<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:16px"><span style="color:var(--muted)">${a}</span><span style="text-align:right;word-break:break-word">${esc(b)}</span></div>`).join('')}</div>`;
     origBox(s, t);
   }
+}
+// ⋯ del lettore a tutto schermo (telefono): gli strumenti che sul computer sono pulsanti sotto il titolo, poi il menu del brano
+function nowTools() {
+  const d = $('#dlg'); d.className = 'sheet'; const t = currentTrack();
+  d.innerHTML = `${t ? `<div class="pcard"><span class="pic">${imgTag(t.coverArt, 112, t.serverId)}</span><span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></span></div>` : ''}
+    <button class="mi" data-t="sleep">${ic('moon')}<span class="grow">Timer di spegnimento${Sleep.end || Sleep.eot ? '<small>attivo</small>' : ''}</span></button>
+    <button class="mi" data-t="speed">${ic('speed')}<span class="grow">Velocità<small>${P.speed}×</small></span></button>
+    <button class="mi" data-t="eq">${ic('sliders')}<span class="grow">Equalizzatore</span></button>
+    <button class="mi" data-t="q">${ic('album')}<span class="grow">Qualità di ascolto<small>${esc(QUALITIES[P.quality].label)}</small></span></button>
+    ${t ? `<button class="mi" data-t="song">${ic('more')}<span class="grow">Azioni del brano<small>Playlist, coda, artista, album, condividi…</small></span></button>` : ''}`;
+  d.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { d.close(); ({ sleep: sleepDialog, speed: speedDialog, eq: eqDialog, q: qualityDialog, song: () => songMenu(currentTrack()) })[b.dataset.t](); });
+  closeOutside(d); d.showModal();
 }
 /* ================= tema: sul web un pulsante in alto a destra, nell'app in Impostazioni → Aspetto ================= */
 I.sun = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
@@ -3385,7 +3433,7 @@ async function toggleStar(t) {
 }
 function paintStar() {
   const t = currentTrack(), on = !!t?.starred;
-  $$('#bStar, #nowStar').forEach(b => { b.hidden = !t || !!t.fed || !srv(t.serverId); b.classList.toggle('on', on); b.innerHTML = ic('heart', on); b.setAttribute('aria-label', on ? 'Togli dai Preferiti' : 'Aggiungi ai Preferiti'); });
+  $$('#bStar, #bStarM, #nowStar').forEach(b => { b.hidden = !t || !!t.fed || !srv(t.serverId); b.classList.toggle('on', on); b.innerHTML = ic('heart', on); b.setAttribute('aria-label', on ? 'Togli dai Preferiti' : 'Aggiungi ai Preferiti'); });
 }
 // crediti e dettagli di un brano qualsiasi (quello in riproduzione li ha nella scheda Dettagli)
 async function songInfo(t) {
@@ -3438,15 +3486,18 @@ function ctxMenu([x, y], items, head = '') {
   m.querySelector('button')?.focus({ preventScroll: true });
 }
 document.addEventListener('contextmenu', e => {
-  if (e.defaultPrevented || e.shiftKey || !matchMedia('(pointer:fine)').matches || e.target.closest('input,textarea,select,[contenteditable],dialog,#cmenu,.lyrics')) return;
-  const at = [e.clientX, e.clientY], go = h => () => { location.hash = h; }, menu = (items, head) => { e.preventDefault(); ctxMenu(at, items, head); };
+  // sul telefono tenere premuto un brano (o il mini lettore) apre il suo menu dal basso, come Spotify
+  const touch = !matchMedia('(pointer:fine)').matches;
+  if (e.defaultPrevented || e.shiftKey || e.target.closest('input,textarea,select,[contenteditable],dialog,#cmenu,.lyrics')) return;
+  if (touch && !e.target.closest('.song[data-i]:not(.ghost), #player .np')) return;
+  const at = touch ? undefined : [e.clientX, e.clientY], go = h => () => { location.hash = h; }, menu = (items, head) => { e.preventDefault(); ctxMenu(at, items, head); };
   const song = e.target.closest('.song[data-i]:not(.ghost)');
   if (song) {
     const lst = song.closest('.songs[data-l]'), t = (lst && Lists.get(+lst.dataset.l) || S.lastList)[+song.dataset.i]; if (!t) return;
     const q = song.dataset.act === 'qplay' ? +song.dataset.i : null, pl = view.dataset.pl && song.closest('#lList') ? (t._pi ?? +song.dataset.i) : null;
-    e.preventDefault(); return songMenu(t, { at, pl, q });
+    e.preventDefault(); navigator.vibrate?.(10); return songMenu(t, touch ? { pl, q } : { at, pl, q });
   }
-  if (e.target.closest('#player .np, #player .meta, #disc') && currentTrack()) { e.preventDefault(); return songMenu(currentTrack(), { at }); }
+  if (e.target.closest('#player .np, #player .meta, #disc') && currentTrack()) { e.preventDefault(); return songMenu(currentTrack(), touch ? {} : { at }); }
   const alb = e.target.closest('.card:not(.ghost), .qk, .hbest');
   const aid = alb?.querySelector('[data-act="playalbum"],[data-act="playalb"]')?.dataset.id || (alb?.dataset.act === 'album' ? alb.dataset.id : null);
   if (aid) {
@@ -3523,7 +3574,7 @@ function vSettings(id = location.hash.split('/')[2]) {
 
   // sul web non c'è: il tema sta nel pulsante in alto a destra, la barra in basso si personalizza tenendola premuta
   NATIVE ? ['dev', 'aspetto', 'Aspetto', 'moon', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
-    <div class="tbset"><span class="grow"><b>Barra in basso</b><small>${[...tabsOf().map(h => NAV.find(n => n[0] === h)[1]), 'Altro'].join(' · ')}</small></span><button class="btn sm" data-act="tabsedit">Personalizza</button></div>`] : null,
+    <div class="tbset"><span class="grow"><b>Barra in basso</b><small>${tabsOf().map(h => NAV.find(n => n[0] === h)[1]).join(' · ')}</small></span><button class="btn sm" data-act="tabsedit">Personalizza</button></div>`] : null,
 
   ['dev', 'jam', 'Jam', 'jam', 'stun turn 5g internet nat ascoltare insieme', `<div class="panel stack">
     <label class="check"><input type="checkbox" data-pb="stun" ${P.stun ? 'checked' : ''}><span>Permetti Jam via internet (5G)<small>Usa server STUN pubblici per scoprire l'indirizzo esterno. Non passa musica né chiavi da quei server.</small></span></label>
@@ -4115,30 +4166,44 @@ function ctxDialog() {
   d.querySelector('[data-ctx]').onclick = () => { d.close(); if (S.servers.length) location.hash = '#/impostazioni/server'; else serverDialog(); };
   closeOutside(d); d.showModal();
 }
-function moreSheet() {
-  const d = $('#dlg'); d.className = 'sheet';
-  const cur = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
-  const items = NAV.filter(([h]) => inMore(h) && (h !== 'rete' || can('rete')));
-  if (matchMedia('(any-hover:hover)').matches) items.push(['tasti', 'Scorciatoie da tastiera', 'more']);
-  const dot = h => h === 'amici' && Presence.on() && Presence.playingCount() ? '<i class="dot pdot" aria-label="qualcuno sta ascoltando"></i>'
-    : h === 'impostazioni' && srv()?.me?.pending ? '<i class="dot pdot" aria-label="dispositivi in attesa"></i>' : '';
-  d.innerHTML = `<div class="head"><b>Altre sezioni</b></div>${items.map(([h, l, i]) => `<a class="mi ${h === cur ? 'on' : ''}" href="#/${h}" ${h === cur ? 'aria-current="page"' : ''}>${ic(i)}${l}${dot(h)}</a>`).join('')}`;
-  d.querySelectorAll('a').forEach(a => a.onclick = () => d.close());
-  closeOutside(d); d.showModal();
-}
-// barra in basso del telefono: le sezioni scelte (tabsOf) e "Altro", sempre ultimo
+// barra in basso del telefono: le sezioni scelte (tabsOf). Le altre stanno nel menu del profilo, in alto a sinistra
+// (come Spotify): niente più "Altro" nella barra
 function paintTabs() {
   const navOf = h => NAV.find(n => n[0] === h);
-  $('#tabs').innerHTML = tabsOf().map(navOf).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span>${l}</span></a>`).join('')
-    + `<button type="button" id="tabMore" aria-haspopup="dialog">${ic('more')}<span>Altro</span></button>`;
-  $('#tabMore').onclick = moreSheet;
+  $('#tabs').innerHTML = tabsOf().map(navOf).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span>${l}</span></a>`).join('');
   markNav(location.hash.replace(/^#\/?/, '').split('/')[0] || 'home');
-  Presence.paint();
+  paintMe(); Presence.paint();
+}
+// l'avatar in alto a sinistra (telefono): l'iniziale dell'utente, con un puntino se nel menu c'è qualcosa di nuovo
+function paintMe() {
+  const b = $('#hMe'); if (!b) return;
+  const u = srv()?.user || '?', dot = (Presence.on?.() && Presence.playingCount?.() && inMore('amici')) || (srv()?.me?.pending && inMore('impostazioni'));
+  b.innerHTML = pavatar({ user: u, name: u }) + (dot ? '<i class="dot pdot" aria-hidden="true"></i>' : '');
+}
+// menu del profilo (telefono): chi sei, server e qualità, tutte le sezioni che non stanno nella barra in basso
+function drawer() {
+  const d = $('#dlg'); d.className = 'drawer';
+  const s = srv(), u = s?.user || 'Ospite', cur = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
+  const items = NAV.filter(([h]) => inMore(h) && (h !== 'rete' || can('rete')));
+  const dot = h => h === 'amici' && Presence.on() && Presence.playingCount() ? '<i class="dot pdot" aria-label="qualcuno sta ascoltando"></i>'
+    : h === 'impostazioni' && srv()?.me?.pending ? '<i class="dot pdot" aria-label="dispositivi in attesa"></i>' : '';
+  d.innerHTML = `<div class="dr-me">${pavatar({ user: u, name: u }, 'm')}<span class="grow"><b>${esc(u)}</b><small>${esc(s?.name || 'Nessun server')}${s?.me?.admin ? ' · amministratore' : ''}</small></span></div>
+    <button class="mi" id="drSrv">${ic('lib')}<span class="grow">Server e qualità<small>${esc(s?.name || '—')} · ${esc(QUALITIES[P.quality].short)}</small></span></button>
+    ${!NATIVE ? `<button class="mi" id="drTheme">${ic(THEMES[P.theme]?.[1] || 'themeauto')}<span class="grow">Tema<small>${esc((THEMES[P.theme] || THEMES.auto)[0])}</small></span></button>` : ''}
+    <div class="dr-sep"></div>
+    ${items.map(([h, l, i]) => `<a class="mi ${h === cur ? 'on' : ''}" href="#/${h}" ${h === cur ? 'aria-current="page"' : ''}>${ic(i)}<span class="grow">${l}</span>${dot(h)}</a>`).join('')}
+    <div class="dr-sep"></div>
+    <button class="mi" id="drTabs">${ic('sliders')}<span class="grow">Barra in basso<small>Scegli le sezioni a portata di pollice</small></span></button>`;
+  d.querySelectorAll('a').forEach(a => a.onclick = () => d.close());
+  $('#drSrv').onclick = () => { d.close(); ctxDialog(); };
+  $('#drTabs').onclick = () => { d.close(); tabsEditor(); };
+  if ($('#drTheme')) $('#drTheme').onclick = () => { $('#themeBtn').click(); d.close(); };
+  closeOutside(d); d.showModal();
 }
 // scegliere e ordinare le voci della barra: frecce (accessibili, niente trascinamento da indovinare), anteprima in cima
 function tabsEditor() {
   const d = $('#dlg'); d.className = 'sheet tbed';
-  d.innerHTML = `<div class="head" tabindex="-1" autofocus><span class="grow"><b style="display:block">Barra in basso</b><small style="color:var(--muted)">Fino a quattro sezioni, poi Altro con tutte le altre. Vale su questo dispositivo.</small></span></div>
+  d.innerHTML = `<div class="head" tabindex="-1" autofocus><span class="grow"><b style="display:block">Barra in basso</b><small style="color:var(--muted)">Fino a quattro sezioni. Le altre sono nel menu del profilo, in alto a sinistra. Vale su questo dispositivo.</small></span></div>
     <div class="tbprev" id="tbPrev" aria-hidden="true"></div>
     <p class="sh" id="tbInH">Nella barra</p><div id="tbIn" role="list" aria-labelledby="tbInH"></div>
     <p class="sh" id="tbOutH"></p><div class="tbout" id="tbOut" role="list" aria-labelledby="tbOutH"></div>
@@ -4146,12 +4211,12 @@ function tabsEditor() {
   const navOf = h => NAV.find(n => n[0] === h), save = t => { store.set('tabs', t); paintTabs(); paint(); };
   const paint = () => {
     const t = tabsOf(), full = t.length >= 4, out = NAV.filter(([h]) => !t.includes(h));
-    const sum = $('.tbset small'); if (sum) sum.textContent = [...t.map(h => navOf(h)[1]), 'Altro'].join(' · ');
-    $('#tbPrev').innerHTML = t.map(navOf).map(([, l, i]) => `<span>${ic(i)}<small>${l}</small></span>`).join('') + `<span>${ic('more')}<small>Altro</small></span>`;
+    const sum = $('.tbset small'); if (sum) sum.textContent = t.map(h => navOf(h)[1]).join(' · ');
+    $('#tbPrev').innerHTML = t.map(navOf).map(([, l, i]) => `<span>${ic(i)}<small>${l}</small></span>`).join('');
     keyed($('#tbIn'), t.map(navOf).map(([h, l, i], k) => ({ k: h, cls: 'tbrow', attrs: { role: 'listitem' }, html: `${ic(i)}<b class="grow">${l}</b>
       <button class="icon-btn" data-x="up" aria-label="Sposta ${l} a sinistra"${k ? '' : ' disabled'}>${ic('up')}</button><button class="icon-btn" data-x="dn" aria-label="Sposta ${l} a destra"${k < t.length - 1 ? '' : ' disabled'}>${ic('dn')}</button>
       <button class="icon-btn" data-x="del" aria-label="Togli ${l} dalla barra"${t.length > 1 ? '' : ' disabled'}>${ic('close')}</button>` })));
-    $('#tbOutH').textContent = full ? 'In Altro · la barra è piena: togline una per aggiungerne un\'altra' : 'In Altro · tocca per aggiungere alla barra';
+    $('#tbOutH').textContent = full ? 'Nel menu del profilo · la barra è piena: togline una per aggiungerne un\'altra' : 'Nel menu del profilo · tocca per aggiungere alla barra';
     keyed($('#tbOut'), out.map(([h, l, i]) => ({ k: h, attrs: { role: 'listitem' }, html: `<button class="chip" data-x="add" aria-label="Aggiungi ${l} alla barra"${full ? ' disabled' : ''}>${ic(i)}${l}</button>` })));
   };
   const act = e => {
@@ -4331,6 +4396,7 @@ view.addEventListener('click', async e => {
       case 'exportqueue': exportTracks('Coda', S.queue); break;
       case 'newpl': { const name = await ask('Nuova playlist', '', 'Nome'); if (name) { await api('createPlaylist', { name }); route(); } break; }
       case 'importpl': importPlaylist(); break;
+      case 'libplus': libPlus(); break;
       case 'exportpl': { const p = (await api('getPlaylist', { id })).playlist; exportTracks(p.name, arr(p.entry).map(x => norm(x))); break; }
       case 'editpl': {
         const m = JSON.parse(view.dataset.plMeta || '{}'); const d = $('#dlg2');
@@ -4373,6 +4439,8 @@ view.addEventListener('click', async e => {
       }
       case 'wrapped': makeWrapped(); break;
       case 'nowmore': songMenu(currentTrack()); break;
+      case 'nowtools': nowTools(); break;
+      case 'npclose': Scene.back ? history.back() : (location.hash = '#/home'); break;
       case 'sleep': sleepDialog(); break;
       case 'speed': speedDialog(); break;
       case 'eq': eqDialog(); break;
@@ -4885,6 +4953,7 @@ const Live = {
   pill() {
     const pill = $('#livePill'); if (!pill) return;
     const remote = this.remote();
+    $('#bDev')?.classList.toggle('on', remote);  // telefono: l'icona del dispositivo nel mini lettore
     const hp = !remote && Phone.out;  // cuffie di questo telefono (solo app)
     pill.hidden = !this.devices.size && !hp;
     pill.classList.toggle('on', remote);
@@ -5119,6 +5188,26 @@ document.addEventListener('click', e => {
 }, true);
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches?.('[data-pact="act"]')) e.target.click(); });
 
+// mini lettore del telefono, come Spotify: scorri a sinistra o a destra per cambiare brano, in su per aprire il lettore
+function miniGestures() {
+  const b = $('#npBtn'), tx = b.querySelector('.t'); let x0 = null, y0 = 0, dx = 0, moved = false;
+  b.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') return; x0 = e.clientX; y0 = e.clientY; dx = 0; moved = false; });
+  b.addEventListener('pointermove', e => {
+    if (x0 == null) return;
+    dx = e.clientX - x0; const dy = e.clientY - y0;
+    if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) { moved = true; tx.style.transform = `translateX(${dx}px)`; tx.style.opacity = 1 - Math.min(.7, Math.abs(dx) / 220); }
+    else if (dy < -36 && !moved) { moved = true; x0 = null; location.hash = '#/ora'; }
+  });
+  const end = () => {
+    if (x0 == null) return; x0 = null;
+    tx.style.transition = 'transform .22s var(--ease-out), opacity .22s'; tx.style.transform = ''; tx.style.opacity = '';
+    setTimeout(() => { tx.style.transition = ''; }, 240);
+    if (Math.abs(dx) > 70) dx < 0 ? ctlNext(false) : ctlPrev();
+  };
+  b.addEventListener('pointerup', end); b.addEventListener('pointercancel', end);
+  b.addEventListener('click', e => { if (moved) { e.stopImmediatePropagation(); e.preventDefault(); moved = false; } }, true);
+}
+
 /* ================= controlli del lettore e avvio ================= */
 function wirePlayer() {
   $('#bPrev').innerHTML = ic('prev'); $('#bNext').innerHTML = ic('next'); $('#bQueue').innerHTML = ic('queue'); $('#bQm').innerHTML = ic('sliders'); $('#bLyr').innerHTML = ic('lyrics');
@@ -5127,7 +5216,11 @@ function wirePlayer() {
   $('#bLyr').onclick = () => { sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; };
   $('#npBtn').onclick = () => location.hash = '#/ora';
   $('#bQm').onclick = qualityDialog; $('#qBadge').onclick = qualityDialog;
-  $('#bStar').onclick = () => currentTrack() && toggleStar(currentTrack());
+  $('#bStar').onclick = $('#bStarM').onclick = () => currentTrack() && toggleStar(currentTrack());
+  $('#bDev').innerHTML = ic('speaker'); $('#bDev').onclick = () => Live.sheet();
+  $('#bQueueM').innerHTML = ic('queue'); $('#bQueueM').onclick = () => location.hash = '#/coda';
+  $('#hMe').onclick = drawer;
+  miniGestures();
   $('#sleepPill').onclick = sleepDialog; $('#jamPill').onclick = () => location.hash = '#/jam';
   $('#bShuf').onclick = () => {
     if (Jam.role === 'guest') return toast('Durante una Jam l\'ordine lo decide l\'host.');
