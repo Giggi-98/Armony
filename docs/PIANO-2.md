@@ -163,6 +163,7 @@ quindi le notifiche viaggiano sul canale dal vivo che i dispositivi tengono già
 - **0.27.0 (2026-10-11)**: foto profilo (richiesta dell'utente), 3.7, 3.10, 3.11, 4.4, 4.5, 7.4, 8.2, 8.3.
 - **0.28.0 (2026-10-11)**: 5.7, 5.8, 6.9 (tranne gli artisti ospiti), 8.6, 9.9.
 - **0.29.0 (2026-10-11)**: 5.6, 6.8, 6.10 (pagine dei mix; le cartelle di playlist restano da fare).
+- **0.30.0 (2026-10-11)**: 4.6 (senza tetto giornaliero: con i turni non serve), 4.8, 7.9, 9.8 (nuova versione agli amministratori, brani nuovi negli abbonamenti, «da controllare» nel riepilogo).
 - In più, fuori piano: telecomando con testi, dettagli e bande; utenti eliminati che ricomparivano.
 
 ## Ordine proposto

@@ -4,7 +4,7 @@ Armony - ascolti contati dal server (capacità "ascolti").
   GET /api/ascolti/brano?id=…[&dz=1]   ascolti di un brano: in tutto, tuoi, per utente; con dz=1 anche l'indice di
                                        popolarità di Deezer (un punteggio, non il numero di stream: quello non è pubblico)
   GET /api/ascolti/brani?ids=a,b,…     solo i totali, per mostrarli accanto ai brani di un album o di un artista
-  GET /api/ascolti/server?days=30      il riepilogo del server: ascolti per utente, brani più ascoltati, gli ultimi ascolti
+  GET /api/ascolti/server?days=30      il riepilogo del server: ascolti per utente, brani e artisti più ascoltati, minuti, gli ultimi ascolti
 
 ─── PERCHÉ dal DB di Navidrome ───
 Ogni client (Armony, Symfonium, Tempo…) segnala gli ascolti a Navidrome con scrobble: la tabella scrobbles ha brano,
@@ -87,11 +87,15 @@ def server():
         recent = c.execute("SELECT u.user_name, m.id, m.title, m.artist, m.album_id, s.submission_time FROM scrobbles s JOIN user u ON u.id = s.user_id "
                            "JOIN media_file m ON m.id = s.media_file_id ORDER BY s.submission_time DESC LIMIT 200").fetchall()
         allt = c.execute("SELECT count(*) FROM scrobbles").fetchone()[0]
+        # per l'immagine «Il nostro mese»: minuti e artisti di tutti
+        mins = c.execute(f"SELECT coalesce(sum(m.duration), 0) / 60 FROM scrobbles s JOIN media_file m ON m.id = s.media_file_id WHERE {cond}", (arg,)).fetchone()[0]
+        arts = c.execute(f"SELECT m.artist, count(*) n FROM scrobbles s JOIN media_file m ON m.id = s.media_file_id WHERE {cond} "
+                         "GROUP BY m.artist ORDER BY n DESC LIMIT 10", (arg,)).fetchall()
     finally:
         c.close()
     ts = lambda v: v if isinstance(v, (int, float)) else time.mktime(time.strptime(str(v)[:19], "%Y-%m-%d %H:%M:%S")) if v else None
     users = [{"user": u, "name": A.pres_who(u)[1], "plays": n, "last": ts(last)} for u, n, last in per if shown(u)]
-    return jsonify(days=days, total=sum(r[1] for r in per), ever=allt, users=users, others=sum(r[1] for r in per if not shown(r[0])),
+    return jsonify(days=days, total=sum(r[1] for r in per), ever=allt, minutes=round(mins), artists=[{"artist": a, "plays": n} for a, n in arts if a], users=users, others=sum(r[1] for r in per if not shown(r[0])),
                    top=[{"id": r[0], "title": r[1], "artist": r[2], "album": r[3], "albumId": r[4], "plays": r[5], "listeners": r[6]} for r in top],
                    recent=[{"user": r[0], "name": A.pres_who(r[0])[1], "id": r[1], "title": r[2], "artist": r[3], "albumId": r[4], "at": ts(r[5])}
                            for r in recent if shown(r[0])][:60])

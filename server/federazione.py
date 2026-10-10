@@ -1382,7 +1382,7 @@ def sub_sync(sub):
             jj = dict(url="", mode="audio", format="", quality="", playlist=False, folder="", sponsorblock=False, meta={}, fed={"id": it["fed"], "r": n["id"]})
             with A.jlock:
                 A.jobs[jid] = dict(jj, id=jid, status="in coda", progress=0, title=f"{it['artists'][0]} - {it['title']}", created=now, updated=now,
-                                   by=sub["owner"], batch="sub:" + sub["pid"], label=f"Abbonamento: {sub['name']}")
+                                   by=sub["owner"], batch=f"sub:{sub['pid']}:{int(now)}", label=f"Abbonamento: {sub['name']}")
                 A.jsave(jid)
             A.jq.put((jid, jj))
         db.run("UPDATE fed_subs SET last = ?, error = NULL WHERE pid = ?", now, sub["pid"])

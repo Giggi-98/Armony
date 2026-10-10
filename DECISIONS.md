@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Coda dei download a turni fra utenti, senza tetto giornaliero
+
+**Contesto:** voce 4.6 del piano: un'importazione da migliaia di brani di un utente faceva aspettare ore il brano singolo di un altro.
+**Scelta:** la coda unica (`queue.Queue`) diventa `Turni` in `app.py`: una fila per utente (dal campo `by` del lavoro) e un giro; ogni esecutore prende il primo lavoro dell'utente di turno, che torna in fondo al giro. Stessa interfaccia (`put`, `get`, `qsize`), quindi federazione e scelta non cambiano. I download finiti da più di 30 giorni escono da memoria e database nel giro orario (`pota_lavori`), tranne quelli da controllare o in attesa di una playlist.
+**Alternative scartate:** tetto giornaliero per utente (con i turni chi importa tanto rallenta solo sé stesso; un tetto avrebbe chiesto un'impostazione in più e un messaggio d'errore per un caso che non si presenta fra amici); priorità ai download singoli sulle importazioni (un'importazione è comunque di qualcuno che aspetta).
+**Conseguenze:** il ritmo verso YouTube (un video ogni 12 s, fra tutti) resta lo stesso: i turni cambiano l'ordine, non la velocità totale. Abbonamenti: ogni giro è un gruppo a sé (`sub:<pid>:<ora>`), così ogni giro con brani nuovi ha il suo avviso (prima la chiave fissa lo faceva arrivare solo la prima volta).
+**Da rivedere se:** il server ha molti utenti che importano insieme e qualcuno abusa.
+
 ## 2026-10-11 — Selezione multipla nella pagina, mix come pagine, download a mano riconosciuti su Deezer
 
 **Contesto:** voci 6.8, 6.10 e 5.6 del piano.

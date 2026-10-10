@@ -2930,7 +2930,8 @@ async function vStats() {
       ${top('Album', albums, x => `${esc(x.album)}<small style="display:block">${esc(x.artist)}</small>`)}${top('Generi', genres, x => esc(x.genre))}</div>`}
     <h2>I tuoi dati</h2><div class="row"><button class="btn" data-act="histexport">Esporta storico (CSV)</button><button class="btn danger" data-act="histclear">Cancella storico</button></div>`;
   view.querySelectorAll('[name=sp]').forEach(r => r.onchange = () => { sessionStorage.setItem('armony:sp', r.value); vStats(); });
-  view._wrapped = { secs, h, artists, songs, period };
+  view._wrapped = { title: { '7': 'Ultimi 7 giorni', '30': 'Ultimi 30 giorni', year: 'Il mio ' + new Date().getFullYear(), all: 'Da sempre' }[period],
+    mins: Math.round(secs / 60), a: ['Artisti', artists.map(e => e.x.artist)], b: ['Brani', songs.map(e => e.x.title)], foot: `${h.length} ascolti, ${artists.length} artisti`, share: 'Il mio Armony' };
 }
 // tutti gli ascolti del server: chi ascolta di più, i brani più ascoltati e un registro degli ultimi ascolti
 async function vStatsServer(period, tabs, n) {
@@ -2940,13 +2941,18 @@ async function vStatsServer(period, tabs, n) {
   const f = x => x.toLocaleString('it-IT'), max = Math.max(1, ...d.users.map(u => u.plays));
   const label = { '7': 'negli ultimi 7 giorni', '30': 'negli ultimi 30 giorni', year: 'quest\'anno', all: 'da sempre' }[period];
   view.innerHTML = `<h1>Statistiche</h1>${tabs}<p class="sub">Gli ascolti di tutti gli utenti di ${esc(srv().name)}, contati dal server: valgono anche per le app Subsonic collegate. Chi non vuole comparire conta nei totali ma non per nome.</p>
-    <div class="row" style="margin-bottom:24px"><div class="seg">${[['7', '7 giorni'], ['30', '30 giorni'], ['year', 'Quest\'anno'], ['all', 'Sempre']].map(([v, l]) => `<label><input type="radio" name="sp" value="${v}" ${v === period ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
+    <div class="row" style="margin-bottom:24px"><div class="seg">${[['7', '7 giorni'], ['30', '30 giorni'], ['year', 'Quest\'anno'], ['all', 'Sempre']].map(([v, l]) => `<label><input type="radio" name="sp" value="${v}" ${v === period ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      ${d.total ? `<button class="btn" data-act="wrapped">${ic('image')} Crea immagine del gruppo</button>` : ''}</div>
     <div class="statshero"><div class="lead"><b>${f(d.total)}</b><span>ascolti sul server ${label}${d.users[0] ? `, il più assiduo è <em>${esc(d.users[0].name)}</em>` : ''}</span></div>
       <dl class="minor"><div><dt>da sempre</dt><dd>${f(d.ever)}</dd></div><div><dt>${d.users.length === 1 ? 'utente' : 'utenti'}</dt><dd>${f(d.users.length)}</dd></div></dl></div>
     <div class="grid2"><div><h2>Per utente</h2>${d.users.length ? `<div class="srvusers">${d.users.map(u => `<div class="srvuser">${pavatar(u, 's')}<span class="grow"><b>${esc(u.name)}</b><span class="srvbar"><i style="width:${u.plays / max * 100}%"></i></span></span><span class="srvn"><b>${f(u.plays)}</b><small>${u.last ? ago(u.last * 1000) : ''}</small></span></div>`).join('')}${d.others ? `<p class="small" style="color:var(--muted)">Altri utenti: ${f(d.others)} ascolti.</p>` : ''}</div>` : '<div class="empty">Nessun ascolto in questo periodo.</div>'}</div>
       <div><h2>I più ascoltati</h2>${d.top.length ? `<ol class="rank">${d.top.map(t => `<li${t.albumId ? ` data-act="album" data-id="${esc(t.albumId)}" style="cursor:pointer"` : ''}><span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></span><small>${f(t.plays)} ascolti${t.listeners > 1 ? ` · ${t.listeners} persone` : ''}</small></li>`).join('')}</ol>` : '<div class="empty">Ancora niente.</div>'}</div></div>
     <h2>Ultimi ascolti</h2>${d.recent.length ? `<div class="srvlog">${d.recent.map(r => `<div class="srvlogrow"${r.albumId ? ` data-act="album" data-id="${esc(r.albumId)}"` : ''}>${pavatar(r, 's')}<span class="grow"><b>${esc(r.name)}</b> ha ascoltato <b>${esc(r.title)}</b> <small>· ${esc(r.artist)}</small></span><small data-at="${r.at * 1000}">${ago(r.at * 1000)}</small></div>`).join('')}</div>` : '<div class="empty">Nessun ascolto registrato.</div>'}`;
   view.querySelectorAll('[name=sp]').forEach(r => r.onchange = () => { sessionStorage.setItem('armony:sp', r.value); vStats(); });
+  // «Il nostro mese»: la stessa immagine di quella personale, con chi ascolta di più al posto degli artisti
+  view._wrapped = { title: { '7': 'La nostra settimana', '30': 'Il nostro mese', year: 'Il nostro ' + new Date().getFullYear(), all: 'Da sempre, insieme' }[period],
+    mins: d.minutes || 0, a: ['Chi ascolta di più', d.users.map(u => u.name)], b: [d.artists?.length ? 'Artisti' : 'Brani', d.artists?.length ? d.artists.map(a => a.artist) : d.top.map(t => t.title)],
+    foot: `${f(d.total)} ascolti su ${srv().name}`, share: 'Il nostro Armony' };
 }
 async function makeWrapped() {
   const w = view._wrapped; if (!w) return;
@@ -2955,18 +2961,17 @@ async function makeWrapped() {
   x.fillStyle = '#1b1e36'; x.fillRect(0, 0, 1080, 1350);
   const ring = (cx, cy, r) => { for (let i = 0; i < 40; i++) { x.strokeStyle = i % 2 ? '#23264a' : '#191b30'; x.lineWidth = 3; x.beginPath(); x.arc(cx, cy, r - i * 3, 0, Math.PI * 2); x.stroke(); } x.fillStyle = '#f2a541'; x.beginPath(); x.arc(cx, cy, r * .38, 0, Math.PI * 2); x.fill(); x.fillStyle = '#1b1e36'; x.beginPath(); x.arc(cx, cy, 10, 0, Math.PI * 2); x.fill(); };
   ring(900, 200, 240);
-  const label = { '7': 'Ultimi 7 giorni', '30': 'Ultimi 30 giorni', year: 'Il mio ' + new Date().getFullYear(), all: 'Da sempre' }[w.period];
   x.fillStyle = '#ece8dd'; x.font = '800 64px "Bricolage Grotesque", sans-serif'; x.fillText('armony', 80, 130);
-  x.fillStyle = '#a3a8c8'; x.font = '500 40px Figtree, sans-serif'; x.fillText(label, 80, 190);
-  x.fillStyle = '#f2a541'; x.font = '800 190px "Bricolage Grotesque", sans-serif'; x.fillText(Math.round(w.secs / 60).toLocaleString('it-IT'), 80, 470);
+  x.fillStyle = '#a3a8c8'; x.font = '500 40px Figtree, sans-serif'; x.fillText(w.title, 80, 190);
+  x.fillStyle = '#f2a541'; x.font = '800 190px "Bricolage Grotesque", sans-serif'; x.fillText(w.mins.toLocaleString('it-IT'), 80, 470);
   x.fillStyle = '#ece8dd'; x.font = '500 44px Figtree, sans-serif'; x.fillText('minuti di musica', 86, 535);
   const col = (title, items, y0, X) => { x.fillStyle = '#a3a8c8'; x.font = '600 36px Figtree, sans-serif'; x.fillText(title, X, y0); items.slice(0, 5).forEach((t, i) => { x.fillStyle = '#ece8dd'; x.font = '600 38px Figtree, sans-serif'; let s = `${i + 1}  ${t}`; while (x.measureText(s).width > 440 && s.length > 4) s = s.slice(0, -2); if (s !== `${i + 1}  ${t}`) s += '…'; x.fillText(s, X, y0 + 70 + i * 64); }); };
-  col('Artisti', w.artists.map(e => e.x.artist), 680, 80);
-  col('Brani', w.songs.map(e => e.x.title), 680, 560);
-  x.fillStyle = '#a3a8c8'; x.font = '500 30px Figtree, sans-serif'; x.fillText(`${w.h.length} ascolti, ${w.artists.length} artisti`, 80, 1260);
+  col(w.a[0], w.a[1], 680, 80);
+  col(w.b[0], w.b[1], 680, 560);
+  x.fillStyle = '#a3a8c8'; x.font = '500 30px Figtree, sans-serif'; x.fillText(w.foot, 80, 1260);
   c.toBlob(async b => {
     const f = new File([b], 'armony.png', { type: 'image/png' });
-    if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f], title: 'Il mio Armony' }); return; } catch {} }
+    if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f], title: w.share }); return; } catch {} }
     saveFile('armony.png', b);
   });
 }

@@ -757,13 +757,15 @@ def ricontrolla():
 
 def pulizia():
     """Ogni ora: sessioni scadute, credenziali rimaste negli abbinamenti scaduti (token e sale valgono la password per
-    Subsonic), quote per indirizzo vecchie."""
+    Subsonic), quote per indirizzo vecchie, brani mandati vecchi, download finiti da un mese; poi utenti, versione, copia notturna."""
     while True:
         time.sleep(3600)
         try:
             now = time.time()
             db.run("UPDATE pairings SET t = '', s = '' WHERE expires < ? AND (t != '' OR s != '')", now)
             db.run("DELETE FROM sessions WHERE exp IS NOT NULL AND exp < ?", now)
+            db.run("DELETE FROM mandati WHERE ts < ? AND id NOT IN (SELECT id FROM mandati ORDER BY id DESC LIMIT 2000)", now - 90 * 86400)
+            A.pota_lavori()
             with _hlock:
                 for k in [k for k, v in _hits.items() if not v or now - v[-1] > 3600]:
                     _hits.pop(k, None)
@@ -773,6 +775,10 @@ def pulizia():
             ricontrolla()
         except Exception as e:  # noqa: BLE001
             A.diagnosi.log("avviso", "dispositivi", f"ricontrollo degli utenti non riuscito: {e}")
+        try:
+            A.avvisa_versione()
+        except Exception as e:  # noqa: BLE001
+            A.diagnosi.log("avviso", "aggiornamento", f"controllo della nuova versione non riuscito: {e}")
         try:
             backup_notte()
         except Exception as e:  # noqa: BLE001

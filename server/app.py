@@ -1308,8 +1308,43 @@ def pl_attivita(m, q, body):
 # ------------------------------------------------------------------ download
 jobs = {}
 jlock = threading.Lock()
+
+
+class Turni:
+    """Coda dei download a turni fra utenti: gli esecutori prendono un lavoro per utente alla volta, a giro.
+    Con una sola coda l'importazione da 5000 brani di uno faceva aspettare ore il brano singolo di un altro."""
+
+    def __init__(self):
+        self.q, self.giro, self.cv = {}, collections.deque(), threading.Condition()
+
+    def put(self, item):
+        u = (jobs.get(item[0]) or {}).get("by") or ""
+        with self.cv:
+            if u not in self.q:
+                self.q[u] = collections.deque()
+                self.giro.append(u)
+            self.q[u].append(item)
+            self.cv.notify()
+
+    def get(self, timeout=None):
+        with self.cv:
+            if not self.cv.wait_for(lambda: self.giro, timeout):
+                raise queue.Empty
+            u = self.giro.popleft()
+            item = self.q[u].popleft()
+            if self.q[u]:
+                self.giro.append(u)  # in fondo al giro: prima tocca agli altri
+            else:
+                del self.q[u]
+            return item
+
+    def qsize(self):
+        with self.cv:
+            return sum(len(d) for d in self.q.values())
+
+
 # una coda e due esecutori fissi: con un'importazione da migliaia di brani un thread per lavoro non regge
-jq = queue.Queue()
+jq = Turni()
 COOKIES = os.path.join(os.path.dirname(db.PATH), "youtube-cookies.txt")
 # PO Token di YouTube: il plugin bgutil di yt-dlp li chiede al servizio "pot" del compose (armony-pot)
 POT_URL = os.environ.get("ARMONY_POT_URL", "http://127.0.0.1:4416").rstrip("/")
@@ -1372,8 +1407,15 @@ def avvisa_job(j, grp):
         if not grp:
             return
         ok = sum(1 for x in grp if x["status"].startswith("completato"))
+        dubbi = sum(1 for x in grp if x.get("sospetto"))
+        if j["batch"].startswith("sub:"):  # abbonamento: un avviso per ogni giro che porta brani nuovi
+            if ok:
+                notifiche.notifica(u, "import", f"{'Un brano nuovo' if ok == 1 else f'{ok} brani nuovi'} in «{j.get('label', '').removeprefix('Abbonamento: ')}»",
+                                   "dalla playlist a cui sei abbonato", "#/scarica", only_once="batch:" + j["batch"])
+            return
         notifiche.notifica(u, "import" if j.get("track") else "download", f"«{j.get('label') or 'Download'}» finito",
-                           f"{ok} di {len(grp)} brani in libreria" + (f", {len(grp) - ok} non trovati" if ok < len(grp) else ""),
+                           f"{ok} di {len(grp)} brani in libreria" + (f", {len(grp) - ok} non trovati" if ok < len(grp) else "")
+                           + (f"; {dubbi} da controllare" if dubbi else ""),
                            "#/scarica", only_once="batch:" + j["batch"])
     elif j.get("sost"):
         if j["status"] != "errore":
@@ -2233,6 +2275,30 @@ def check_latest(force=False):
     except Exception as e:  # noqa: BLE001
         latest["error"] = str(e)[:200]
     latest["checked"] = time.time()
+
+
+def avvisa_versione():
+    """Dal giro orario (dispositivi.pulizia): una nuova versione su GitHub si annuncia una volta agli amministratori."""
+    check_latest()
+    cur, new = semver(VERSION), latest["tag"] and semver(latest["tag"])
+    if cur and new and new > cur:
+        for r in db.all_("SELECT DISTINCT user FROM devices WHERE admin = 1 AND state = 'fidato'"):
+            notifiche.notifica(r["user"], "sistema", f"Armony {latest['tag'].lstrip('v')} disponibile", "Aggiorna da Impostazioni → Server",
+                               "#/impostazioni", only_once="versione:" + latest["tag"])
+
+
+def pota_lavori():
+    """Dal giro orario: i download finiti da più di 30 giorni escono dalla memoria e dal database (prima restavano finché
+    qualcuno non premeva «Pulisci», e /api/jobs li ripassava tutti a ogni richiesta). Restano quelli da controllare
+    e quelli che aspettano una playlist."""
+    lim = time.time() - 30 * 86400
+    with jlock:
+        via = [k for k, x in jobs.items() if x["status"] in DONE and not x.get("plwait") and not x.get("sospetto")
+               and (x.get("finished") or x.get("updated") or 0) < lim]
+        for k in via:
+            del jobs[k]
+    for k in via:
+        db.run("DELETE FROM jobs WHERE id = ?", k)
 
 
 def read_json(path):
