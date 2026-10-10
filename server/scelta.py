@@ -38,6 +38,8 @@ import metadati
 bp = Blueprint("scelta", __name__)
 A = None
 PROP, PQ = {}, []  # proposte per i brani da controllare: id → candidato (None: niente di abbastanza vicino); coda da cercare
+PROP_TS = {}       # quando è stata cercata: le proposte si salvano (settings "scelta_prop") e un riavvio non le rifà;
+RIPROVA = 86400    # «niente di vicino» si ricerca dopo un giorno (YouTube Music aggiunge brani)
 MIN = 1.5      # sotto questo punteggio un candidato non si usa mai
 SICURO = 5     # da qui in su non serve guardare oltre
 NO = re.compile(r"\b(live|dal vivo|en vivo|in concerto|concert|concerto|session|sessions|unplugged|cover|karaoke|instrumental|"
@@ -295,8 +297,14 @@ def proponi(sid):
 
 def proposte():
     """In sottofondo, un brano alla volta: le ricerche non si accavallano ai download e YouTube non vede raffiche."""
+    try:
+        carica_prop()
+    except Exception as e:  # noqa: BLE001 — senza le proposte salvate si ricercano
+        diagnosi.log("avviso", "scelta", f"proposte salvate illeggibili: {e}")
     while True:
         sid = PQ.pop(0) if PQ else None
+        if sid in PROP:
+            continue
         if not sid:
             time.sleep(3)
             continue
@@ -306,12 +314,14 @@ def proposte():
             continue
         try:
             PROP[sid] = proponi(sid)
+            salva_prop(sid)
         except Exception as e:  # noqa: BLE001
             if A.yt_bloccato(e) or "bloccato" in str(e):
                 PQ.append(sid)
                 time.sleep(300)
                 continue
             PROP[sid] = None
+            salva_prop(sid)
             diagnosi.log("avviso", "scelta", f"proposta non trovata per {sid}: {str(e)[:200]}")
         time.sleep(2)
 
@@ -362,9 +372,28 @@ def gia_ok():
     return set(json.loads(r["value"])) if r else set()
 
 
+def salva_prop(sid):
+    import db
+    if sid in PROP:
+        PROP_TS[sid] = time.time()
+    else:
+        PROP_TS.pop(sid, None)
+    keep = {k: [PROP.get(k), PROP_TS.get(k, 0)] for k in list(PROP)}
+    db.run("INSERT INTO settings VALUES ('scelta_prop', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", json.dumps(keep))
+
+
+def carica_prop():
+    import db
+    r = db.one("SELECT value FROM settings WHERE key = 'scelta_prop'")
+    for k, (c, ts) in (json.loads(r["value"]) if r else {}).items():
+        if c or time.time() - ts < RIPROVA:
+            PROP[k], PROP_TS[k] = c, ts
+
+
 def segna_ok(sid):
     import db
     PROP.pop(sid, None)
+    salva_prop(sid)
     db.run("INSERT INTO settings VALUES ('scelta_ok', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", json.dumps(sorted(gia_ok() | {sid})))
 
 

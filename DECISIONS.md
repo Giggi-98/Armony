@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Proposte di «Da controllare» salvate (precisa la voce «Proposte … cercate in sottofondo»)
+
+**Contesto:** le proposte vivevano solo in memoria: ogni riavvio del server rifaceva da capo un centinaio di ricerche su YouTube.
+**Scelta:** si salvano in `settings` (`scelta_prop`, id → [candidato, quando]) a ogni proposta trovata e si ricaricano all'avvio; «niente di abbastanza vicino» vale un giorno, poi si ricerca.
+**Alternative scartate:** una tabella nuova con migrazione (per un centinaio di righe basta la tabella delle impostazioni); tenere anche i «niente» per sempre (YouTube Music aggiunge brani).
+**Conseguenze:** una proposta salvata può puntare a un video poi rimosso: la sostituzione fallisce e la riga offre «Riprova».
+**Da rivedere se:** i brani da controllare diventano migliaia.
+
 ## 2026-10-10 — Tempo massimo sulle chiamate del client
 
 **Contesto:** una pagina è rimasta per sempre sullo scheletro di caricamento: il tunnel del Funnel (indirizzo pubblico che cambia ogni 20–30 secondi) o un riavvio del server lasciavano una richiesta senza risposta, e `fetch` senza tempo massimo aspetta all'infinito.
