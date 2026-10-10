@@ -2418,16 +2418,37 @@ def accoda(tracks, fmt, folder, label, by, pids=None):
     return {"added": len(added), "skipped": len(tracks) - len(added), "jobs": ids}
 
 
+# ─── PERCHÉ una copia pronta ───
+# La pagina Scarica chiede l'elenco ogni 2 s, da ogni dispositivo che la tiene aperta: con un'importazione da migliaia
+# di brani ordinarli e raggrupparli ogni volta per ognuno costava. Si rifà solo quando un lavoro cambia (o al più ogni
+# 10 s, per i cambi fatti senza jupdate); l'ETag fa rispondere 304 al browser che ha già quella versione.
+_jcache = {}
+
+
 @app.get("/api/jobs")
 def list_jobs():
     want = [i for i in (request.args.get("ids") or "").split(",") if i][:300]
     if want:  # solo lo stato, per le barre di avanzamento; inlib = Navidrome ha già il brano
         with jlock:
             return jsonify([{k: jobs[i].get(k) for k in ("id", "status", "progress", "error", "inlib")} for i in want if i in jobs])
+    grouped = request.args.get("grouped") == "1"
     with jlock:
-        all_ = sorted(jobs.values(), key=lambda x: x["created"], reverse=True)
-    if request.args.get("grouped") != "1":
-        return jsonify(all_[:200])  # forma di prima, per i client vecchi
+        key = (grouped, len(jobs), max((x.get("updated") or 0 for x in jobs.values()), default=0))
+    c = _jcache.get(grouped)
+    if not c or c[0] != key or time.time() - c[1] > 10:
+        c = _jcache[grouped] = (key, time.time(), json.dumps(jobs_elenco(grouped)), hashlib.sha1(repr((key, time.time())).encode()).hexdigest()[:16])
+    resp = app.response_class(c[2], mimetype="application/json")
+    resp.set_etag(c[3])
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["Vary"] = "X-Token"
+    return resp.make_conditional(request)
+
+
+def jobs_elenco(grouped):
+    with jlock:
+        all_ = sorted((dict(x) for x in jobs.values()), key=lambda x: x["created"], reverse=True)
+    if not grouped:
+        return all_[:200]  # forma di prima, per i client vecchi
     # raggruppata (capacità "jobgroups"): un'importazione di migliaia di brani è una riga sola
     groups, single = {}, []
     for x in all_:
@@ -2453,7 +2474,7 @@ def list_jobs():
     out = sorted(groups.values(), key=lambda gr: gr["created"], reverse=True)
     for gr in out:
         gr["progress"] = round((gr["done"] + gr["errors"] + gr.pop("partial")) / gr["total"] * 100, 1)
-    return jsonify(groups=out, jobs=single[:200])
+    return {"groups": out, "jobs": single[:200]}
 
 
 @app.delete("/api/jobs")

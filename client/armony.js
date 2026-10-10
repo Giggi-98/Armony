@@ -278,6 +278,8 @@ const norm = (x, sid = S.active) => ({
   id: x.id, title: x.title || 'Senza titolo', artist: x.displayArtist || x.artist || 'Artista sconosciuto',
   // "[Unknown Album]" è il segnaposto di Navidrome per i file senza album: non si mostra
   artistId: x.artistId, album: x.album === '[Unknown Album]' ? '' : x.album || '', albumId: x.albumId, duration: x.duration || 0, track: x.track,
+  // gli ospiti (feat.): Navidrome li elenca in artists, ognuno con la sua pagina
+  artists: x.artists?.length > 1 ? x.artists.filter(a => a.id).map(a => ({ id: a.id, name: a.name })) : undefined,
   coverArt: x.coverArt, starred: !!x.starred, starredAt: x.starred || undefined, suffix: x.suffix, bitRate: x.bitRate, genre: x.genre, year: x.year, created: x.created,
   rg: x.replayGain ? { trackGain: x.replayGain.trackGain, albumGain: x.replayGain.albumGain, trackPeak: x.replayGain.trackPeak, albumPeak: x.replayGain.albumPeak } : null,
   serverId: sid
@@ -1556,7 +1558,7 @@ const DB = {
   _db: null,
   open() {
     return this._db ||= new Promise((res, rej) => {
-      const r = indexedDB.open('armony', 4);
+      const r = indexedDB.open('armony', 5);
       r.onupgradeneeded = e => {
         const d = r.result;
         if (e.oldVersion < 1) {
@@ -1566,6 +1568,10 @@ const DB = {
         if (e.oldVersion < 2) d.createObjectStore('telefono', { keyPath: 'k' });  // telefono.js
         if (e.oldVersion < 3) d.createObjectStore('chiavi', { keyPath: 'k' });  // dispositivi.js: chiavi private non esportabili
         if (e.oldVersion < 4) d.createObjectStore('acache', { keyPath: 'k' });  // cache dei brani (ACache)
+        if (e.oldVersion < 5) {
+          d.createObjectStore('acmeta', { keyPath: 'k' });  // ACache: dimensione e ultimo uso, a parte dai file
+          d.createObjectStore('stato', { keyPath: 'k' });  // copia della coda (persistQueue)
+        }
       };
       // una scheda vecchia aperta non deve bloccare l'aggiornamento del database (né l'avvio di questa):
       // chi ha la versione vecchia la chiude quando ne arriva una nuova, e se resta bloccata si va avanti senza
@@ -1669,8 +1675,23 @@ setInterval(() => OffPin.sync(), 30 * 60000);
    funziona anche aprendo Armony senza HTTPS */
 const ACache = {
   idx: {}, busy: new Set(), t: null,
-  // l'indice si ricostruisce dal database: con più schede aperte una copia in localStorage si sovrascriverebbe
-  async init() { try { for (const r of await DB.all('acache')) this.idx[r.k] = { size: r.blob?.size || 0, at: r.at || 0 }; } catch {} },
+  // l'indice si ricostruisce dal database: con più schede aperte una copia in localStorage si sovrascriverebbe.
+  // Dimensione e ultimo uso stanno in «acmeta», a parte: prima l'avvio leggeva tutti i file della cache (centinaia di MB)
+  // e ogni ascolto riscriveva il file intero solo per aggiornarne la data
+  async init() {
+    try {
+      let m = await DB.all('acmeta');
+      if (!m.length) {  // la prima volta dopo l'aggiornamento: l'indice dai file, uno alla volta
+        for (const k of await DB.run('acache', 'readonly', s => s.getAllKeys())) {
+          const r = await DB.get('acache', k); if (!r?.blob) continue;
+          const x = { k, size: r.blob.size, at: r.at || 0 }; m.push(x); await DB.put('acmeta', x);
+        }
+      }
+      for (const r of m) this.idx[r.k] = { size: r.size, at: r.at };
+    } catch {}
+  },
+  meta(k) { const x = this.idx[k]; DB.put('acmeta', { k, size: x.size, at: x.at }).catch(() => {}); },
+  drop(k) { delete this.idx[k]; DB.del('acache', k).catch(() => {}); DB.del('acmeta', k).catch(() => {}); },
   k: (t, q) => `${key(t)}@${q}`,
   max: () => (P.cacheMB ?? 1024) * 1e6,
   size() { return Object.values(this.idx).reduce((n, x) => n + x.size, 0); },
@@ -1687,8 +1708,8 @@ const ACache = {
     const k = this.k(t, q); if (!this.idx[k]) return null;
     try {
       const r = await DB.get('acache', k);
-      if (!r?.blob) { delete this.idx[k]; return null; }
-      this.idx[k].at = Date.now(); DB.put('acache', { ...r, at: Date.now() }).catch(() => {});
+      if (!r?.blob) { this.drop(k); return null; }
+      this.idx[k].at = Date.now(); this.meta(k);
       return URL.createObjectURL(r.blob);
     } catch { return null; }
   },
@@ -1699,18 +1720,18 @@ const ACache = {
       // tempo massimo: una connessione appesa non deve bloccare la cache dei brani dopo
       const r = await fetch(streamUrl(t, q), { signal: AbortSignal.timeout?.(180000) }); if (!r.ok || /json|xml/.test(r.headers.get('content-type') || '')) return;
       const blob = await r.blob(); if (blob.size < 20000) return;  // una risposta d'errore, non un brano
-      await DB.put('acache', { k, blob, at: Date.now() });
-      this.idx[k] = { size: blob.size, at: Date.now() }; this.trim();
+      await DB.put('acache', { k, blob });
+      this.idx[k] = { size: blob.size, at: Date.now() }; this.meta(k); this.trim();
     } catch {} finally { this.busy.delete(k); }
   },
   async trim() {
     let tot = this.size(); const max = this.max(); if (tot <= max) return;
     for (const [k, x] of Object.entries(this.idx).sort((a, b) => a[1].at - b[1].at)) {
       if (tot <= max * .9) break;
-      await DB.del('acache', k).catch(() => {}); delete this.idx[k]; tot -= x.size;
+      this.drop(k); tot -= x.size;
     }
   },
-  async clear() { await DB.clear('acache').catch(() => {}); this.idx = {}; },
+  async clear() { await DB.clear('acache').catch(() => {}); await DB.clear('acmeta').catch(() => {}); this.idx = {}; },
   // dopo un cambio di brano, lasciato il tempo al brano attuale di riempire il suo buffer
   ahead() {
     clearTimeout(this.t);
@@ -2180,8 +2201,13 @@ const broadcastGuest = () => Jam.role === 'guest' && Jam.mode === 'broadcast';
 function isPlaying() { return broadcastGuest() ? Jam.playing : Live.remote() ? Live.playing() : !Engine.el.paused; }
 function playPos() { return broadcastGuest() ? Jam.estPos() : Radio.st ? Radio.pos() : Live.remote() ? Live.pos() : Engine.time(); }
 function playDur() { return broadcastGuest() ? (Jam.track?.duration || 0) : Radio.st ? Radio.dur() : Live.remote() ? Live.dur() : Engine.duration(); }
+// la coda va anche in IndexedDB: se localStorage è pieno (5 MB, e una coda da 3000 brani ne occupa più di uno)
+// la scrittura fallisce in silenzio e al riavvio tornava una coda vecchia. queueAt dice quale copia è più recente
 function persistQueue() {
-  store.set('queue', S.queue.slice(0, 3000)); store.set('index', S.index);
+  const at = Date.now();
+  try { localStorage.setItem('armony:queue', JSON.stringify(S.queue.slice(0, 3000))); store.set('queueAt', at); } catch {}
+  store.set('index', S.index);
+  clearTimeout(persistQueue.d); persistQueue.d = setTimeout(() => DB.put('stato', { k: 'queue', at, queue: S.queue.slice(0, 3000), index: S.index }).catch(() => {}), 1000);
   clearTimeout(persistQueue.t); persistQueue.t = setTimeout(() => Live.publish(), 300);  // gli altri dispositivi vedono la stessa coda
 }
 // da dove suona la coda ("In riproduzione da PLAYLIST · Nome", come Spotify): la pagina da cui è partita
@@ -2560,7 +2586,7 @@ async function vNow() {
       <div class="bigdisc ${isPlaying() ? 'spin' : ''}" id="bigdisc"><canvas id="viz" width="640" height="640"></canvas>
         <div class="rec">${t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 600, t.serverId))}" alt="">` : '<div class="lbl"></div>'}</div></div>
       <div class="now-title"><h1>${esc(t.title)}</h1><button class="icon-btn now-star" id="nowStar" aria-label="Preferito"></button></div>
-      <p class="sub now-meta">${t.artistId ? `<a href="#/artista/${encodeURIComponent(t.artistId)}">${esc(t.artist)}</a>` : esc(t.artist)}${t.album ? ` · ${t.albumId ? `<a href="#/album/${encodeURIComponent(t.albumId)}">${esc(t.album)}</a>` : esc(t.album)}` : ''}</p>
+      <p class="sub now-meta">${t.artists ? t.artists.map(a => `<a class="ar" href="#/artista/${encodeURIComponent(a.id)}">${esc(a.name)}</a>`).join(', ') : t.artistId ? `<a href="#/artista/${encodeURIComponent(t.artistId)}">${esc(t.artist)}</a>` : esc(t.artist)}${t.album ? ` · ${t.albumId ? `<a href="#/album/${encodeURIComponent(t.albumId)}">${esc(t.album)}</a>` : esc(t.album)}` : ''}</p>
       <div class="row now-acts">
         <button class="btn sm" data-act="nowmore">${ic('more')} Azioni</button>
         <button class="btn sm" data-act="sleep">${ic('moon')} Timer</button>
@@ -2763,7 +2789,7 @@ const Sost = {
       try { if (!(await api('getScanStatus', {}, s)).scanStatus?.scanning) break; } catch { break; }
     }
     this.bust[k] = Date.now();
-    for (const q of Object.keys(QUALITIES)) { const ck = ACache.k(t, q); if (ACache.idx[ck]) { delete ACache.idx[ck]; DB.del('acache', ck).catch(() => {}); } }
+    for (const q of Object.keys(QUALITIES)) { const ck = ACache.k(t, q); if (ACache.idx[ck]) ACache.drop(ck); }
     if (Engine.idle.dataset.key === k) { Engine.idle.removeAttribute('src'); delete Engine.idle.dataset.key; }
     try {
       const nt = norm((await api('getSong', { id: t.id }, s)).song, s.id);
@@ -3826,7 +3852,8 @@ function songMenu(t, ctx = {}) {
     Jam.role ? ['jam', Jam.role === 'host' ? 'Aggiungi alla coda della Jam' : 'Proponi alla Jam', () => Jam.suggest(t)] : null,
     ['radio', 'Vai alla radio del brano', () => radioFrom(t)],
     t.albumId ? ['album', 'Vai all\'album', () => location.hash = '#/album/' + encodeURIComponent(t.albumId)] : null,
-    t.artistId ? ['artist', 'Vai all\'artista', () => location.hash = '#/artista/' + encodeURIComponent(t.artistId)] : null,
+    ...(t.artists ? t.artists.map(a => ['artist', `Vai a ${a.name}`, () => location.hash = '#/artista/' + encodeURIComponent(a.id)])
+      : [t.artistId ? ['artist', 'Vai all\'artista', () => location.hash = '#/artista/' + encodeURIComponent(t.artistId)] : null]),
     phoneT ? null : ['sliders', 'Crediti e dettagli', () => songInfo(t)],
     ctx.row ? ['check', 'Seleziona', () => { const l = ctx.row.closest('.songs[data-l]'); if (l) Sel.toggle(+l.dataset.l, +ctx.row.dataset.i); }] : null,
     Amici.on() && !t.fed && !phoneT ? ['send', 'Manda a un amico', () => Amici.manda({ kind: 'brano', id: t.id, title: t.title, sub: t.artist })] : null,
@@ -3851,7 +3878,7 @@ function songMenu(t, ctx = {}) {
   if (ctx.q != null && !Live.remote() && Jam.role !== 'guest') items.splice(2, 0, ['close', 'Togli dalla coda', () => { const b = document.createElement('button'); b.hidden = true; b.dataset.act = 'qrm'; b.dataset.i = ctx.q; view.append(b); b.click(); b.remove(); }]);
   if (ctx.at) return ctxMenu(ctx.at, items, `<b>${esc(t.title)}</b><small>${esc(t.artist)}</small>`);
   d.innerHTML = `<div class="head"><span class="pic">${imgTag(t.coverArt, 100, t.serverId)}</span><span style="min-width:0"><b style="display:block">${esc(t.title)}</b><small style="color:var(--muted)">${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}${t.fed ? '<br>' + netSrc(t.fed) : ''}</small></span></div>
-    ${items.map(([i, l, , cls], n) => `<button class="mi${cls ? ' ' + cls : ''}" data-n="${n}">${ic(i)}${l}</button>`).join('')}`;
+    ${items.map(([i, l, , cls], n) => `<button class="mi${cls ? ' ' + cls : ''}" data-n="${n}">${ic(i)}${esc(l)}</button>`).join('')}`;
   d.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { d.close(); items[+b.dataset.n][2](); });
   d.onclose = () => { d.className = ''; d.onclose = null; };
   d.showModal();
@@ -5837,6 +5864,7 @@ async function boot() {
   Wave.init();
   Engine.init(); wirePlayer();
   await Offline.init(); await Local.init(); ACache.init();
+  try { const q = await DB.get('stato', 'queue'); if (q?.queue && q.at > store.get('queueAt', 0)) { S.queue = q.queue; S.index = q.index; } } catch {}
   if (srv()?.session && Disp.ok(srv()) && Disp.stale(srv())) await Promise.race([Disp.fresh(srv(), true), sleep(4000)]);
   if (Local.on() && !navigator.onLine && !srv()?.local) S.active = Local.id;  // senza rete suona il telefono
   fillSelectors(); updateNowPlaying(); paintTime();

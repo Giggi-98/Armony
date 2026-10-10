@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Cache dei brani con l'indice a parte, coda copiata in IndexedDB
+
+**Contesto:** voce 8.5 del piano. All'avvio `ACache.init` leggeva tutti i file della cache (fino a 5 GB) per conoscerne la dimensione, e ogni ascolto da cache riscriveva il file intero per aggiornarne la data. La coda stava solo in localStorage: oltre i 5 MB la scrittura falliva in silenzio e al riavvio tornava una coda vecchia.
+**Scelta:** IndexedDB passa alla versione 5 con due archivi: `acmeta` (chiave, dimensione, ultimo uso: l'unico che si legge all'avvio e si aggiorna a ogni ascolto) e `stato` (una copia della coda, scritta un secondo dopo ogni cambio). La copia in localStorage resta per l'avvio sincrono; `queueAt` si scrive solo se la coda è entrata, e all'avvio vince la copia più recente. La prima volta l'indice si ricostruisce leggendo i file uno alla volta.
+**Alternative scartate:** spostare la coda solo in IndexedDB (l'avvio legge `S.queue` in modo sincrono in decine di punti prima di `boot()`: troppo da toccare per lo stesso risultato); Cache Storage per i file (non c'è senza HTTPS).
+**Conseguenze:** due scritture per ogni cambio di coda; una scheda vecchia aperta si chiude da sola all'aggiornamento del database (già così dalla versione 4).
+**Da rivedere se:** la coda deve sopravvivere anche alla pulizia dei dati del sito (andrebbe sul server, come lo storico).
+
 ## 2026-10-11 — Coda dei download a turni fra utenti, senza tetto giornaliero
 
 **Contesto:** voce 4.6 del piano: un'importazione da migliaia di brani di un utente faceva aspettare ore il brano singolo di un altro.
