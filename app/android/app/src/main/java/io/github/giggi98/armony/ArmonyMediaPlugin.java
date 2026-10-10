@@ -11,6 +11,7 @@ import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
@@ -144,6 +145,7 @@ public class ArmonyMediaPlugin extends Plugin {
         ArmonyMediaService.album = call.getString("album", "");
         ArmonyMediaService.playing = Boolean.TRUE.equals(call.getBoolean("playing", false));
         ArmonyMediaService.positionMs = Math.round(call.getDouble("position", 0d) * 1000);
+        ArmonyMediaService.positionAt = SystemClock.elapsedRealtime();
         ArmonyMediaService.durationMs = Math.round(call.getDouble("duration", 0d) * 1000);
         ArmonyMediaService.rate = call.getFloat("rate", 1f);
         String url = call.getString("artwork", "");

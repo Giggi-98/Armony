@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- widget della schermata Home (ArmonyWidget.java): i colori del tema scuro di client/index.html -->
+<resources>
+    <color name="widget_bg">#1B1E36</color>
+    <color name="widget_surface">#2A2E55</color>
+    <color name="widget_ink">#F1ECE1</color>
+    <color name="widget_muted">#A0A5C8</color>
+    <color name="widget_accent">#F4A63C</color>
+    <color name="widget_on_accent">#191C38</color>
+    <!-- da Android 12 il raggio è quello del sistema (values-v31) -->
+    <dimen name="widget_radius">24dp</dimen>
+    <string name="widget_label">In riproduzione</string>
+    <string name="widget_desc">Il brano che sta suonando, con copertina e comandi. Funziona anche quando il telefono fa da telecomando.</string>
+    <string name="widget_idle">Niente in riproduzione</string>
+    <string name="widget_idle_sub">Tocca per aprire Armony</string>
+    <string name="widget_prev">Precedente</string>
+    <string name="widget_next">Successivo</string>
+    <string name="widget_play">Riproduci</string>
+    <string name="widget_pause">Pausa</string>
+    <string name="widget_cover">Apri In riproduzione</string>
+</resources>
