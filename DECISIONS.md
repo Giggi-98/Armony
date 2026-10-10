@@ -27,6 +27,49 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Dispositivi gemellati: lo stesso server riconosciuto anche con indirizzi diversi
+
+**Contesto:** con il telefono su Tailscale e il PC sull'indirizzo di casa, i brani del telefono arrivavano al PC con un indirizzo di server sconosciuto: niente copertina né testo; il telecomando vedeva solo i prossimi 20 brani e sembrava che la coda fosse corta.
+**Scelta:** nel brano viaggia anche l'indirizzo pubblico del server (`pub`); `localize` riconosce il server da quello, e per i propri dispositivi (Live) il brano è comunque del server del canale, salvo la musica del solo telefono. Il telecomando riceve i prossimi 50 e il numero di quelli dopo.
+**Alternative scartate:** mandare tutta la coda (troppo per ogni cambio di stato); un identificativo di server nuovo (l'indirizzo pubblico c'è già).
+**Da rivedere se:** un utente usa due server Armony diversi con lo stesso indirizzo pubblico.
+
+## 2026-10-10 — Radio sezione a sé, barra in basso scelta dall'utente
+
+**Contesto:** la Radio si raggiungeva dalla pagina Jam; l'utente vuole la Radio separata, Cerca sempre a portata e scegliere la barra in basso.
+**Scelta:** Radio è una voce di `NAV` (ribalta «Pagina a sé raggiungibile da Jam» della voce Jam Radio del 2026-10-09). Sul telefono la barra ha 1–4 sezioni scelte dall'utente più "Altro" sempre ultimo, salvate per dispositivo (`store('tabs')`); una voce sconosciuta riporta al predefinito. Ordine con frecce. Lente fissa nell'intestazione del telefono. Icone del lettore piene; i tracciati di play/pausa tengono conto del contorno da 2 px (le barre della pausa si toccavano).
+**Alternative scartate:** trascinamento (difficile da rendere accessibile); sincronizzare la barra fra dispositivi (telefoni diversi, usi diversi); Radio fissa nella barra.
+**Da rivedere se:** serve la barra anche su tablet sopra gli 860 px.
+
+## 2026-10-10 — App Android: widget della schermata Home dal servizio di riproduzione
+
+**Contesto:** un widget musicale come quelli di One UI.
+**Scelta:** `ArmonyWidget` (RemoteViews) legge lo stato di `ArmonyMediaService`, lo ridisegna a ogni `apply()`; i tasti usano gli stessi PendingIntent della notifica. La barra avanza ogni 15 s solo mentre suona e a schermo acceso. Impaginazione scelta dalle misure del launcher. Ad app chiusa "Niente in riproduzione" e ogni tocco apre l'app.
+**Alternative scartate:** `updatePeriodMillis`/AlarmManager (sveglie a vuoto); avviare il servizio dal widget ad app chiusa (senza WebView non suona nulla, e da Android 12 il servizio in primo piano non parte dal sottofondo).
+**Da rivedere se:** la riproduzione diventa nativa.
+
+## 2026-10-10 — App Android: DNS di riserva con un proxy locale per la WebView
+
+**Contesto:** con il DNS privato di Android il nome del Funnel (`….ts.net`) non si risolve e l'app non raggiunge il server; la WebView usa sempre il risolutore di sistema.
+**Scelta:** proxy CONNECT su 127.0.0.1 (porta casuale) dentro l'app, impostato con `ProxyController` e bypass rovesciato: solo l'HTTPS verso i server configurati e GitHub passa da lì. Risolve con il DNS del telefono, poi DoH (Cloudflare, Google) o DoT (Quad9) per IP, con cache sul TTL; il TLS resta da capo a capo. Le richieste native usano lo stesso proxy. Interruttore acceso di serie.
+**Alternative scartate:** `shouldInterceptRequest` (non vede i corpi delle POST/PUT); CapacitorHttp (non sceglie il DNS); IP fisso del Funnel (cambia); OkHttp con DoH (porta Kotlin nell'APK); segreto o controllo dell'UID sul proxy (non disponibili senza VPN): la protezione è l'elenco chiuso di host e porte.
+**Da rivedere se:** la WebView permette di scegliere il risolutore.
+
+## 2026-10-10 — YouTube dal server: PO Token in un servizio a parte, ritmo e pausa, cookie facoltativi
+
+**Contesto:** durante una grossa importazione YouTube ha risposto «not a bot» a centinaia di richieste in un'ora; il ripiego su SoundCloud falliva spesso per DRM. Senza account YouTube regge circa 300 video l'ora per indirizzo, e yt-dlp ormai vuole un motore JavaScript (EJS).
+**Scelta:** `yt-dlp[default,deno]` aggiornati a ogni avvio; servizio `pot` (bgutil-ytdlp-pot-provider, amd64/arm64) solo su localhost, con il suo plugin; un video ogni 12 s fra tutti gli esecutori (4 s con i cookie); al blocco mezz'ora di pausa e brani «in attesa» invece che in errore; cookie di un account secondario caricati dall'amministratore; brani DRM di SoundCloud saltati.
+**Alternative scartate:** cookie obbligatori (rischio per l'account); `player_client` fisso (cambia spesso); istanze Invidious/Piped; yt-dlp-getpot-wpc (richiede un browser); riprovare subito dopo un blocco (lo allunga).
+**Conseguenze:** un container in più; importazioni grandi più lente (circa 300 brani l'ora senza cookie).
+**Da rivedere se:** bgutil smette di essere mantenuto, o YouTube blocca anche a 300 l'ora.
+
+## 2026-10-10 — Playlist dei brani importati completate dal server, abbinando il brano per percorso
+
+**Contesto:** i brani da aggiungere alle playlist dopo un'importazione stavano nel localStorage di chi importava e si aggiungevano solo con la pagina Scarica aperta: a telefono chiuso la playlist restava a 3 brani su 92.
+**Scelta:** le playlist (`pids`) stanno nel lavoro; un thread del server le completa come amministratore di Navidrome riconoscendo il brano da `media_file.path` (lo stesso percorso scritto dal lavoro), senza doppioni e solo nelle playlist di chi ha chiesto il download; chiede la scansione al più ogni 2 minuti. Gli avvisi `{"type":"libreria"}` viaggiano su `/api/live`; le pagine mostrano una barra di avanzamento per job. Le tracce mancanti si scaricano con la data dell'album in libreria (Navidrome separa gli album per data).
+**Alternative scartate:** abbinamento per titolo/artista/durata (può sbagliare, richiede il client); un canale nuovo per gli avvisi (thread di waitress); il `path` di Subsonic (Navidrome lo inventa).
+**Da rivedere se:** Navidrome espone il percorso vero via Subsonic.
+
 ## 2026-10-09 — L'app si scarica direttamente da GitHub, non dal server
 
 **Contesto:** con la 0.16.2 il server dava `/app.apk`, un rimando all'ultima APK su GitHub, usato da link e QR. L'utente vuole poter chiudere le porte del server: l'app non deve passare di lì (un gettone per proteggere il link non serve, visto che l'APK è pubblica nelle release).

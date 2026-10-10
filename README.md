@@ -79,7 +79,7 @@ Fatto: da qui in avanti gli aggiornamenti arrivano con il tasto **Aggiorna** in 
 
 **Mac o Windows (Docker Desktop):** nel `docker-compose.yml` togli `network_mode: host` dal servizio `armony`, aggiungi `ports: ["8080:8080"]`, metti `NAVIDROME_URL: "http://navidrome:4533"` e `ARMONY_MULTICAST: "0"`. Si perde solo la scoperta automatica in casa (multicast).
 
-**Porte:** 8080 (Armony), 4533 (Navidrome). Facoltativo: `docker compose --profile turn up -d` avvia un server TURN per la Jam dietro reti mobili difficili.
+**Porte:** 8080 (Armony), 4533 (Navidrome); il servizio `pot` (aiuta i download da YouTube) ascolta solo in locale. Facoltativo: `docker compose --profile turn up -d` avvia un server TURN per la Jam dietro reti mobili difficili.
 
 ---
 
