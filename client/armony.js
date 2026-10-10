@@ -3879,7 +3879,7 @@ const Phone = {
    La Jam (più persone insieme) resta separata: con una Jam aperta questo modulo non interviene. */
 const Live = {
   es: null, devices: new Map(), states: new Map(), target: null, sent: null, tick: null, retry: null, dog: null, last: 0, beatAt: 0, fails: 0, want: null,
-  name() { return P.deviceName || (NATIVE ? 'Telefono' : /Android|iPhone|iPad|Mobile/.test(navigator.userAgent) ? 'Telefono (browser)' : 'Computer'); },
+  name() { return P.deviceName || store.get('devName', null) || (NATIVE ? 'Telefono' : /Android|iPhone|iPad|Mobile/.test(navigator.userAgent) ? 'Telefono (browser)' : 'Computer'); },
   on() { const s = srv(); return P.live !== false && !!s?.session && !!s.me?.caps?.includes('live'); },
   st() { return this.target ? this.states.get(this.target) || null : null; },
   // telecomando: c'è un dispositivo di destinazione collegato e qui non sta suonando niente
