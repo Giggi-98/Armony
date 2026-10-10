@@ -23,7 +23,6 @@ import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -181,7 +180,7 @@ public class ArmonyMediaPlugin extends Plugin {
 
     private static Bitmap load(String url) {
         try {
-            HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+            HttpURLConnection c = ArmonyNetPlugin.open(url);
             c.setConnectTimeout(8000);
             c.setReadTimeout(8000);
             try (InputStream in = c.getInputStream()) { return BitmapFactory.decodeStream(in); }

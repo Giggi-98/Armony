@@ -23,7 +23,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.security.MessageDigest;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -143,7 +142,7 @@ public class ArmonyUpdatePlugin extends Plugin {
     private String download(String url, File out, boolean report) throws Exception {
         HttpURLConnection c = null;
         for (int i = 0; i < 6; i++) {
-            c = (HttpURLConnection) new URL(url).openConnection();
+            c = ArmonyNetPlugin.open(url);
             c.setInstanceFollowRedirects(false);
             c.setConnectTimeout(15000);
             c.setReadTimeout(30000);
