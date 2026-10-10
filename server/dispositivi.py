@@ -432,6 +432,9 @@ def login():
         event("accesso_fallito", u)
         return jsonify(error="Utente o password errati"), 401
     clear_fails(*keys)
+    # il nome com'è su Navidrome: "Gg" e "gg" entrano entrambi, ma sono lo stesso account. Con il nome scritto a mano i
+    # dispositivi dello stesso utente finivano divisi (Dove suona, storico, preferenze): si usa sempre quello vero
+    u = str((r.get("user") or {}).get("username") or u)
     admin = bool(r.get("user", {}).get("adminRole"))
     cid, name, kind = str(d.get("device") or "")[:40], clean_name(d.get("name")), str(d.get("kind") or "")
     kind = kind if kind in KINDS else ""

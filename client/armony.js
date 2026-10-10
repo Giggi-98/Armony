@@ -224,8 +224,9 @@ async function api(method, params, s = srv(), post = false, again = false) {
 }
 const norm = (x, sid = S.active) => ({
   id: x.id, title: x.title || 'Senza titolo', artist: x.displayArtist || x.artist || 'Artista sconosciuto',
-  artistId: x.artistId, album: x.album === '[Unknown Album]' ? '' : x.album || '', albumId: x.albumId,  // il segnaposto di Navidrome per i file senza album duration: x.duration || 0, track: x.track,
-  coverArt: x.coverArt, starred: !!x.starred, suffix: x.suffix, bitRate: x.bitRate, genre: x.genre, year: x.year,
+  // "[Unknown Album]" è il segnaposto di Navidrome per i file senza album: non si mostra
+  artistId: x.artistId, album: x.album === '[Unknown Album]' ? '' : x.album || '', albumId: x.albumId, duration: x.duration || 0, track: x.track,
+  coverArt: x.coverArt, starred: !!x.starred, suffix: x.suffix, bitRate: x.bitRate, genre: x.genre, year: x.year, created: x.created,
   rg: x.replayGain ? { trackGain: x.replayGain.trackGain, albumGain: x.replayGain.albumGain, trackPeak: x.replayGain.trackPeak, albumPeak: x.replayGain.albumPeak } : null,
   serverId: sid
 });
@@ -266,6 +267,7 @@ async function syncSessions() {
       const r = await fetch(absUrl(s.url) + '/api/me', { headers: { 'X-Token': s.session } }).catch(() => null);
       if (r?.ok) {
         s.me = await r.json(); s.tk = s.me.ticket; s.dev = s.me.dev || s.dev;
+        if (s.me.user && s.me.user.toLowerCase() === String(s.user).toLowerCase()) s.user = s.me.user;  // il nome com'è sul server
         // client aggiornato che entrava senza chiave: se la crea adesso, senza chiedere niente
         if (Disp.ok(s) && !s.me.keyed && Disp.can()) await Disp.setKey(s).catch(() => {});
         continue;
@@ -437,7 +439,7 @@ function songList(tracks, opts = {}) {
   const cur = currentTrack();
   const art = opts.art !== false, alb = opts.showAlbum !== false;
   return `<div class="songs tracklist${alb ? '' : ' noalb'}${opts.queue ? ' q' : ''}" data-l="${lid}">
-    <div class="th${art ? '' : ' noart'}" aria-hidden="true"><span class="n">#</span><span class="tt">Titolo</span>${alb ? '<span class="al">Album</span>' : ''}<span class="d">${ic('clock')}</span><span></span></div>${tracks.map((t, i) => `
+    <div class="th${art ? '' : ' noart'}"${opts.sortable ? '' : ' aria-hidden="true"'}><span class="n">#</span><span class="tt"${opts.sortable ? ' data-sort="title" role="button" tabindex="0"' : ''}>Titolo</span>${alb ? `<span class="al"${opts.sortable ? ' data-sort="album" role="button" tabindex="0"' : ''}>Album</span>` : ''}<span class="d"${opts.sortable ? ' data-sort="duration" role="button" tabindex="0" aria-label="Durata"' : ''}>${ic('clock')}</span><span></span></div>${tracks.map((t, i) => `
     <div class="song ${art ? '' : 'noart'} ${cur && key(cur) === key(t) ? 'now' : ''}" data-act="${opts.queue ? 'qplay' : 'play'}" data-i="${i}" data-tid="${esc(t.id)}">
       <span class="n">${opts.queue ? i + 1 : (opts.numbers ? (t.track || i + 1) : i + 1)}</span>
       <span class="thumb">${art ? imgTag(t.coverArt, 84, t.serverId) : ''}</span>
@@ -537,6 +539,58 @@ function lArtistCard(a) {
 function lPlCard(p) {
   return `<button class="lcard" data-act="openpl" data-id="${esc(p.id)}"><div class="lcover">${p.songCount ? imgTag(p.coverArt, 300) : ic('list')}</div><b>${esc(p.name)}</b><small>${p.owner ? esc(p.owner) + ' · ' : ''}${p.songCount} ${p.songCount === 1 ? 'brano' : 'brani'}</small></button>`;
 }
+// ordina e cerca dentro un elenco di brani, come su Spotify: "Ordina per" (personalizzato, titolo, artista, album, aggiunti
+// di recente, durata, crescente o decrescente) e la lente per filtrare. Si ricorda per pagina (store 'ord:<chiave>').
+// Ogni brano tiene la sua posizione vera (_pi): "Togli dalla playlist" deve togliere quella, non la riga mostrata
+const ORD = [['custom', 'Personalizzato'], ['title', 'Titolo'], ['artist', 'Artista'], ['album', 'Album'], ['added', 'Aggiunti di recente'], ['duration', 'Durata']];
+const Ord = {
+  get: k => ({ by: 'custom', dir: 1, q: '', ...store.get('ord:' + k, {}) }),
+  set(k, o) { store.set('ord:' + k, { by: o.by, dir: o.dir }); },
+  apply(songs, o) {
+    songs.forEach((t, i) => { if (t._pi == null) t._pi = i; });
+    const q = cleanTxt(o.q || ''), cmp = (a, b) => String(a || '').localeCompare(String(b || ''), 'it', { sensitivity: 'base', numeric: true });
+    let l = q ? songs.filter(t => cleanTxt(`${t.title} ${t.artist} ${t.album}`).includes(q)) : songs.slice();
+    const f = { title: (a, b) => cmp(a.title, b.title), artist: (a, b) => cmp(a.artist, b.artist) || cmp(a.album, b.album) || (a.track || 0) - (b.track || 0),
+      album: (a, b) => cmp(a.album, b.album) || (a.track || 0) - (b.track || 0), added: (a, b) => cmp(b.created, a.created), duration: (a, b) => (a.duration || 0) - (b.duration || 0) }[o.by];
+    if (f) l.sort((a, b) => f(a, b) * o.dir);
+    else if (o.dir < 0) l.reverse();
+    return l;
+  },
+  // la barra sopra l'elenco: lente che si apre, e "Ordina per" con le voci di Spotify
+  bar(k) {
+    const o = this.get(k), lab = ORD.find(x => x[0] === o.by)?.[1] || ORD[0][1];
+    return `<div class="ordbar" data-ord="${esc(k)}"><label class="ordq">${ic('search')}<input type="search" placeholder="Cerca qui" aria-label="Cerca in questo elenco" autocomplete="off"></label>
+      <button class="ordby" aria-haspopup="menu"><span>${esc(lab)}</span>${o.dir < 0 && o.by !== 'custom' ? ic('dn') : o.by !== 'custom' ? ic('up') : ic('queue')}</button></div>`;
+  },
+  // collega barra ed elenco: render(lista ordinata) ridisegna, songs() dà l'elenco intero più recente
+  wire(k, songs, render) {
+    const bar = $(`.ordbar[data-ord="${CSS.escape(k)}"]`); if (!bar) return;
+    const o = this.get(k), redo = () => render(this.apply(songs(), o));
+    let t; bar.querySelector('input').oninput = e => { clearTimeout(t); t = setTimeout(() => { o.q = e.target.value; redo(); }, 150); };
+    bar.querySelector('.ordby').onclick = e => {
+      const r = e.currentTarget.getBoundingClientRect();
+      ctxMenuOrPick([r.left, r.bottom + 4], ORD.map(([v, l]) => [v === o.by ? 'check' : 'more', l + (v === o.by && v !== 'custom' ? (o.dir > 0 ? ' · crescente' : ' · decrescente') : ''), () => {
+        o.dir = v === o.by && v !== 'custom' ? -o.dir : v === 'added' ? 1 : 1; o.by = v; this.set(k, o);
+        bar.outerHTML = this.bar(k); this.wire(k, songs, render); const nb = $(`.ordbar[data-ord="${CSS.escape(k)}"] input`); if (nb && o.q) nb.value = o.q;
+        redo();
+      }]), 'Ordina per');
+    };
+    // sul computer anche le intestazioni delle colonne ordinano, come su Spotify
+    const host = bar.nextElementSibling;
+    if (host) host.onclick = e => {
+      const h = e.target.closest('.th [data-sort]'); if (!h) return;
+      const v = h.dataset.sort; o.dir = o.by === v ? -o.dir : 1; o.by = v; this.set(k, o); bar.outerHTML = this.bar(k); this.wire(k, songs, render); redo();
+    };
+  }
+};
+// sul telefono il menu col tasto destro non esiste: lo stesso elenco di voci come foglio
+function ctxMenuOrPick(at, items, title) {
+  if (matchMedia('(pointer:fine)').matches) return ctxMenu(at, items, title ? `<b>${esc(title)}</b>` : '');
+  const d = $('#dlg'); d.className = 'sheet';
+  d.innerHTML = `${title ? `<div class="head"><b>${esc(title)}</b></div>` : ''}${items.map(([i, l], n) => `<button class="mi" data-n="${n}">${ic(i)}<span>${esc(l)}</span></button>`).join('')}`;
+  d.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { d.close(); items[+b.dataset.n][2](); });
+  d.onclose = () => { d.className = ''; d.onclose = null; }; closeOutside(d); d.showModal();
+}
 // tempo reale: mentre una playlist o un album sono aperti, i brani nuovi entrano al loro posto e quelli tolti escono,
 // senza ridisegnare la pagina (ogni 20 s, e subito all'evento 'libreria' di Bus)
 function lLive(n, fetch, opts, after) {
@@ -544,7 +598,9 @@ function lLive(n, fetch, opts, after) {
     if (stale(n)) return Bus.removeEventListener('libreria', check);
     let songs; try { songs = await fetch(); } catch { return; }
     if (stale(n)) return;
-    if (S.lastList.map(t => t.id).join() === songs.map(t => t.id).join()) return;
+    // anche durata e titolo: un brano appena scaricato può comparire prima con durata 0 e poi giusto
+    const sig = l => l.map(t => `${t.id}|${t.duration}|${t.title}`).join();
+    if (sig(S.lastList) === sig(songs)) return;
     lMerge(songs, opts); after?.(songs);
   };
   viewInterval(check, 20000); Bus.addEventListener('libreria', check);
@@ -561,7 +617,11 @@ function lMerge(songs, opts) {
   box.querySelectorAll(':scope > .song.ghost').forEach(el => el.remove());
   fresh.forEach((nu, i) => {
     let el = keep.get(songs[i].id)?.shift();
-    if (el) { el.dataset.i = i; el.querySelectorAll('[data-i]').forEach(b => b.dataset.i = i); const nn = el.querySelector('.n'); if (nn) nn.textContent = nu.querySelector('.n')?.textContent || ''; }
+    if (el) {
+      el.dataset.i = i; el.querySelectorAll('[data-i]').forEach(b => b.dataset.i = i);
+      for (const sel of ['.n', '.d', '.t small']) { const a = el.querySelector(sel), b = nu.querySelector(sel); if (a && b && a.textContent !== b.textContent) a.innerHTML = b.innerHTML; }
+      const tb = el.querySelector('.t b'), nb = nu.querySelector('.t b'); if (tb && nb && tb.textContent !== nb.textContent) tb.innerHTML = nb.innerHTML;
+    }
     else { el = nu; el.classList.add('arrivato'); }
     box.append(el);
   });
@@ -635,14 +695,18 @@ async function vHome() {
     box.innerHTML = `<a class="hbanner" href="#/amici">${ic('friends')}<span class="grow"><small>Amici in ascolto</small><b>${list.slice(0, 2).map(f => `${esc(f.username)}: ${esc(f.title)}`).join(' · ')}${list.length > 2 ? ` e altri ${list.length - 2}` : ''}</b></span>${ic('chevr')}</a>`;
   });
 }
-async function vLibrary(tab = 'artisti') {
+async function vLibrary(tab) {
   if (!srv()) return noServer();
-  tab = tab || 'artisti';
+  tab = tab || 'playlist';
   const n = Scene.nav;
   // tempo reale: artisti, album e generi arrivati con un download compaiono da soli (evento 'libreria')
   const live = f => { const on = () => { Bus.removeEventListener('libreria', on); if (!stale(n)) f(); }; Bus.addEventListener('libreria', on); };
-  const tabs = `<h1>Libreria</h1><div class="lpills" role="navigation" aria-label="Sezioni della libreria">${[['artisti', 'Artisti'], ['album', 'Album'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>`;
-  if (tab === 'artisti') {
+  const tabs = `<h1>Libreria</h1><div class="lpills" role="navigation" aria-label="Sezioni della libreria">${[['playlist', 'Playlist'], ['artisti', 'Artisti'], ['album', 'Album'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>`;
+  if (tab === 'playlist') {
+    view.innerHTML = tabs + '<div id="plBox"></div>';
+    await playlistsInto($('#plBox'), n);
+    live(() => vLibrary(tab));
+  } else if (tab === 'artisti') {
     const idx = arr((await api('getArtists')).artists.index);
     if (stale(n)) return;
     const tot = idx.reduce((k, x) => k + arr(x.artist).length, 0);
@@ -1130,24 +1194,40 @@ async function netPlaylists(nid, name) {
 async function vPlaylists() {
   if (!srv()) return noServer();
   const n = Scene.nav;
-  const pls = arr((await api('getPlaylists')).playlists.playlist);
-  if (stale(n)) return;
-  view.innerHTML = `<h1>Playlist</h1><p class="sub">${srv().local ? 'Restano su questo telefono; con la copia sul server attiva finiscono anche lì.' : 'Le playlist condivise si vedono da tutti gli utenti del server.'}</p>
-    <div class="lcards">
-      ${can('playlist') ? `<button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
-      <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>` : ''}
-      ${pls.map(lPlCard).join('')}
-    </div>`;
+  view.innerHTML = `<h1>Playlist</h1><p class="sub">${srv().local ? 'Restano su questo telefono; con la copia sul server attiva finiscono anche lì.' : 'Le tue playlist e, se puoi vederle, quelle condivise degli altri.'}</p><div id="plBox"></div>`;
+  await playlistsInto($('#plBox'), n);
   // tempo reale: conteggi e copertine cambiano quando una playlist si riempie (anche dal server, dopo i download)
   const again = () => { Bus.removeEventListener('playlists', again); if (!stale(n)) vPlaylists(); };
   Bus.addEventListener('playlists', again);
+}
+// le playlist come in "La tua libreria" di Spotify: Preferiti fissato in cima, cerca, ordina (recenti, alfabetico, creatore)
+async function playlistsInto(box, n) {
+  const [pr, st] = await Promise.all([api('getPlaylists'), api('getStarred2').catch(() => null)]);
+  if (stale(n) || !box.isConnected) return;
+  const pls = arr(pr.playlists.playlist), favs = arr(st?.starred2?.song).length, o = { by: 'recent', ...store.get('plOrd', {}) }, me = srv().user;
+  const sortL = [['recent', 'Recenti'], ['alpha', 'Alfabetico'], ['owner', 'Creatore']];
+  const paint = q => {
+    const Q = cleanTxt(q || ''), cmp = (a, b) => String(a || '').localeCompare(String(b || ''), 'it', { sensitivity: 'base' });
+    const l = pls.filter(p => !Q || cleanTxt(`${p.name} ${p.owner || ''}`).includes(Q))
+      .sort({ recent: (a, b) => cmp(b.changed || b.created, a.changed || a.created), alpha: (a, b) => cmp(a.name, b.name), owner: (a, b) => (a.owner !== me) - (b.owner !== me) || cmp(a.owner, b.owner) || cmp(a.name, b.name) }[o.by]);
+    $('#plCards').innerHTML = (!Q || cleanTxt('preferiti').includes(Q) ? `<a class="lcard favs" href="#/preferiti"><div class="lcover">${ic('heart', true)}</div><b>Preferiti</b><small>Playlist · ${favs} ${favs === 1 ? 'brano' : 'brani'}</small></a>` : '')
+      + (can('playlist') && !Q ? `<button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
+        <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>` : '')
+      + l.map(lPlCard).join('') + (Q && !l.length ? `<p class="sub">Nessuna playlist con «${esc(q)}».</p>` : '');
+  };
+  box.innerHTML = `<div class="ordbar"><label class="ordq">${ic('search')}<input type="search" id="plQ" placeholder="Cerca nelle playlist" aria-label="Cerca nelle playlist" autocomplete="off"></label>
+    <button class="ordby" id="plOrd"><span>${esc(sortL.find(x => x[0] === o.by)[1])}</span>${ic('sliders')}</button></div><div class="lcards" id="plCards"></div>`;
+  paint('');
+  $('#plQ').oninput = e => paint(e.target.value);
+  $('#plOrd').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); ctxMenuOrPick([r.left, r.bottom + 4], sortL.map(([v, l]) => [v === o.by ? 'check' : 'more', l, () => { o.by = v; store.set('plOrd', o); $('#plOrd span').textContent = l; paint($('#plQ').value); }]), 'Ordina per'); };
 }
 
 async function vPlaylist(id) {
   const n = Scene.nav;
   const p = (await api('getPlaylist', { id })).playlist;
   if (stale(n)) return;
-  const songs = arr(p.entry).map(x => norm(x));
+  let songs = arr(p.entry).map(x => norm(x)); songs.forEach((t, i) => t._pi = i);
+  const ok = 'pl:' + id, popts = { empty: 'Playlist vuota. Aggiungi brani dal menu ⋯ accanto a ogni canzone.', sortable: true };
   // modificarla: è mia (o sono l'amministratore) e posso gestire playlist
   const mine = can('playlist') && (access().admin || srv().local || !p.owner || p.owner === srv().user);
   const count = q => { const k = arr(q.entry).length; return `${k} ${k === 1 ? 'brano' : 'brani'}, ${fmtLong(q.duration || 0)}`; };
@@ -1162,7 +1242,8 @@ async function vPlaylist(id) {
       mine && { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
       mine && !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
       mine && { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
-    `<div id="impSt"></div><div id="lList">${songList(songs, empty)}</div>`;
+    `<div id="impSt"></div>${songs.length > 1 ? Ord.bar(ok) : ''}<div id="lList">${songList(Ord.apply(songs, Ord.get(ok)), popts)}</div>`;
+  Ord.wire(ok, () => songs, l => { $('#lList').innerHTML = songList(l, popts); });
   view.dataset.pl = id;
   impStatus(id, n);
   view.dataset.plMeta = JSON.stringify({ name: p.name, comment: p.comment || '', public: !!p.public });
@@ -1173,8 +1254,9 @@ async function vPlaylist(id) {
     const k = (q.songCount ? 1 : 0) + '|' + q.coverArt, el = $('#view .phero-art');
     if (k !== art && el) { art = k; el.innerHTML = q.songCount ? imgTag(q.coverArt, 500) : ic('list'); }
     impStatus(id, n);
-    return arr(q.entry).map(x => norm(x));
-  }, empty);
+    songs = arr(q.entry).map(x => norm(x)); songs.forEach((t, i) => t._pi = i);
+    return Ord.apply(songs, { ...Ord.get(ok), q: $('.ordbar input')?.value || '' });
+  }, popts);
 }
 // ascolti sul server accanto ai brani (album, popolari dell'artista): una richiesta per tutta la lista
 async function playCounts(box, n) {
@@ -1206,13 +1288,14 @@ async function vStarred() {
   const n = Scene.nav;
   const r = (await api('getStarred2')).starred2;
   if (stale(n)) return;
-  const songs = arr(r.song).map(x => norm(x)), ar = arr(r.artist), al = arr(r.album);
+  const songs = arr(r.song).map(x => norm(x)), ar = arr(r.artist), al = arr(r.album), fopts = { empty: 'Tocca il cuore accanto a un brano per ritrovarlo qui.', sortable: true };
   view.innerHTML = lPhero({ kind: 'Raccolta', title: 'Preferiti', tile: 'linear-gradient(135deg,#4a2fbd,#c7a0ff)', art: ic('heart', true),
       meta: `${songs.length} brani · ${al.length} album · ${ar.length} artisti` }) +
     lActionBar({ offline: false, extra: srv().local ? '' : pinBtn('preferiti'), more: [{ act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' }] }) +
-    `<div id="lList">${songList(songs, { empty: 'Tocca il cuore accanto a un brano per ritrovarlo qui.' })}</div>` +
+    (songs.length > 1 ? Ord.bar('preferiti') : '') + `<div id="lList">${songList(Ord.apply(songs, Ord.get('preferiti')), fopts)}</div>` +
     (al.length ? `<h2>Album</h2>${albumGrid(al, { strip: true })}` : '') +
     (ar.length ? `<h2>Artisti</h2><div class="lcards shelfish">${ar.map(lArtistCard).join('')}</div>` : '');
+  Ord.wire('preferiti', () => songs, l => { $('#lList').innerHTML = songList(l, fopts); });
 }
 
 function vQueue() {
@@ -1424,6 +1507,16 @@ async function srvApi(s, path, opts = {}) {
 }
 const HistSync = {
   busy: false, t: null,
+  // gli ascolti registrati senza durata (client 0.19–0.21) si completano una volta con getSong, al più 300 brani
+  async repair() {
+    if (store.get('histFix1')) return;
+    const all = await DB.all('history').catch(() => []), bad = all.filter(x => !x.duration && x.id && srv(x.serverId) && !srv(x.serverId).local);
+    const ids = [...new Set(bad.map(x => x.serverId + '|' + x.id))].slice(0, 300), dur = new Map();
+    for (const k of ids) { const [sid, id] = k.split('|'); try { dur.set(k, (await api('getSong', { id }, srv(sid))).song.duration || 0); } catch {} }
+    const fixed = bad.filter(x => dur.get(x.serverId + '|' + x.id)).map(x => ({ ...x, duration: dur.get(x.serverId + '|' + x.id) }));
+    if (fixed.length) await DB.putMany('history', fixed).catch(() => {});
+    if (ids.length < 300) store.set('histFix1', 1);
+  },
   schedule(ms = 30000) { clearTimeout(this.t); this.t = setTimeout(() => this.run(), ms); },
   async run() {
     if (this.busy || !P.sync) return; this.busy = true;
@@ -1859,7 +1952,7 @@ function updateNowPlaying() {
     navigator.mediaSession.metadata = t ? new MediaMetadata({ title: t.title, artist: t.artist, album: t.album,
       artwork: t.coverArt && srv(t.serverId) ? [{ src: coverUrl(t.coverArt, 512, t.serverId), sizes: '512x512' }] : [] }) : null;
   }
-  paintButtons(); NativeMedia.sync(); Live.publish();
+  paintButtons(); NativeMedia.sync(); Live.publish(); paintStar();
 }
 function paintButtons() {
   const playing = isPlaying();
@@ -2107,7 +2200,7 @@ async function vNow() {
   view.innerHTML = `<div class="now"><div>
       <div class="bigdisc ${isPlaying() ? 'spin' : ''}" id="bigdisc"><canvas id="viz" width="640" height="640"></canvas>
         <div class="rec">${t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 600, t.serverId))}" alt="">` : '<div class="lbl"></div>'}</div></div>
-      <h1 style="margin-top:18px">${esc(t.title)}</h1>
+      <div class="now-title"><h1>${esc(t.title)}</h1><button class="icon-btn now-star" id="nowStar" aria-label="Preferito"></button></div>
       <p class="sub now-meta">${t.artistId ? `<a href="#/artista/${encodeURIComponent(t.artistId)}">${esc(t.artist)}</a>` : esc(t.artist)}${t.album ? ` · ${t.albumId ? `<a href="#/album/${encodeURIComponent(t.albumId)}">${esc(t.album)}</a>` : esc(t.album)}` : ''}</p>
       <div class="row now-acts">
         <button class="btn sm" data-act="nowmore">${ic('more')} Azioni</button>
@@ -2119,6 +2212,7 @@ async function vNow() {
     </div>
     <div><div class="tabs">${[['lyr', 'Testi'], ['next', 'Prossimi'], ['info', 'Dettagli']].map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div><div id="nowPane"></div></div></div>`;
   view.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { sessionStorage.setItem('armony:nowtab', b.dataset.tab); vNow(); });
+  $('#nowStar').onclick = () => toggleStar(currentTrack()); paintStar();
   Turntable.set($('#bigdisc .rec'), isPlaying(), true);  // il disco grande nasce già alla velocità del piccolo
   const pane = $('#nowPane');
   let lyr = null;
@@ -2195,8 +2289,69 @@ async function vNow() {
         ...(a.deezer?.rank ? [['Popolarità su Deezer', `${a.deezer.rank.toLocaleString('it-IT')} (indice da 0 a 1.000.000, non il numero di stream)`]] : []));
       if (currentTrack() !== t || !$('#nowPane')) return;
     }
-    pane.innerHTML = `<div class="panel">${rows.map(([a, b]) => `<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:16px"><span style="color:var(--muted)">${a}</span><span style="text-align:right;word-break:break-word">${esc(b)}</span></div>`).join('')}</div>`;
+    pane.innerHTML = `<div id="origBox"></div><div class="panel">${rows.map(([a, b]) => `<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:16px"><span style="color:var(--muted)">${a}</span><span style="text-align:right;word-break:break-word">${esc(b)}</span></div>`).join('')}</div>`;
+    origBox(s, t);
   }
+}
+/* ================= origine del file e scelta della versione (capacità "scelta", server/scelta.py) ================= */
+I.yt = '<rect x="2" y="5" width="20" height="14" rx="4"/><path d="M10 9l5 3-5 3z" fill="currentColor"/>';
+I.ytm = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M11 10l3 2-3 2z" fill="currentColor"/>';
+I.cloud = '<path d="M7 18a4 4 0 0 1-.5-8A5.5 5.5 0 0 1 17 9a4.5 4.5 0 0 1 .5 9z"/>';
+const SRC_UI = { ytmusic: ['ytm', 'YouTube Music'], youtube: ['yt', 'YouTube'], soundcloud: ['cloud', 'SoundCloud'], caricato: ['up', 'Caricato da un dispositivo'],
+  scaricato: ['down', 'Scaricato'], libreria: ['album', 'Libreria del server'], rete: ['globe', 'Copiato dalla rete'] };
+const CODEC = c => ({ mp4a: 'AAC', opus: 'Opus', vorbis: 'Vorbis', mp3: 'MP3', flac: 'FLAC' }[String(c || '').toLowerCase()] || c || '?');
+const fmtQ = q => q ? [CODEC(q.codec), q.kbps ? q.kbps + ' kbps' : '', q.hz ? (q.hz / 1000).toLocaleString('it-IT') + ' kHz' : ''].filter(Boolean).join(' · ') : '';
+const canPick = sid => !!srv(sid)?.me?.caps?.includes('scelta') && (access().admin || access().delete);
+// nei Dettagli: da dove viene il file, che conversione ha avuto, e "Scegli un'altra versione"
+async function origBox(s, t, any = false) {
+  if (!s?.me?.caps?.includes('scelta') || t.fed || s.local) return;
+  const r = await srvApi(s, '/api/origine?id=' + encodeURIComponent(t.id)).catch(() => null), box = $('#origBox');
+  if (!r || !box || (!any && currentTrack() !== t)) return;
+  const o = r.origine || {}, [icon, label] = SRC_UI[r.kind === 'rete' ? 'rete' : o.src] || ['down', o.src || 'Sconosciuta'];
+  const conv = o.da && o.a ? `${fmtQ(o.da)} → ${fmtQ(o.a)}` : r.file ? fmtQ(r.file) : '';
+  box.innerHTML = `<div class="panel origin"><div class="orig-h"><span class="orig-ic src-${esc(o.src || r.kind)}">${ic(icon)}</span><span class="grow"><b>${esc(label)}</b>
+      <small>${o.title ? esc(o.title) + (o.canale ? ' · ' + esc(o.canale) : '') : o.vecchio ? 'Scaricato prima che Armony registrasse l\'origine' : ''}</small></span>
+      ${o.url ? `<a class="icon-btn" href="${esc(o.url)}" target="_blank" rel="noopener" aria-label="Apri l'originale" title="Apri l'originale">${ic('globe')}</a>` : ''}</div>
+    ${conv ? `<p class="orig-c">${ic('sliders')}<span>${o.da && o.a ? 'Conversione' : 'File'} <b>${esc(conv)}</b></span></p>` : ''}
+    ${o.dubbi?.length ? `<p class="orig-c warn">${ic('close')}<span>Da controllare: ${esc(o.dubbi.join(' · '))}</span></p>` : ''}
+    ${canPick(t.serverId) && r.kind === 'file' ? `<button class="btn sm" id="pickVer">${ic('repeat')} Scegli un'altra versione</button>` : ''}</div>`;
+  $('#pickVer')?.addEventListener('click', () => versionSheet(t));
+}
+// il pool: i candidati di YouTube Music, YouTube e SoundCloud con il punteggio; "Usa questa" sostituisce il file nello stesso posto
+async function versionSheet(t) {
+  const d = $('#dlg'); d.className = 'sheet vsheet';
+  d.innerHTML = `<div class="head"><span class="grow" style="min-width:0"><b style="display:block">Scegli la versione</b><small style="color:var(--muted)">${esc([t.artist, t.title].filter(Boolean).join(' – '))}</small></span></div><div id="vpool"><p class="sub" style="padding:0 14px">Cerco su YouTube Music, YouTube e SoundCloud…</p></div>`;
+  closeOutside(d); d.showModal();
+  let r; try { r = await srvApi(srv(t.serverId), '/api/scelta?id=' + encodeURIComponent(t.id)); } catch (e) { $('#vpool').innerHTML = `<p class="sub" style="padding:0 14px">${esc(e.message)}</p>`; return; }
+  if (!$('#vpool')) return;
+  const want = r.track.duration, diff = c => c.duration && want ? Math.round(c.duration - want) : null;
+  $('#vpool').innerHTML = `<p class="small" style="padding:0 14px;margin:0 0 var(--s2);color:var(--muted)">Si cerca «${esc(r.track.title)}»${want ? `, ${fmt(want)}` : ''}${r.track.da === 'Spotify' ? ' (come su Spotify)' : ''}. Adesso il file è ${esc(fmtQ(r.file))}${r.file?.dur ? ', ' + fmt(r.file.dur) : ''}. Il file nuovo prende il posto del vecchio: playlist e preferiti restano.</p>
+    ${r.avviso ? `<p class="small" style="padding:0 14px;color:var(--danger)">${esc(r.avviso)}</p>` : ''}
+    ${r.candidates.length ? r.candidates.map((c, i) => { const [icn, lab] = SRC_UI[c.source], dd = diff(c); return `<div class="vcand">
+      <span class="orig-ic src-${c.source}" title="${esc(lab)}">${ic(icn)}</span>
+      <span class="grow"><b>${esc(c.title)}</b><small>${esc(c.channel || lab)}${c.duration ? ' · ' + fmt(c.duration) : ''}${dd != null && Math.abs(dd) > 3 ? ` <span class="${Math.abs(dd) > 15 ? 'bad' : ''}">(${dd > 0 ? '+' : ''}${dd} s)</span>` : dd != null ? ' <span class="good">(durata giusta)</span>' : ''}</small>
+        ${c.flags.length ? `<span class="vflags">${c.flags.map(f => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</span>
+      <span class="vscore" title="Punteggio di somiglianza">${String(c.score).replace('.', ',')}</span>
+      <a class="icon-btn" href="${esc(c.url)}" target="_blank" rel="noopener" aria-label="Ascolta sul sito">${ic('globe')}</a>
+      <button class="btn sm${i ? '' : ' primary'}" data-vi="${i}">Usa</button></div>`; }).join('') : '<p class="sub" style="padding:0 14px">Nessun candidato trovato.</p>'}`;
+  $('#vpool').querySelectorAll('[data-vi]').forEach(b => b.onclick = async () => {
+    const c = r.candidates[+b.dataset.vi]; b.disabled = true;
+    try {
+      await srvApi(srv(t.serverId), '/api/scelta', { method: 'POST', body: JSON.stringify({ id: t.id, url: c.url, source: c.source, title: c.title, score: c.score }) });
+      d.close(); toast('In arrivo: la versione nuova prende il posto del file fra poco (Scarica → Download).', 5000); emitSoon('libreria');
+    } catch (e) { b.disabled = false; toast(e.message); }
+  });
+}
+// pagina Scarica: brani da controllare (verifica non convinta, o durata diversa da Spotify)
+async function refreshSosp() {
+  const box = $('#sosp'); if (!box || !srv()?.me?.caps?.includes('scelta')) return;
+  let list; try { list = await dlApi('/api/scelta/sospetti'); } catch { box.innerHTML = ''; return; }
+  if ($('#sosp') !== box) return;
+  box.innerHTML = list.length ? `<details class="panel sosp"${list.length < 8 ? ' open' : ''}><summary><b>Da controllare</b> <span class="tag acc">${list.length}</span><small>Brani forse sbagliati: una live, un videoclip con l'introduzione, un'altra versione.</small></summary>
+    ${list.map((x, i) => `<div class="vcand"><span class="grow"><b>${esc(x.title || '')}</b><small>${esc(x.motivi.join(' · '))}</small></span>
+      ${canPick() ? `<button class="btn sm primary" data-sp="${i}">Scegli</button>` : ''}<button class="btn sm" data-ok="${i}">Va bene</button></div>`).join('')}</details>` : '';
+  box.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => { const x = list[+b.dataset.sp]; versionSheet({ id: x.id, serverId: dlSrv().id, title: x.title, artist: '' }); });
+  box.querySelectorAll('[data-ok]').forEach(b => b.onclick = async () => { await dlApi('/api/scelta/sospetti/' + encodeURIComponent(list[+b.dataset.ok].key), { method: 'DELETE' }).catch(() => {}); refreshSosp(); });
 }
 
 /* ================= offline (vista) ================= */
@@ -2332,7 +2487,7 @@ async function vDownload(sub = '') {
   if (t === 'carica') return vUpload(tabs);
   if (S.dl.url && !access().download) { view.innerHTML = `<h1>Scarica</h1>${tabs}<div class="empty">I download non sono abilitati per il tuo utente. Chiedilo a chi gestisce il server.</div>`; return; }
   view.innerHTML = `<h1>Scarica</h1><p class="sub">Da YouTube, SoundCloud, Bandcamp, Vimeo e centinaia di altri siti. L'audio entra nella libreria, i video restano qui sotto.</p>
-  ${tabs}
+  <div id="sosp"></div>${tabs}
   <div class="svc"><div class="svc-main">
   <div class="panel">
     ${t === 'link' ? `<label class="f">Link, uno per riga<textarea id="dUrl" placeholder="https://www.youtube.com/watch?v=..."></textarea></label>`
@@ -2388,7 +2543,7 @@ async function vDownload(sub = '') {
     $('#yGo').onclick = go; $('#ySearch').onkeydown = e => { if (e.key === 'Enter') go(); };
     if (q0) go();
   }
-  refreshJobs(); refreshVideos(); viewInterval(refreshJobs, 2000);
+  refreshJobs(); refreshVideos(); refreshSosp(); viewInterval(refreshJobs, 2000);
 }
 // un gruppo (importazione, album): una riga con l'avanzamento complessivo, i brani in corso e gli errori a richiesta
 const jobGroup = gr => {
@@ -2937,20 +3092,24 @@ function songMenu(t, ctx = {}) {
     ['down', 'Copia nella mia libreria', () => netCopy([t])],
     ['offline', 'Salva per l\'offline', () => Offline.save([t])]
   ] : [
-    ['nextup', 'Riproduci dopo', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.splice(S.index + 1, 0, t); persistQueue(); toast('Verrà riprodotto dopo il brano attuale.'); }],
-    ['plus', 'Aggiungi alla coda', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.push(t); persistQueue(); toast('Aggiunto alla coda.'); }],
-    Jam.role ? ['jam', Jam.role === 'host' ? 'Aggiungi alla coda della Jam' : 'Proponi alla Jam', () => Jam.suggest(t)] : null,
+    // l'ordine di Spotify: preferiti, playlist, coda, radio, album, artista, crediti, condividi; poi offline e il resto
+    ['heart', t.starred ? 'Togli dai Preferiti' : 'Aggiungi ai Preferiti', () => toggleStar(t)],
     can('playlist') ? ['addlist', 'Aggiungi a playlist', () => addToPlaylistDialog([t])] : null,
-    ['radio', 'Avvia una radio da qui', () => radioFrom(t)],
+    ['plus', 'Aggiungi alla coda', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.push(t); persistQueue(); toast('Aggiunto alla coda.'); }],
+    ['nextup', 'Riproduci dopo', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.splice(S.index + 1, 0, t); persistQueue(); toast('Verrà riprodotto dopo il brano attuale.'); }],
+    Jam.role ? ['jam', Jam.role === 'host' ? 'Aggiungi alla coda della Jam' : 'Proponi alla Jam', () => Jam.suggest(t)] : null,
+    ['radio', 'Vai alla radio del brano', () => radioFrom(t)],
     t.albumId ? ['album', 'Vai all\'album', () => location.hash = '#/album/' + encodeURIComponent(t.albumId)] : null,
     t.artistId ? ['artist', 'Vai all\'artista', () => location.hash = '#/artista/' + encodeURIComponent(t.artistId)] : null,
-    !phoneT && can('condividi') ? ['share', 'Condividi un link', () => shareItem(t.id, `${t.title} - ${t.artist}`, t.serverId)] : null,
+    phoneT ? null : ['sliders', 'Crediti e dettagli', () => songInfo(t)],
+    !phoneT && can('condividi') ? ['share', 'Condividi', () => shareItem(t.id, `${t.title} - ${t.artist}`, t.serverId)] : null,
     phoneT && !Offline.has(t) ? null : Offline.has(t) ? ['trash', 'Togli dall\'offline', async () => { await Offline.remove(offKey(t)); toast('Rimosso dall\'offline.'); if (location.hash.startsWith('#/offline')) route(); }]
       : ['offline', 'Salva per l\'offline', () => Offline.save([t])],
     phoneT ? null : ['down', 'Scarica il file originale', () => { const a = document.createElement('a'); a.href = apiUrl(srv(t.serverId), 'download', { id: t.id }); a.download = ''; a.click(); }],
     ['lyrics', 'Testo', () => { if (key(currentTrack() || {}) !== key(t)) return toast('Il testo si apre per il brano in riproduzione.'); sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; }],
     ctx.pl != null && can('playlist') ? ['trash', 'Togli dalla playlist', async () => { await api('updatePlaylist', { playlistId: view.dataset.pl, songIndexToRemove: ctx.pl }); route(); }] : null,
     canEdit(t.serverId) ? ['pen', 'Modifica informazioni', () => editTrack(t)] : null,
+    canPick(t.serverId) && !t.fed && !phoneT ? ['repeat', 'Scegli un\'altra versione', () => versionSheet(t)] : null,
     canDelete(t.serverId) ? ['trash', 'Elimina dal server', () => deleteTracks([t], t.title), 'danger'] : null
   ].filter(Boolean);
   if (ctx.q != null && !Live.remote() && Jam.role !== 'guest') items.splice(2, 0, ['close', 'Togli dalla coda', () => { const b = document.createElement('button'); b.hidden = true; b.dataset.act = 'qrm'; b.dataset.i = ctx.q; view.append(b); b.click(); b.remove(); }]);
@@ -2960,6 +3119,32 @@ function songMenu(t, ctx = {}) {
   d.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { d.close(); items[+b.dataset.n][2](); });
   d.onclose = () => { d.className = ''; d.onclose = null; };
   d.showModal();
+}
+
+// preferito come su Spotify: dal menu, dal lettore, da "In riproduzione"; le righe a schermo si aggiornano
+async function toggleStar(t) {
+  try { await api(t.starred ? 'unstar' : 'star', { id: t.id }, srv(t.serverId)); } catch (e) { return toast(e.message); }
+  t.starred = !t.starred;
+  [...S.queue, ...S.lastList].forEach(x => { if (x && key(x) === key(t)) x.starred = t.starred; });
+  $$(`.song[data-tid="${CSS.escape(t.id)}"] [data-act="star"]`).forEach(b => { b.classList.toggle('on', t.starred); b.innerHTML = ic('heart', t.starred); });
+  paintStar(); toast(t.starred ? 'Aggiunto ai Preferiti.' : 'Tolto dai Preferiti.');
+}
+function paintStar() {
+  const t = currentTrack(), on = !!t?.starred;
+  $$('#bStar, #nowStar').forEach(b => { b.hidden = !t || !!t.fed || !srv(t.serverId); b.classList.toggle('on', on); b.innerHTML = ic('heart', on); b.setAttribute('aria-label', on ? 'Togli dai Preferiti' : 'Aggiungi ai Preferiti'); });
+}
+// crediti e dettagli di un brano qualsiasi (quello in riproduzione li ha nella scheda Dettagli)
+async function songInfo(t) {
+  if (currentTrack() && key(currentTrack()) === key(t)) { sessionStorage.setItem('armony:nowtab', 'info'); location.hash = '#/ora'; return; }
+  const s = srv(t.serverId), d = $('#dlg2'); d.className = '';
+  d.innerHTML = `<h3>${esc(t.title)}</h3><p class="sub">${esc(t.artist)}</p><div id="origBox"></div><div id="siRows"><p class="sub">Carico…</p></div><div class="row"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
+  closeOutside(d); d.showModal();
+  let raw = null; try { raw = (await api('getSong', { id: t.id }, s)).song; } catch {}
+  const rows = raw ? [['Album', raw.album], ['Artista dell\'album', raw.displayAlbumArtist || raw.albumArtist], ['Anno', raw.year], ['Genere', raw.genre], ['Traccia', raw.track && `${raw.track}${raw.discNumber > 1 ? ' · disco ' + raw.discNumber : ''}`],
+    ['Durata', fmt(raw.duration)], ['Formato', `${(raw.suffix || '').toUpperCase()}, ${raw.bitRate || '?'} kbps`], ['Ascolti tuoi', raw.playCount || 0]].filter(r => r[1]) : [];
+  const box = $('#siRows'); if (!box) return;
+  box.innerHTML = rows.map(([a, b]) => `<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:16px"><span style="color:var(--muted)">${esc(a)}</span><span style="text-align:right">${esc(b)}</span></div>`).join('');
+  origBox(s, t, true);
 }
 
 /* ================= menu col tasto destro (computer) =================
@@ -3004,7 +3189,7 @@ document.addEventListener('contextmenu', e => {
   const song = e.target.closest('.song[data-i]:not(.ghost)');
   if (song) {
     const lst = song.closest('.songs[data-l]'), t = (lst && Lists.get(+lst.dataset.l) || S.lastList)[+song.dataset.i]; if (!t) return;
-    const q = song.dataset.act === 'qplay' ? +song.dataset.i : null, pl = view.dataset.pl && song.closest('#lList') ? +song.dataset.i : null;
+    const q = song.dataset.act === 'qplay' ? +song.dataset.i : null, pl = view.dataset.pl && song.closest('#lList') ? (t._pi ?? +song.dataset.i) : null;
     e.preventDefault(); return songMenu(t, { at, pl, q });
   }
   if (e.target.closest('#player .np, #player .meta, #disc') && currentTrack()) { e.preventDefault(); return songMenu(currentTrack(), { at }); }
@@ -3798,7 +3983,7 @@ view.addEventListener('click', async e => {
       case 'offpin': { const name = id === 'preferiti' ? 'Preferiti' : JSON.parse(view.dataset.plMeta || '{}').name || 'Playlist'; await OffPin.toggle(id, name, list); el.outerHTML = pinBtn(id); break; }
       case 'addalltopl': addToPlaylistDialog(list); break;
       case 'enqueue': if (Jam.role === 'guest') { Jam.suggest(list[i]); break; } S.queue.push(list[i]); persistQueue(); flyToQueue(el); toast('Aggiunto alla coda.'); break;
-      case 'more': songMenu(list[i], { pl: view.dataset.pl ? i : null }); break;
+      case 'more': songMenu(list[i], { pl: view.dataset.pl ? (list[i]._pi ?? i) : null }); break;
       case 'star': {
         const t = list[i]; await api(t.starred ? 'unstar' : 'star', { id: t.id }, srv(t.serverId));
         t.starred = !t.starred; el.classList.toggle('on', t.starred); el.innerHTML = ic('heart', t.starred); if (t.starred) beat(el.firstChild); break;
@@ -4616,6 +4801,7 @@ function wirePlayer() {
   $('#bLyr').onclick = () => { sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; };
   $('#npBtn').onclick = () => location.hash = '#/ora';
   $('#bQm').onclick = qualityDialog; $('#qBadge').onclick = qualityDialog;
+  $('#bStar').onclick = () => currentTrack() && toggleStar(currentTrack());
   $('#sleepPill').onclick = sleepDialog; $('#jamPill').onclick = () => location.hash = '#/jam';
   $('#bShuf').onclick = () => {
     if (Jam.role === 'guest') return toast('Durante una Jam l\'ordine lo decide l\'host.');
@@ -4656,7 +4842,7 @@ function wirePlayer() {
     else if (k === 'q') location.hash = '#/coda';
     else if (k === 's') $('#bShuf').click();
     else if (k === 'r') $('#bRep').click();
-    else if (k === 'f') { const t = currentTrack(); if (t) api(t.starred ? 'unstar' : 'star', { id: t.id }, srv(t.serverId)).then(() => { t.starred = !t.starred; toast(t.starred ? 'Aggiunto ai preferiti.' : 'Tolto dai preferiti.'); }); }
+    else if (k === 'f') { const t = currentTrack(); if (t) toggleStar(t); }
     else if (k === '/') { e.preventDefault(); location.hash = '#/cerca'; }
     else if (k === '?') location.hash = '#/tasti';
   });
@@ -4707,5 +4893,5 @@ async function boot() {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
+  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); HistSync.repair(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
 }

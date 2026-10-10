@@ -55,6 +55,8 @@ Armony - server di supporto.
                         Fra i server, /fed/v1/canale: canale inverso per chi è dietro NAT (federazione.py)
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
                         Navidrome, playlist completata e riordinata a ogni brano nuovo; capacità "importsrv"
+  /api/scelta          candidati per un brano e sostituzione con un'altra versione (permesso "download", scelta.py);
+                        /api/scelta/sospetti i brani da controllare. /api/origine da dove viene un file (capacità "scelta")
   /api/ascolti/*        ascolti contati dal server, per brano, per utente, gli ultimi (ascolti.py); capacità "ascolti"
   /api/log, /api/stato  registro eventi (POST da ogni client, lettura dell'amministratore) e risorse del server
                         (diagnosi.py); capacità "diagnosi". Le eccezioni non gestite delle rotte finiscono nel registro
@@ -93,6 +95,7 @@ import ascolti
 import diagnosi
 import dispositivi
 import importa
+import scelta
 import utenti
 import federazione
 import metadati
@@ -124,10 +127,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/chiave", None), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -470,7 +473,7 @@ def proxy(p):
         val = lambda n: args.get(n) or (form.get(n) or [""])[0]
         who = identity(request.headers.get("X-Token"), val("k"))
         if who:
-            if who["user"] and val("u") and val("u") != who["user"]:
+            if who["user"] and val("u") and val("u").lower() != who["user"].lower():
                 return jsonify(error="Questo dispositivo è di un altro utente."), 403
             dev = who["dev"]
         elif g.why or val("k") or dispositivi.rest_salt_blocked(val("s")):  # un gettone che non vale non ripiega sulle credenziali
@@ -1144,7 +1147,7 @@ def yt_turno():
         yt["ultimo"] = time.time()
 
 
-JOB_KEYS = ("url", "mode", "format", "quality", "playlist", "folder", "sponsorblock", "meta", "track", "fed")
+JOB_KEYS = ("url", "mode", "format", "quality", "playlist", "folder", "sponsorblock", "meta", "track", "fed", "sost")
 DONE = ("completato", "completato con errori", "errore")
 
 
@@ -1188,7 +1191,7 @@ def worker():
         except queue.Empty:
             continue
         try:
-            (run_brano if j.get("track") else federazione.run_copy if j.get("fed") else run_job)(jid, j)
+            (run_brano if j.get("track") else federazione.run_copy if j.get("fed") else scelta.run_sost if j.get("sost") else run_job)(jid, j)
         except Exception as e:  # noqa: BLE001 — un lavoro rotto non deve fermare la coda
             jupdate(jid, status="errore", error=str(e)[:400], finished=time.time())
             diagnosi.errore("download", f"lavoro {jid} interrotto: {e}", e, user=jobs.get(jid, {}).get("by"))
@@ -1233,11 +1236,27 @@ def run_job(jid, j):
         sponsor = [{"key": "SponsorBlock", "categories": ["music_offtopic", "intro", "outro", "selfpromo", "sponsor"], "when": "after_filter"},
                    {"key": "ModifyChapters", "remove_sponsor_segments": ["music_offtopic", "intro", "outro", "selfpromo", "sponsor"]}]
 
+    def origine(d):
+        # file al suo posto (MoveFiles è l'ultimo passo): origine e conversione scritte dentro (scelta.py)
+        if not audio or d.get("status") != "finished" or d.get("postprocessor") != "MoveFiles":
+            return
+        i = d.get("info_dict") or {}
+        path = i.get("filepath")
+        if path and os.path.exists(path):
+            ek = str(i.get("extractor_key") or "").lower()
+            scelta.finale(path, {"src": "youtube" if ek.startswith("youtube") else "soundcloud" if ek.startswith("soundcloud") else ek or "link",
+                                 "url": i.get("webpage_url") or j["url"], "title": i.get("title") or "", "canale": i.get("channel") or i.get("uploader") or "",
+                                 "da": {"codec": (i.get("acodec") or "?").split(".")[0], "kbps": round(i.get("abr") or 0) or None, "hz": i.get("asr")},
+                                 "quando": round(time.time())}, [], "link")
+
+    # conversione e copertina nella cartella temporanea: nella cartella della musica il file arriva finito (MoveFiles),
+    # altrimenti Navidrome lo legge a metà e gli dà durata 0
     opts = yt_opts(
-        outtmpl=os.path.join(base, dir_tpl, name_tpl),
+        paths={"home": base, "temp": os.path.join("/tmp/armony-dl", jid)},
+        outtmpl=os.path.join(dir_tpl, name_tpl),
         noplaylist=not j["playlist"], ignoreerrors=j["playlist"],
         windowsfilenames=True, retries=5,
-        progress_hooks=[progress], writethumbnail=True,
+        progress_hooks=[progress], postprocessor_hooks=[origine], writethumbnail=True,
     )
     if j["playlist"]:  # fra un video e l'altro della playlist, come consiglia yt-dlp per non farsi bloccare
         opts.update(sleep_interval=5, max_sleep_interval=10)
@@ -1267,46 +1286,25 @@ def run_job(jid, j):
                  merge="dl" if audio else "video", many="ha scaricato {n} brani" if audio else "ha scaricato {n} video")
     except Exception as e:  # noqa: BLE001
         jupdate(jid, status="errore", error=YT_BLOCCO if yt_bloccato(e) else str(e)[:400], finished=time.time())
+    finally:
+        shutil.rmtree(os.path.join("/tmp/armony-dl", jid), ignore_errors=True)
 
 
 # brani importati: da evitare se il titolo originale non li nomina
-BRANO_MIN = 1.5  # punteggio minimo di un risultato: almeno l'artista con la durata giusta, o il titolo
-BRANO_NO = re.compile(r"\b(live|cover|karaoke|instrumental|8d|slowed|sped up|nightcore|reverb|remix|acoustic)\b", re.I)
-
-
 def run_brano(jid, j):
-    """Un brano da Spotify: metadati dal CSV completati da Deezer, ricerca con la durata come filtro
-    (prima YouTube, poi SoundCloud), tag scritti con mutagen, file nella cartella dell'album."""
+    """Un brano da Spotify: metadati dal CSV completati da Deezer, la versione dal pool di scelta.py (YouTube Music,
+    YouTube, SoundCloud, con un punteggio), verificata dopo lo scaricamento; tag scritti con mutagen, file nella cartella
+    dell'album, origine e conversione scritte nel file."""
     jupdate(jid, status="metadati")
     m = j["track"]
     try:
         m = metadati.arricchisci(m)
     except Exception as e:  # noqa: BLE001 — senza Deezer bastano i dati del CSV
         diagnosi.avviso("import", f"metadati da Deezer non disponibili per «{m.get('title')}»: {e}", user=jobs[jid].get("by"))
-    artists, title, dur = m.get("artists") or [], m.get("title") or "", m.get("duration")
+    artists, title = m.get("artists") or [], m.get("title") or ""
     tmp = os.path.join("/tmp/armony-dl", jid)
-    shutil.rmtree(tmp, ignore_errors=True)
-    os.makedirs(tmp)
-    want_no = {w.lower() for w in BRANO_NO.findall(title)}
-    nt, na = metadati.norm(title), metadati.norm(" ".join(artists[:1]))
-
-    # ─── PERCHÉ NON BASTA filtrare per durata ───
-    # Un filtro rigido scartava brani buoni (video con qualche secondo di silenzio, edizioni diverse) e
-    # il download falliva. Qui la durata è una preferenza: si guardano i primi risultati senza scaricarli,
-    # si dà un punteggio e si prende il migliore, anche se la durata non coincide.
-    def punteggio(e):
-        t, ch, d = metadati.norm(e.get("title")), (e.get("channel") or e.get("uploader") or ""), e.get("duration")
-        sc = (3 if nt and nt in t else 0) + (1.5 if na and (na in t or na in metadati.norm(ch)) else 0)
-        if ch.endswith(" - Topic"):  # YouTube Music: audio ufficiale, durata esatta, niente intro
-            sc += 3
-        if "official audio" in (e.get("title") or "").lower():
-            sc += 1.5
-        if {w.lower() for w in BRANO_NO.findall(e.get("title") or "")} - want_no:
-            sc -= 4  # live, cover, remix… che il titolo originale non nomina
-        if dur and d:
-            dd = abs(d - dur)
-            sc += 2 if dd <= 3 else -min(dd, 180) / 15
-        return sc
+    q, fmt = scelta.query(m), j.get("format") or "m4a"
+    attese = jobs[jid].get("attese", 0)
 
     def progress(d):
         if d["status"] == "downloading":
@@ -1314,11 +1312,6 @@ def run_brano(jid, j):
             jupdate(jid, progress=round(d.get("downloaded_bytes", 0) * 100 / tot, 1) if tot else None)
         elif d["status"] == "finished":
             jupdate(jid, progress=100, status="conversione")
-
-    q = f"{(artists or [''])[0]} - {title}"
-    fmt = j.get("format") or "m4a"
-    got, last_err, bloccato = None, "", False
-    attese = jobs[jid].get("attese", 0)
 
     def aspetta():
         # YouTube in pausa: il brano torna in coda alla fine della pausa (al massimo 8 volte, circa 4 ore)
@@ -1332,85 +1325,82 @@ def run_brano(jid, j):
         yt["pausa"] = max(yt["pausa"], time.time() + 1800)
         return attese < 8
 
+    # già in libreria (scaricato da un'altra importazione, caricato, copiato): niente doppione "(2)"
+    try:
+        if importa.lib().match(m):
+            return jupdate(jid, status="completato", progress=100, finished=time.time(), note="già in libreria")
+    except Exception:  # noqa: BLE001 — DB di Navidrome illeggibile: si scarica come prima
+        pass
     if time.time() < yt["pausa"] and attese < 8:
         return aspetta()
-    for src in (f"ytsearch8:{q}", f"scsearch8:{q}"):
-        su_yt = src.startswith("yt")
+    pool, bloccato, last_err = scelta.cerca(m, presto=True)
+    if bloccato and not [c for c in pool if c["score"] >= scelta.MIN] and ferma():
+        return aspetta()
+    # ─── PERCHÉ una soglia ───
+    # Il migliore dei risultati può non c'entrare ("Door Hinges" → come montare un fermaporta): sotto la soglia
+    # (né titolo, né artista con la durata giusta) un candidato non si usa
+    pool = [c for c in pool if c["score"] >= scelta.MIN]
+    got, orig, why, best = None, None, [], None
+    tentati = 0
+    for c in pool:
+        if tentati >= 3:
+            break
+        shutil.rmtree(tmp, ignore_errors=True)
+        os.makedirs(tmp)
+        jupdate(jid, status="in corso", source=scelta.SRC[c["source"]],
+                scelto=f"{c['title']} ({c.get('channel') or scelta.SRC[c['source']]}, {round(c['duration']) if c.get('duration') else '?'} s)")
         try:
-            with yt_dlp.YoutubeDL(yt_opts(extract_flat="in_playlist")) as y:
-                found = [e for e in (y.extract_info(src, download=False) or {}).get("entries") or [] if e and e.get("url")]
-        except Exception as e:  # noqa: BLE001
-            last_err, found = str(e)[:300], []
-            if su_yt and yt_bloccato(e):
+            f, o = scelta.scarica(c, fmt, j.get("quality"), tmp, progress, thumb=not m.get("cover"))
+        except Exception as ex:  # noqa: BLE001
+            last_err = str(ex)[:300]
+            if "DRM" in last_err:
+                continue  # protetti, frequenti su SoundCloud: falliscono subito, non contano
+            tentati += 1
+            if c["source"] != "soundcloud" and yt_bloccato(ex):
                 bloccato = True
                 if ferma():
                     return aspetta()
-        # ─── PERCHÉ una soglia ───
-        # Il migliore di otto risultati può essere un video che non c'entra ("Door Hinges" → come montare un
-        # fermaporta): sotto la soglia (né titolo, né artista con la durata giusta) quei risultati non si usano
-        found = [e for e in found if punteggio(e) >= BRANO_MIN]
-        if not found:
-            last_err = last_err or f"nessun risultato abbastanza simile su {'YouTube' if su_yt else 'SoundCloud'}"
             continue
-        found.sort(key=punteggio, reverse=True)
-        if punteggio(found[0]) < 3:  # scelta incerta: si scarica, ma resta nel registro da controllare
-            diagnosi.avviso("import", f"scelta incerta per «{q}»: {found[0].get('title')}", f"punteggio {punteggio(found[0]):.1f}, durata cercata {dur} s, trovata {found[0].get('duration')} s, {found[0].get('url')}",
-                            user=jobs[jid].get("by"))
-        opts = yt_opts(outtmpl=os.path.join(tmp, "%(id)s.%(ext)s"), retries=3, ignoreerrors=False, progress_hooks=[progress],
-                       # M4A e Opus arrivano già così da YouTube: si estrae senza ricodificare
-                       format=f"bestaudio[ext={'webm' if fmt == 'opus' else fmt}]/bestaudio/best",
-                       postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": fmt, "preferredquality": AUDIO_QUALITIES.get(j.get("quality") or "best", "0")}])
-        if not m.get("cover"):  # senza copertina vera si tiene almeno quella del video
-            opts["writethumbnail"] = True
-            opts["postprocessors"] += [{"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"}, {"key": "EmbedThumbnail"}]
-        # il migliore; se il download fallisce (video bloccato, rimosso) si prova il successivo. I brani protetti da
-        # DRM (frequenti su SoundCloud) si saltano senza contarli: falliscono subito, prima di scaricare
-        tentati = 0
-        for e in found:
-            if tentati >= 3:
-                break
-            jupdate(jid, status="in corso", source="YouTube" if su_yt else "SoundCloud",
-                    scelto=f"{e.get('title')} ({e.get('channel') or e.get('uploader') or '?'}, {round(e['duration']) if e.get('duration') else '?'} s)")
-            try:
-                if su_yt:
-                    yt_turno()
-                with yt_dlp.YoutubeDL(opts) as y:
-                    y.download([e["url"]])
-            except Exception as ex:  # noqa: BLE001
-                last_err = str(ex)[:300]
-                if "DRM" in last_err:
-                    continue
-                if su_yt and yt_bloccato(ex):
-                    bloccato = True
-                    break
-            tentati += 1
-            files = [f for f in os.listdir(tmp) if f.rsplit(".", 1)[-1].lower() in UPLOAD_AUDIO]
-            if files:
-                got = os.path.join(tmp, files[0])
-                break
-        if got:
+        tentati += 1
+        w, _ = scelta.verifica(f, m)
+        w += [f"{c['source'] == 'youtube' and 'video' or 'versione'} {', '.join(c['flags'])}"] if c["flags"] else []
+        if c["score"] < 3:
+            w.append(f"somiglianza bassa ({c['score']})")
+        keep = os.path.join(os.path.dirname(tmp), jid + "-" + str(tentati) + "." + f.rsplit(".", 1)[-1])
+        shutil.move(f, keep)
+        if not w:
+            got, orig, why = keep, o, []
             break
-        if bloccato and ferma():
-            return aspetta()
+        if best is None or len(w) < len(best[2]):
+            best = (keep, o, w)
+    if not got and best:  # nessuno convince del tutto: il meno peggio, segnato "da controllare"
+        got, orig, why = best
+        diagnosi.avviso("import", f"da controllare: «{q}»", "; ".join(why) + f" · {orig.get('url')}", user=jobs[jid].get("by"))
+    for f in os.listdir(os.path.dirname(tmp)):  # gli altri tentativi
+        p = os.path.join(os.path.dirname(tmp), f)
+        if f.startswith(jid + "-") and p != got:
+            os.remove(p)
+    shutil.rmtree(tmp, ignore_errors=True)
     if not got:
-        shutil.rmtree(tmp, ignore_errors=True)
         if not bloccato:
             diagnosi.log("info", "import", f"non trovato: {q}", last_err, user=jobs[jid].get("by"))
         return jupdate(jid, status="errore", finished=time.time(),
-                       error=YT_BLOCCO if bloccato else "Non trovato né su YouTube né su SoundCloud" + (f" ({last_err})" if last_err else ""))
+                       error=YT_BLOCCO if bloccato else "Non trovato su YouTube Music, YouTube o SoundCloud" + (f" ({last_err})" if last_err else ""))
     try:
         metadati.tagga(got, m, pulisci=bool(m.get("cover")))
+        scelta.finale(got, orig, why, "importazione")
         base = os.path.join(MUSIC_DIR, clean_segment(j.get("folder"), "Scaricati"))
         dest = metadati.sistema(got, base, m)
         jupdate(jid, status="completato", progress=100, finished=time.time(), path=os.path.relpath(dest, MUSIC_DIR),
-                album=m.get("album"), track_no=m.get("track"))
+                album=m.get("album"), track_no=m.get("track"), **({"sospetto": why} if why else {}))
         lib_arrivo(jobs[jid]["path"], m.get("album"), m.get("albumartist") or (artists or [None])[0], jid)
         label = jobs[jid].get("label")
         attivita(jobs[jid].get("by"), "download", f"ha scaricato «{title}»" + (f" di {artists[0]}" if artists else ""),
                  {"album": m["album"], "artist": m.get("albumartist") or (artists or [None])[0]} if m.get("album") else None,
                  merge=jobs[jid].get("batch") or "dl", many="ha scaricato {n} brani" + (f" di «{label}»" if label else ""))
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        if os.path.exists(got):
+            os.remove(got)
 
 
 @app.get("/api/album/scaletta")
@@ -2248,6 +2238,7 @@ dispositivi.init(app, sys.modules[__name__])
 radio.init(app, sys.modules[__name__])
 diagnosi.init(app, sys.modules[__name__])
 importa.init(app, sys.modules[__name__])
+scelta.init(app, sys.modules[__name__])
 utenti.init(app, sys.modules[__name__])
 ascolti.init(app, sys.modules[__name__])
 
@@ -2270,6 +2261,8 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(MUSIC_DIR, "Scaricati"), exist_ok=True)
     os.makedirs(VIDEO_DIR, exist_ok=True)
     db.migrate()
+    utenti.unisci_nomi()
+    utenti.ripara_storico()
     # i plugin di yt-dlp (PO Token) si caricano alla prima istanza: qui, prima che due esecutori li carichino insieme
     yt_dlp.YoutubeDL(yt_opts()).close()
     for _ in range(2):

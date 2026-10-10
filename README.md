@@ -17,7 +17,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - Qualità fino all'originale (FLAC), dissolvenza fra i brani, normalizzazione del volume, equalizzatore a 10 bande con modalità **automatica** che si regola su ogni brano, protezione dai gracchi, volume notte, timer.
 - Testi sincronizzati in stile karaoke, visualizzatore, radio da un brano o da un artista, mix pronti e **mix del giorno** sui tuoi artisti preferiti.
 - **Cache dei brani** come Spotify: i prossimi della coda arrivano prima che servano e partono subito, anche senza rete. L'app si apre all'istante anche in 5G.
-- Sul computer, **tasto destro** su brani, album, artisti e playlist per tutte le azioni.
+- Menu, ordinamenti e «Cerca qui» come su Spotify in ogni playlist e album; sul computer, **tasto destro** su brani, album, artisti e playlist per tutte le azioni.
 
 **Più dispositivi, una sola musica**
 - Avvii sul telefono e il PC diventa il telecomando, o viceversa; "Dove suona" sposta la musica da un dispositivo all'altro dallo stesso punto. Se un'app si chiude male, si riaggancia da sola.
@@ -32,6 +32,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 **La libreria**
 - Download da YouTube, SoundCloud e centinaia di siti (yt-dlp), con copertina e metadati; caricamento di file dal dispositivo.
 - **Importazione da Spotify** (CSV di Exportify): la fa il server in pochi secondi anche con migliaia di brani, scarica i mancanti e tiene le playlist complete e nell'ordine di Spotify mentre arrivano, anche ad app chiusa. «Brani che ti piacciono» diventano anche i tuoi Preferiti.
+- **Scelta della versione giusta**: il server confronta più candidati e scarta live, cover e audio scadente; nelle informazioni del brano vedi da dove arriva il file e in che formato, e se è sbagliato ne scegli un'altra versione con un tocco.
 - Album completi: le tracce che mancano compaiono al loro posto e si scaricano con un tocco.
 - Modifica di titoli, artisti e copertine; eliminazione dei brani; statistiche d'ascolto, tue e di tutto il server (quante volte è stato ascoltato ogni brano e da chi).
 

@@ -298,6 +298,62 @@ def filter_playlists(method, body, is_json, user):
     return body
 
 
+def unisci_nomi():
+    """Dati divisi per maiuscole ("Gg" e "gg", "Brollo" e "brollo"): tutto sotto il nome vero di Navidrome. Una volta
+    all'avvio; per le tabelle con un utente per riga (prefs, perms) vince la riga più recente, o quella col nome vero."""
+    import sqlite3
+    try:
+        nd = sqlite3.connect(f"file:{A.NAVIDROME_DB}?mode=ro", uri=True, timeout=10)
+        names = {r[0].lower(): r[0] for r in nd.execute("SELECT user_name FROM user")}
+        nd.close()
+    except sqlite3.Error:
+        return
+    c, moved = db.conn(), 0
+    plain = [("devices", "user"), ("sessions", "user"), ("events", "user"), ("pairings", "user"), ("log", "user"),
+             ("fed_subs", "owner"), ("imports", "owner")]
+    for low, real in names.items():
+        for t, col in plain:
+            moved += c.execute(f"UPDATE {t} SET {col} = ? WHERE lower({col}) = ? AND {col} != ?", (real, low, real)).rowcount
+        # storico: lo stesso ascolto (hid) può esserci già sotto il nome vero
+        moved += c.execute("UPDATE OR IGNORE history SET user = ? WHERE lower(user) = ? AND user != ?", (real, low, real)).rowcount
+        c.execute("DELETE FROM history WHERE lower(user) = ? AND user != ?", (low, real))
+        for t, order in (("prefs", "updated"), ("perms", None)):
+            rows = c.execute(f"SELECT rowid, user{', ' + order if order else ''} FROM {t} WHERE lower(user) = ?", (low,)).fetchall()
+            if len(rows) > 1 or (rows and rows[0][1] != real):
+                keep = max(rows, key=lambda r: (r[2] if order else 0, r[1] == real))
+                c.execute(f"DELETE FROM {t} WHERE lower(user) = ? AND rowid != ?", (low, keep[0]))
+                c.execute(f"UPDATE {t} SET user = ? WHERE rowid = ?", (real, keep[0]))
+                moved += 1
+    if moved:
+        A.diagnosi.log("info", "utenti", f"nomi utente uniti per maiuscole: {moved} righe sotto il nome vero di Navidrome")
+
+
+def ripara_storico():
+    """Ascolti registrati con durata 0 (client 0.19–0.21: la durata non arrivava ai brani): durata dal DB di Navidrome."""
+    import sqlite3
+    rows = db.all_("SELECT seq, data FROM history WHERE json_extract(data, '$.duration') IN (0, '0') OR json_extract(data, '$.duration') IS NULL")
+    if not rows:
+        return
+    try:
+        nd = sqlite3.connect(f"file:{A.NAVIDROME_DB}?mode=ro", uri=True, timeout=10)
+        ids = {json.loads(r["data"]).get("id") for r in rows} - {None}
+        dur = {}
+        for chunk in [list(ids)[i:i + 400] for i in range(0, len(ids), 400)]:
+            dur.update({k: v for k, v in nd.execute(f"SELECT id, duration FROM media_file WHERE id IN ({','.join('?' * len(chunk))})", chunk)})
+        nd.close()
+    except sqlite3.Error:
+        return
+    n = 0
+    for r in rows:
+        d = json.loads(r["data"])
+        if dur.get(d.get("id")):
+            d["duration"] = round(dur[d["id"]])
+            db.run("UPDATE history SET data = ? WHERE seq = ?", json.dumps(d), r["seq"])
+            n += 1
+    if n:
+        A.diagnosi.log("info", "utenti", f"{n} ascolti senza durata completati dal database di Navidrome")
+
+
 def init(flask_app, host):
     global A
     A = host

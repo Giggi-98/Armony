@@ -1297,6 +1297,48 @@ dialog.sheet .head .icon-btn{margin:-6px 0 -6px -6px}
 .usrperms{padding:0 14px}
 .usrperms .check{padding:var(--s2) 0;border-bottom:1px solid var(--line)}
 dialog.sheet.usrsheet .head .pav{flex:none}
+/* origine del file e scelta della versione */
+.panel.origin{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s4)}
+.orig-h{display:flex;align-items:center;gap:var(--s3);min-width:0}
+.orig-h .grow{min-width:0;display:flex;flex-direction:column}
+.orig-h small{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.orig-ic{width:34px;height:34px;flex:none;border-radius:var(--r-s);display:grid;place-items:center;background:var(--surface2);color:var(--muted)}
+.orig-ic svg{width:20px;height:20px}
+.orig-ic.src-youtube,.orig-ic.src-ytmusic{background:color-mix(in srgb,#e62117 16%,transparent);color:#e62117}
+.orig-ic.src-soundcloud{background:color-mix(in srgb,#ff5500 16%,transparent);color:#f26a1b}
+.orig-c{display:flex;align-items:center;gap:var(--s2);margin:0;font-size:var(--fs-small);color:var(--muted)}
+.orig-c svg{width:15px;height:15px;flex:none}
+.orig-c b{color:var(--ink);font-weight:600}
+.orig-c.warn,.orig-c.warn b{color:var(--danger)}
+.panel.origin .btn{align-self:flex-start}
+.vcand{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 14px;border-top:1px solid var(--line);min-height:56px}
+.vcand .grow{min-width:0;display:flex;flex-direction:column;gap:2px}
+.vcand b{font-weight:600;font-size:.92rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vcand small{color:var(--muted);font-size:.8rem}
+.vcand small .bad{color:var(--danger)}.vcand small .good{color:var(--sage)}
+.vflags{display:flex;flex-wrap:wrap;gap:4px}
+.vflags em{font-style:normal;font-size:.72rem;font-weight:600;padding:1px 7px;border-radius:99px;background:color-mix(in srgb,var(--danger) 16%,transparent);color:var(--danger)}
+.vscore{flex:none;min-width:34px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums;font-size:.85rem;color:var(--accent-text)}
+details.sosp{padding:0;margin-bottom:var(--s4)}
+details.sosp summary{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4);cursor:pointer;min-height:var(--hit)}
+details.sosp summary small{flex-basis:100%;color:var(--muted);font-size:var(--fs-small)}
+details.sosp .vcand{padding:var(--s2) var(--s4)}
+@media (max-width:520px){.vcand{flex-wrap:wrap}.vcand .grow{flex-basis:calc(100% - 50px)}.vcand .vscore{order:-1}}
+/* ordina e cerca negli elenchi (Ord) */
+.ordbar{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);margin:0 0 var(--s2)}
+.ordq{display:flex;align-items:center;gap:var(--s2);min-width:0;flex:0 1 260px;height:36px;padding:0 var(--s3);border-radius:99px;background:var(--surface2);color:var(--muted)}
+.ordq svg{width:16px;height:16px;flex:none}
+.ordq input{border:0;background:none;padding:0;height:100%;min-width:0;flex:1;font-size:16px;color:var(--ink);outline:none}
+.ordby{display:inline-flex;align-items:center;gap:var(--s2);min-height:36px;padding:0 var(--s2);border:0;background:none;color:var(--muted);font:inherit;font-size:var(--fs-small);font-weight:600;cursor:pointer;border-radius:var(--r-s)}
+.ordby svg{width:16px;height:16px}
+.th [data-sort]{cursor:pointer}
+@media (hover:hover) and (pointer:fine){.ordby:hover,.th [data-sort]:hover{color:var(--ink)}}
+.now-title{display:flex;align-items:center;gap:var(--s3);margin-top:18px;min-width:0}
+.now-title h1{margin:0;min-width:0;flex:1}
+.now-star{flex:none}
+.lcard.favs{text-decoration:none;color:inherit}
+.lcard.favs .lcover{display:grid;place-items:center;background:linear-gradient(135deg,#4a2fbd,#c7a0ff);color:#fff}
+.lcard.favs .lcover svg{width:42%;height:42%}
 /* === fine D === */
 </style>
 </head>
@@ -1336,6 +1378,7 @@ dialog.sheet.usrsheet .head .pav{flex:none}
     <button class="pill" id="sleepPill" hidden></button>
     <button class="pill desk-only" id="qBadge" title="Qualità di ascolto"></button>
     <button class="icon-btn mobile-only" id="bQm" aria-label="Qualità"></button>
+    <button class="icon-btn" id="bStar" aria-label="Preferito" hidden></button>
     <button class="icon-btn" id="bLyr" aria-label="Testi"></button>
     <button class="icon-btn" id="bQueue" aria-label="Coda"></button>
     <input type="range" id="vol" min="0" max="100" value="100" aria-label="Volume">

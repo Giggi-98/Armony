@@ -27,6 +27,22 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Scelta del brano da scaricare: punteggio su più fonti, controllo dopo, origine nel file
+
+**Contesto:** alcuni brani scaricati erano sbagliati: live con audio scarso, videoclip con intro parlata, versioni diverse. Chi ascolta non aveva modo di sapere da dove veniva un file né di correggerlo.
+**Scelta:** `server/scelta.py`. Ricerca su YouTube Music (prima), YouTube e SoundCloud; ogni candidato prende un punteggio da titolo, artisti, durata attesa (dal manifesto Spotify quando c'è), canale ufficiale e parole che indicano un'altra versione (live, cover, remix, slowed…) solo se non stanno nella richiesta; niente espressioni regolari, parole normalizzate. Dopo il download `verifica()` confronta durata e bitrate e marca il lavoro «sospetto». L'origine (fonte, link, codec e bitrate di partenza) si scrive in un tag del file (`ARMONY_ORIGIN`), così resta col file anche se il DB si perde. «Scegli un'altra versione» riusa la stessa ricerca e sostituisce il file al suo posto con i tag copiati. Il file finale si sposta con `os.replace` da un nome temporaneo, mai scritto a metà dove Navidrome lo scansiona.
+**Alternative scartate:** prendere il primo risultato di YouTube (era la causa delle live); un servizio di impronte audio come AcoustID (dipendenza e chiave esterna, e non dice se l'audio è scadente); tenere l'origine solo nel DB di Armony (si perde con un caricamento o un trasferimento del file).
+**Conseguenze:** la ricerca manuale fa più richieste a YouTube (in parallelo); un brano davvero diverso dall'originale Spotify resta in «Da controllare» finché qualcuno dice «va bene così».
+**Da rivedere se:** YouTube Music smette di rispondere alla ricerca per brani, o arriva una fonte con metadati affidabili (ISRC) direttamente nei risultati.
+
+## 2026-10-10 — Un account, un nome: vale quello di Navidrome
+
+**Contesto:** Navidrome accetta «GG» e «gg» come lo stesso utente, ma Armony usava il nome scritto al login: dispositivi, storico e riproduzione condivisa finivano sotto due utenti diversi e il web non vedeva l'app Android.
+**Scelta:** al login il nome viene dalla risposta di Navidrome (`user.username`); all'avvio `unisci_nomi()` sposta sotto il nome vero le righe salvate con le maiuscole sbagliate.
+**Alternative scartate:** confrontare i nomi senza maiuscole ovunque (decine di query da cambiare e un rischio a ogni rotta nuova).
+**Conseguenze:** un nome scritto diverso al login non crea più un utente nuovo in Armony.
+**Da rivedere se:** Armony gestisce utenti propri non presenti su Navidrome.
+
 ## 2026-10-10 — Utenti creati dall'amministratore con link di benvenuto; permessi applicati dal proxy
 
 **Contesto:** l'utente vuole creare in fretta gli account degli amici, con playlist proprie, e che un utente non amministratore veda solo le playlist che ha creato; una sezione con cosa ogni utente può fare. Al primo ingresso l'amico deve scegliere la sua password, che sostituisce quella dell'account. Il codice d'invito per registrarsi da soli resta.

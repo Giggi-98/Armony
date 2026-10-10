@@ -230,6 +230,94 @@ def tagga(path, m, pulisci=False):
     f.save()
 
 
+# ─── origine del file: da dove viene e che conversione ha avuto ───
+# Un tag nel file stesso (JSON), così resta anche se la coda dei download si svuota o il file si sposta:
+# MP4 "----:com.apple.iTunes:ARMONY_ORIGIN", MP3 "TXXX:ARMONY_ORIGIN", Vorbis/FLAC/Opus "ARMONY_ORIGIN"
+ORIGIN = "ARMONY_ORIGIN"
+
+
+def scrivi_origine(path, d):
+    f = mutagen.File(path)
+    if f is None:
+        return
+    data = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+    if f.tags is None:
+        f.add_tags()
+    kind = type(f).__name__
+    if kind == "MP4":
+        from mutagen.mp4 import MP4FreeForm
+        f.tags["----:com.apple.iTunes:" + ORIGIN] = [MP4FreeForm(data.encode())]
+    elif kind == "MP3":
+        from mutagen.id3 import TXXX
+        f.tags.add(TXXX(encoding=3, desc=ORIGIN, text=[data]))
+    else:
+        f.tags[ORIGIN] = [data]
+    f.save()
+
+
+def leggi_origine(path):
+    try:
+        f = mutagen.File(path)
+    except Exception:  # noqa: BLE001
+        return None
+    if f is None or f.tags is None:
+        return None
+    raw = None
+    for k in ("----:com.apple.iTunes:" + ORIGIN, "TXXX:" + ORIGIN, ORIGIN, ORIGIN.lower()):
+        try:
+            v = f.tags[k]
+        except (KeyError, ValueError, TypeError):
+            continue
+        v = v[0] if isinstance(v, list) else getattr(v, "text", [v])[0]
+        raw = bytes(v).decode() if isinstance(v, (bytes, bytearray)) else str(v)
+        break
+    try:
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
+
+
+CODEC = {"MP4": "AAC", "MP3": "MP3", "FLAC": "FLAC", "OggOpus": "Opus", "OggVorbis": "Vorbis", "WAVE": "WAV", "AIFF": "AIFF"}
+
+
+def qualita(path):
+    """Codec, bitrate (kbps), frequenza (Hz) e durata (s) del file com'è adesso."""
+    f = mutagen.File(path)
+    if f is None or not getattr(f, "info", None):
+        return {}
+    i = f.info
+    codec = CODEC.get(type(f).__name__, type(f).__name__)
+    if codec == "AAC" and "alac" in str(getattr(i, "codec", "")).lower():
+        codec = "ALAC"
+    return {"codec": codec, "kbps": round((getattr(i, "bitrate", 0) or 0) / 1000), "hz": getattr(i, "sample_rate", None),
+            "dur": round(getattr(i, "length", 0) or 0, 1)}
+
+
+def copia_tag(old, new):
+    """Tag e copertina dal file vecchio a quello che lo sostituisce (stesso formato: si copiano così come sono)."""
+    a, b = mutagen.File(old), mutagen.File(new)
+    if a is None or b is None or a.tags is None:
+        return
+    if type(a) is not type(b):
+        m = leggi_tag(old)
+        tagga(new, {"title": m["title"], "artists": m["artists"], "album": m["album"], "albumartist": m["albumartist"],
+                    "date": m["date"], "genres": m["genres"], "track": m["track"], "disc": m["disc"]}, pulisci=True)
+        return
+    if b.tags is None:
+        b.add_tags()
+    b.tags.clear()
+    if type(a).__name__ == "MP3":
+        for frame in a.tags.values():
+            b.tags.add(frame)
+    else:
+        for k, v in a.tags.items():
+            b.tags[k] = v
+    if type(a).__name__ == "FLAC":
+        for pic in a.pictures:
+            b.add_picture(pic)
+    b.save()
+
+
 # chiavi "facili" di mutagen per la modifica a mano: campo dell'interfaccia → chiave nel file
 CAMPI = {"title": "title", "artists": "artist", "album": "album", "albumartist": "albumartist",
          "date": "date", "track": "tracknumber", "disc": "discnumber", "genres": "genre"}
@@ -331,25 +419,28 @@ def sistema(src, base, m):
     """Sposta il file al suo posto (senza sovrascrivere un file diverso) e scarica la copertina
     accanto, se la cartella non ne ha già una. Restituisce il percorso finale."""
     dest = destinazione(base, m, src.rsplit(".", 1)[-1].lower())
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    folder = os.path.dirname(dest)
+    os.makedirs(folder, exist_ok=True)
+    img = _cover(m["cover"]) if m.get("cover") else None
+    if img:
+        try:
+            incorpora(src, img)  # prima di spostarlo: nella cartella della musica il file arriva finito
+        except Exception:  # noqa: BLE001 — la copertina nella cartella basta a Navidrome
+            pass
+        if not any(os.path.exists(os.path.join(folder, c)) for c in COVER_NAMES):
+            with open(os.path.join(folder, "cover.jpg"), "wb") as fh:
+                fh.write(img)
     if os.path.abspath(src) != os.path.abspath(dest):
         stem, ext = dest.rsplit(".", 1)
         n = 2
         while os.path.exists(dest):
             dest = "%s (%d).%s" % (stem, n, ext)
             n += 1
-        shutil.move(src, dest)
-    folder = os.path.dirname(dest)
-    if m.get("cover"):
-        img = _cover(m["cover"])
-        if img:
-            if not any(os.path.exists(os.path.join(folder, c)) for c in COVER_NAMES):
-                with open(os.path.join(folder, "cover.jpg"), "wb") as fh:
-                    fh.write(img)
-            try:
-                incorpora(dest, img)
-            except Exception:  # noqa: BLE001 — la copertina nella cartella basta a Navidrome
-                pass
+        # ─── PERCHÉ in due passi ───
+        # Da /tmp alla cartella della musica è una copia, non uno spostamento: Navidrome vedeva il file a metà e gli
+        # dava durata 0 fino alla scansione dopo. Si copia con un nome che Navidrome ignora, poi un rename atomico
+        shutil.move(src, dest + ".armony-part")
+        os.replace(dest + ".armony-part", dest)
     return dest
 
 

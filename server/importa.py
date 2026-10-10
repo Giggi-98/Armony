@@ -60,7 +60,7 @@ def key(t):
 class Lib:
     """Indice della libreria per riconoscere i brani: ISRC, titolo normalizzato, percorso."""
     def __init__(self):
-        self.isrc, self.title, self.path = {}, collections.defaultdict(list), {}
+        self.isrc, self.title, self.path, self.dur = {}, collections.defaultdict(list), {}, {}
         c = nd()
         try:
             # tutte le librerie: anche "Dalla rete" (federati/), dove arrivano le copie delle playlist a cui si è abbonati
@@ -77,6 +77,7 @@ class Lib:
             except (ValueError, AttributeError):
                 pass
             row = (mid, nt(f"{artist} {aa}"), dur or 0)
+            self.dur[mid] = dur or 0
             for k in {nt(title), nt(title, True)}:
                 if k:
                     self.title[k].append(row)
@@ -130,9 +131,20 @@ def owner_of(pid):
 
 
 def entries(pid):
+    """Le voci della playlist con un file che c'è ancora: quelle di file spariti (doppioni tolti, file cancellati) si perdono
+    alla prossima riscrittura invece di restare in fondo per sempre."""
     c = nd()
     try:
-        return [r[0] for r in c.execute("SELECT media_file_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY id", (pid,))]
+        return [r[0] for r in c.execute("SELECT t.media_file_id FROM playlist_tracks t JOIN media_file m ON m.id = t.media_file_id "
+                                        "WHERE t.playlist_id = ? AND m.missing = 0 ORDER BY t.id", (pid,))]
+    finally:
+        c.close()
+
+
+def all_entries(pid):
+    c = nd()
+    try:
+        return c.execute("SELECT count(*) FROM playlist_tracks WHERE playlist_id = ?", (pid,)).fetchone()[0]
     finally:
         c.close()
 
@@ -171,7 +183,7 @@ def stato_di(imp, L=None, write=True):
             new = [x for x in want if x not in set(cur)]
             # si riscrive al primo giro dopo l'importazione (ordine del file), se c'è qualcosa da aggiungere o se ci sono
             # doppioni; altrimenti un riordino fatto a mano resta finché non arriva un brano nuovo
-            if new or not old.get("put") or len(cur) != len(set(cur)):
+            if new or not old.get("put") or len(cur) != len(set(cur)) or all_entries(imp["pid"]) != len(cur):
                 extra = [x for x in dict.fromkeys(cur) if x not in set(want)]
                 scrivi(imp["pid"], want + extra, cur)
             put = (put - gone) | set(want)
