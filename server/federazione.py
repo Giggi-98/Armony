@@ -23,6 +23,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import threading
 import time
 import unicodedata
@@ -65,6 +66,7 @@ build_lock = threading.Lock()
 seen_rids = {}             # id delle richieste inoltrate già viste -> istante (contro i cicli)
 rate = {}                  # nodo -> [minuto, richieste]
 fails = {}                 # nodo -> (aggiornamenti falliti di fila, istante dell'ultimo tentativo)
+inflight, inflight_lock, store_lock = set(), threading.Lock(), threading.Lock()
 pair_failed = {}           # ip -> istanti dei tentativi di abbinamento falliti
 nd_tok = {"jwt": None}
 
@@ -291,15 +293,16 @@ def clean_url(u):
     p = urllib.parse.urlparse(u)
     if p.scheme not in ("http", "https") or not p.hostname or p.query or p.fragment:
         raise ValueError("Indirizzo non valido: serve http(s)://nome-o-ip[:porta]")
-    # un altro server non può farsi chiamare su un servizio interno di questa macchina (SSRF): LAN e Tailscale sì
+    # un altro server non può farsi chiamare su un servizio interno di questa macchina (SSRF): LAN e Tailscale sì.
+    # Si guardano tutti gli indirizzi a cui il nome porta (anche 127.1, ::ffff:127.0.0.1, nomi DNS verso 127.0.0.1)
     try:
-        ip = ipaddress.ip_address(p.hostname)
+        addrs = {a[4][0] for a in socket.getaddrinfo(p.hostname, p.port or (443 if p.scheme == "https" else 80), proto=socket.IPPROTO_TCP)}
+    except OSError:
+        addrs = set()  # il nome non si risolve da qui: lo dirà il primo collegamento
+    for a in addrs:
+        ip = ipaddress.ip_address(a.split("%")[0])
+        ip = ip.ipv4_mapped or ip if ip.version == 6 else ip
         if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
-            raise ValueError("Indirizzo non valido: non può essere un indirizzo interno di questo server")
-    except ValueError as e:
-        if "interno" in str(e):
-            raise
-        if p.hostname.lower() in ("localhost", "localhost.localdomain") or p.hostname.lower().endswith(".localhost"):
             raise ValueError("Indirizzo non valido: non può essere un indirizzo interno di questo server")
     return u
 
@@ -481,6 +484,18 @@ def epoca():
 
 def refresh(nid):
     """Scarica dal vicino le righe del catalogo cambiate dall'ultima volta e aggiorna il suo stato."""
+    with inflight_lock:
+        if nid in inflight:
+            return  # già in corso (un giro lento e un "Aggiorna ora" insieme)
+        inflight.add(nid)
+    try:
+        _refresh(nid)
+    finally:
+        with inflight_lock:
+            inflight.discard(nid)
+
+
+def _refresh(nid):
     n = node(nid)
     if not n or n["state"] not in ("attivo", "attesa"):
         return
@@ -490,6 +505,8 @@ def refresh(nid):
     except FedError as e:
         # chi aspetta la conferma riceve "in attesa": non è un errore da mostrare; "verso": non condivide con noi
         msg = None if "attesa di conferma" in str(e) or "non condivide" in str(e) else str(e)[:200]
+        if "non condivide" in str(e):
+            db.run("DELETE FROM fed_catalog WHERE node = ?", nid)  # ha scelto di non mostrarci più la sua libreria
         db.run("UPDATE fed_nodes SET error = ? WHERE id = ?", msg, nid)
         k = fails.get(nid, (0, 0))[0]
         fails[nid] = (k + 1 if msg else k, time.time())
@@ -498,14 +515,15 @@ def refresh(nid):
     if int(j.get("proto") or 0) != PROTO:
         db.run("UPDATE fed_nodes SET error = ? WHERE id = ?", f"Versione incompatibile: aggiorna Armony su {n['name']} o qui", nid)
         return
-    c = db.conn()
-    c.execute("BEGIN")
-    try:
-        _store(c, nid, n, j)
-        c.execute("COMMIT")
-    except Exception:
-        c.execute("ROLLBACK")  # niente transazioni lasciate aperte sulla connessione del thread
-        raise
+    with store_lock:  # le richieste ai vicini in parallelo, le scritture nel DB una alla volta (niente "database is locked")
+        c = db.conn()
+        c.execute("BEGIN")
+        try:
+            _store(c, nid, n, j)
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")  # niente transazioni lasciate aperte sulla connessione del thread
+            raise
     if j.get("epoca"):
         set_setting("epoca:" + nid, j["epoca"])
 

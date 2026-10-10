@@ -18,15 +18,18 @@ const Diag = {
     const sig = level + area + msg, now = Date.now();
     if (now - (this.seen.get(sig) || 0) < 30000) return;
     this.seen.set(sig, now); if (this.seen.size > 300) this.seen.clear();
-    this.q.push({ level, area, msg, detail: String(detail || '').slice(0, 3000), url: location.hash.slice(0, 200), at: now, app: window.ARMONY_APP?.version || '', ua: navigator.userAgent.slice(0, 200) });
+    // solo la rotta: il link di una Jam porta il segreto della stanza dopo #/jam/entra/, e non deve arrivare al server
+    const url = location.hash.replace(/^(#\/(jam\/entra|abbina|invito)\/).*/, '$1…').slice(0, 120);
+    this.q.push({ level, area, msg, detail: String(detail || '').slice(0, 1500), url, at: now, app: window.ARMONY_APP?.version || '', ua: navigator.userAgent.slice(0, 160) });
     if (this.q.length > 100) this.q.splice(0, this.q.length - 100);
     store.set('diagQ', this.q);
     clearTimeout(this.t); this.t = setTimeout(() => this.flush(), level === 'errore' ? 3000 : 15000);
   },
-  async flush() {
+  // keepalive solo quando la pagina si chiude: lì il limite è 64 kB, quindi lotti piccoli
+  async flush(leaving = false) {
     const s = srv(); if (!this.q.length || !this.ok(s)) return;
-    const batch = this.q.splice(0, 50); store.set('diagQ', this.q);
-    try { await srvApi(s, '/api/log', { method: 'POST', keepalive: true, body: JSON.stringify({ events: batch.map(x => ({ ...x, device: S.device })) }) }); }
+    const batch = this.q.splice(0, leaving ? 8 : 25); store.set('diagQ', this.q);
+    try { await srvApi(s, '/api/log', { method: 'POST', keepalive: leaving, body: JSON.stringify({ events: batch.map(x => ({ ...x, device: S.device })) }) }); }
     catch { this.q.unshift(...batch); store.set('diagQ', this.q.slice(-100)); return; }
     if (this.q.length) this.t = setTimeout(() => this.flush(), 5000);
   }
@@ -39,7 +42,7 @@ addEventListener('unhandledrejection', e => { const r = e.reason; if (r?.name ==
   console.error = (...a) => { ce(...a); Diag.report('errore', 'console', txt(a), a.find(x => x?.stack)?.stack || ''); };
   console.warn = (...a) => { cw(...a); Diag.report('avviso', 'console', txt(a), a.find(x => x?.stack)?.stack || ''); };
 }
-addEventListener('pagehide', () => Diag.flush());
+addEventListener('pagehide', () => Diag.flush(true));
 addEventListener('online', () => setTimeout(() => Diag.flush(), 3000));
 
 /* ---------------- Stato del server ---------------- */

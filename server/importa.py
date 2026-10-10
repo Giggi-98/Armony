@@ -110,6 +110,15 @@ def lib():
         return _idx["lib"]
 
 
+_plocks = collections.defaultdict(threading.Lock)
+
+
+def plock(pid):
+    # una riconciliazione alla volta per playlist: la richiesta d'importazione e il giro non si intrecciano
+    with _lock:
+        return _plocks[pid]
+
+
 def owner_of(pid):
     c = nd()
     try:
@@ -150,22 +159,33 @@ def stato_di(imp, L=None, write=True):
             err.append({"title": f"{', '.join(t.get('artists') or [])} - {t.get('title')}", "error": j.get("error")})
         else:
             miss.append(t)
+    old = json.loads(imp["state"] or "{}") if imp["state"] else {}
+    put = set(old.get("put") or [])  # brani che la riconciliazione ha già messo nella playlist
     if write:
-        cur = entries(imp["pid"])
-        if cur is not None:
-            extra = [x for x in dict.fromkeys(cur) if x not in seen]
-            goal = want + extra
-            if cur != goal:
-                scrivi(imp["pid"], goal, len(cur))
-    st = {"total": len(items), "inlib": inlib, "dl": dl, "err": len(err), "miss": len(miss), "failed": err[:50], "at": time.time()}
+        with plock(imp["pid"]):
+            cur = entries(imp["pid"])
+            # tolto a mano dall'utente dopo che l'avevamo messo: non si rimette (resta tolto anche ai giri dopo)
+            gone = put - set(cur)
+            want = [x for x in want if x not in gone]
+            new = [x for x in want if x not in set(cur)]
+            # si riscrive al primo giro dopo l'importazione (ordine del file), se c'è qualcosa da aggiungere o se ci sono
+            # doppioni; altrimenti un riordino fatto a mano resta finché non arriva un brano nuovo
+            if new or not old.get("put") or len(cur) != len(set(cur)):
+                extra = [x for x in dict.fromkeys(cur) if x not in set(want)]
+                scrivi(imp["pid"], want + extra, cur)
+            put = (put - gone) | set(want)
+    st = {"total": len(items), "inlib": inlib, "dl": dl, "err": len(err), "miss": len(miss), "failed": err[:50], "at": time.time(), "put": sorted(put)}
     db.run("UPDATE imports SET state = ? WHERE pid = ?", json.dumps(st), imp["pid"])
     return st, miss, want
 
 
-def scrivi(pid, ids, before):
-    # createPlaylist con playlistId sostituisce i brani; oltre 200 si aggiungono a pezzi (indirizzi corti)
-    A.federazione.nd_get("createPlaylist", playlistId=pid, songId=ids[:200])
-    for i in range(200, len(ids), 200):
+def scrivi(pid, ids, cur):
+    # updatePlaylist e non createPlaylist con playlistId: come amministratore di Navidrome vale anche sulle playlist degli
+    # altri utenti. Si tolgono le voci a pezzi partendo dal fondo (gli indici prima non si spostano), poi si aggiungono
+    before = len(cur)
+    for end in range(before, 0, -200):
+        A.federazione.nd_get("updatePlaylist", playlistId=pid, songIndexToRemove=list(range(max(0, end - 200), end)))
+    for i in range(0, len(ids), 200):
         A.federazione.nd_get("updatePlaylist", playlistId=pid, songIdToAdd=ids[i:i + 200])
     if len(ids) != before:
         u = owner_of(pid)
@@ -208,7 +228,7 @@ def importa():
     name = str(d.get("name") or "Playlist")[:120]
     now = time.time()
     db.run("INSERT INTO imports (pid, owner, name, items, created, updated) VALUES (?, ?, ?, ?, ?, ?) "
-           "ON CONFLICT(pid) DO UPDATE SET items = excluded.items, name = excluded.name, updated = excluded.updated",
+           "ON CONFLICT(pid) DO UPDATE SET items = excluded.items, name = excluded.name, updated = excluded.updated, state = NULL",
            pid, u, name, json.dumps(items), now, now)
     imp = db.one("SELECT * FROM imports WHERE pid = ?", pid)
     st, miss, ids = stato_di(imp)
@@ -218,7 +238,8 @@ def importa():
         r = A.accoda(miss, fmt, d.get("folder") or "Spotify", "Spotify: " + name, u)
         queued = r["added"]
         st, _, _ = stato_di(imp, write=False)
-    return jsonify(pid=pid, queued=queued, **{k: v for k, v in st.items() if k != "failed"}, **({"ids": ids} if d.get("ids") else {}),
+    # reimportare il file vuol dire rifarla com'è nel file: anche i brani tolti a mano (state = NULL) tornano
+    return jsonify(pid=pid, queued=queued, **{k: v for k, v in st.items() if k not in ("failed", "put")}, **({"ids": ids} if d.get("ids") else {}),
                    missing=[f"{', '.join(t.get('artists') or [])} - {t['title']}" for t in miss[:40]] if not queued else [])
 
 
@@ -227,7 +248,7 @@ def stato():
     u, pid = g.who.get("user"), request.args.get("pid")
     rows = db.all_("SELECT pid, name, state, updated FROM imports WHERE " + ("pid = ? AND (owner = ? OR ?)" if pid else "owner = ?"),
                    *((pid, u, int(g.who["admin"])) if pid else (u,)))
-    out = [{"pid": r["pid"], "name": r["name"], "updated": r["updated"], **json.loads(r["state"] or "{}")} for r in rows]
+    out = [{"pid": r["pid"], "name": r["name"], "updated": r["updated"], **{k: v for k, v in json.loads(r["state"] or "{}").items() if k != "put"}} for r in rows]
     return jsonify(out[0] if pid and out else None if pid else out)
 
 

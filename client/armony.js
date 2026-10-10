@@ -1222,8 +1222,12 @@ const DB = {
         if (e.oldVersion < 3) d.createObjectStore('chiavi', { keyPath: 'k' });  // dispositivi.js: chiavi private non esportabili
         if (e.oldVersion < 4) d.createObjectStore('acache', { keyPath: 'k' });  // cache dei brani (ACache)
       };
-      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-    });
+      // una scheda vecchia aperta non deve bloccare l'aggiornamento del database (né l'avvio di questa):
+      // chi ha la versione vecchia la chiude quando ne arriva una nuova, e se resta bloccata si va avanti senza
+      r.onsuccess = () => { const d = r.result; d.onversionchange = () => { d.close(); DB._db = null; }; res(d); };
+      r.onerror = () => rej(r.error);
+      r.onblocked = () => { toast('Chiudi le altre schede di Armony per completare l\'aggiornamento.', 6000); setTimeout(() => rej(new Error('database bloccato')), 4000); };
+    }).catch(e => { this._db = null; throw e; });
   },
   async run(st, mode, fn) {
     const d = await this.open();
@@ -1313,21 +1317,22 @@ setInterval(() => OffPin.sync(), 30 * 60000);
    Mentre suona un brano si scaricano per intero i prossimi (2 col Wi-Fi, 1 in rete mobile, nessuno con «risparmio
    dati»), alla qualità in uso; un brano in cache parte subito e senza rete. Restano fino al limite scelto in
    Impostazioni → Ascolto (P.cacheMB, per dispositivo), poi se ne vanno i meno recenti. IndexedDB e non Cache Storage:
-   funziona anche aprendo Armony senza HTTPS. L'indice (dimensioni, ultimo uso) sta in localStorage */
+   funziona anche aprendo Armony senza HTTPS */
 const ACache = {
-  idx: store.get('acIdx', {}), busy: new Set(), t: null,
+  idx: {}, busy: new Set(), t: null,
+  // l'indice si ricostruisce dal database: con più schede aperte una copia in localStorage si sovrascriverebbe
+  async init() { try { for (const r of await DB.all('acache')) this.idx[r.k] = { size: r.blob?.size || 0, at: r.at || 0 }; } catch {} },
   k: (t, q) => `${key(t)}@${q}`,
   max: () => (P.cacheMB ?? 1024) * 1e6,
   size() { return Object.values(this.idx).reduce((n, x) => n + x.size, 0); },
   ok(t) { return !!t && P.cacheMB !== 0 && !Offline.has(t) && !srv(t.serverId)?.local && !t.fed && !!srv(t.serverId); },
   has(t, q = activeQuality()) { return !!this.idx[this.k(t, q)]; },
-  save() { store.set('acIdx', this.idx); },
   async url(t, q = activeQuality()) {
     const k = this.k(t, q); if (!this.idx[k]) return null;
     try {
       const r = await DB.get('acache', k);
-      if (!r?.blob) { delete this.idx[k]; this.save(); return null; }
-      this.idx[k].at = Date.now(); this.save();
+      if (!r?.blob) { delete this.idx[k]; return null; }
+      this.idx[k].at = Date.now(); DB.put('acache', { ...r, at: Date.now() }).catch(() => {});
       return URL.createObjectURL(r.blob);
     } catch { return null; }
   },
@@ -1338,7 +1343,7 @@ const ACache = {
       const r = await fetch(streamUrl(t, q)); if (!r.ok) return;
       const blob = await r.blob(); if (blob.size < 20000) return;  // una risposta d'errore, non un brano
       await DB.put('acache', { k, blob, at: Date.now() });
-      this.idx[k] = { size: blob.size, at: Date.now() }; this.save(); this.trim();
+      this.idx[k] = { size: blob.size, at: Date.now() }; this.trim();
     } catch {} finally { this.busy.delete(k); }
   },
   async trim() {
@@ -1347,9 +1352,8 @@ const ACache = {
       if (tot <= max * .9) break;
       await DB.del('acache', k).catch(() => {}); delete this.idx[k]; tot -= x.size;
     }
-    this.save();
   },
-  async clear() { await DB.clear('acache').catch(() => {}); this.idx = {}; this.save(); },
+  async clear() { await DB.clear('acache').catch(() => {}); this.idx = {}; },
   // dopo un cambio di brano, lasciato il tempo al brano attuale di riempire il suo buffer
   ahead() {
     clearTimeout(this.t);
@@ -2950,7 +2954,7 @@ function ctxMenu([x, y], items, head = '') {
   m.querySelector('button')?.focus({ preventScroll: true });
 }
 document.addEventListener('contextmenu', e => {
-  if (e.shiftKey || !matchMedia('(pointer:fine)').matches || e.target.closest('input,textarea,select,[contenteditable],dialog,#cmenu,.lyrics')) return;
+  if (e.defaultPrevented || e.shiftKey || !matchMedia('(pointer:fine)').matches || e.target.closest('input,textarea,select,[contenteditable],dialog,#cmenu,.lyrics')) return;
   const at = [e.clientX, e.clientY], go = h => () => { location.hash = h; }, menu = (items, head) => { e.preventDefault(); ctxMenu(at, items, head); };
   const song = e.target.closest('.song[data-i]:not(.ghost)');
   if (song) {
@@ -4612,11 +4616,11 @@ async function boot() {
   $('#nav').innerHTML = NAV.map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
   Bus.addEventListener('playlists', sidePlaylists); sidePlaylists();
   paintTabs();
-  $('#tabs').oncontextmenu = e => { e.preventDefault(); tabsEditor(); };  // tenere premuta la barra la personalizza
+  $('#tabs').oncontextmenu = e => { if (matchMedia('(pointer:fine)').matches) return; e.preventDefault(); tabsEditor(); };  // tenere premuta la barra la personalizza (col mouse c'è il menu)
   $('#hSearch').onclick = e => { if (location.hash.startsWith('#/cerca')) { e.preventDefault(); $('#q')?.focus(); } else searchFocus = true; };
   Wave.init();
   Engine.init(); wirePlayer();
-  await Offline.init(); await Local.init();
+  await Offline.init(); await Local.init(); ACache.init();
   if (srv()?.session && Disp.ok(srv()) && Disp.stale(srv())) await Promise.race([Disp.fresh(srv(), true), sleep(4000)]);
   if (Local.on() && !navigator.onLine && !srv()?.local) S.active = Local.id;  // senza rete suona il telefono
   fillSelectors(); updateNowPlaying(); paintTime();

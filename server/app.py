@@ -123,7 +123,7 @@ API_LEVEL = 1
 CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/chiave", None), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/chiave", None), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -153,7 +153,8 @@ gz_cache = {}
 
 @app.after_request
 def comprimi(resp):
-    if (resp.status_code != 200 or resp.is_streamed and not resp.direct_passthrough or "gzip" not in request.headers.get("Accept-Encoding", "")
+    if (resp.status_code != 200 or resp.is_streamed and (not resp.direct_passthrough or request.path.startswith("/rest/"))
+            or "gzip" not in request.headers.get("Accept-Encoding", "")
             or resp.headers.get("Content-Encoding") or resp.mimetype not in GZ_TYPES or request.path.startswith("/share/")
             or int(resp.headers.get("Content-Length") or 0) > 8_000_000):
         return resp
@@ -523,11 +524,18 @@ def proxy(p):
                 q.setdefault(k, []).extend(v)
         threading.Thread(target=pl_attivita, args=(m, q, body), daemon=True).start()
         return Response(body, status=r.status_code, headers=out)
+    # JSON (risposte Subsonic): letto intero, così comprimi() lo può comprimere; audio e copertine restano in streaming
+    if prefix == "rest" and "json" in (r.headers.get("content-type") or ""):
+        body = r.content
+        r.close()
+        out.pop("content-length", None)
+        return Response(body, status=r.status_code, headers=out)
     # flussi audio in corso, per lo stato del server (chi ascolta, a che qualità, quanti byte)
-    fk = diagnosi.flusso_apri((g.get("who") or {}).get("user") or request.args.get("u"), request.args.get("id"),
-                              request.args.get("format") or "raw") if m in ("stream", "download") and prefix == "rest" else None
+    who = (g.get("who") or {}).get("user") or request.args.get("u")
 
     def body():
+        # aperto qui dentro: con HEAD o 304 il generatore non parte e il flusso non deve restare contato
+        fk = diagnosi.flusso_apri(who, request.args.get("id"), request.args.get("format") or "raw") if m in ("stream", "download") and prefix == "rest" else None
         try:
             for chunk in r.iter_content(64 * 1024):
                 if dev and dev in dispositivi.CUT:
