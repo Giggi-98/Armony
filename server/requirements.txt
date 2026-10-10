@@ -1,6 +1,7 @@
 flask==3.0.3
 waitress==3.0.0
 requests==2.32.3
-yt-dlp
+yt-dlp[default,deno]
+bgutil-ytdlp-pot-provider
 mutagen==1.47.0
 cryptography==44.0.2

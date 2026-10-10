@@ -2687,6 +2687,7 @@ function vSettings() {
   ${window.ARMONY_APP ? grp('app', 'App Android', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div><div id="apkBox"></div>')
     : grp('app', 'App Android', 'apk app android telefono scarica installa qr', '<div class="panel" id="apkBox"><p class="sub">Controllo…</p></div>')}
   ${access().admin ? grp('aggiornamenti', 'Aggiornamenti', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>') : ''}
+  ${access().admin && srv()?.me?.caps?.includes('youtube') ? grp('youtube', 'YouTube', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>') : ''}
 
   ${grp('aspetto', 'Aspetto', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
     <div class="tbset"><span class="grow"><b>Barra in basso</b><small>${[...tabsOf().map(h => NAV.find(n => n[0] === h)[1]), 'Altro'].join(' · ')}</small></span><button class="btn sm" data-act="tabsedit">Personalizza</button></div>`)}
@@ -2723,7 +2724,7 @@ function vSettings() {
       s.me = { ...s.me, public: r.public }; persistServers(); toast(r.public ? `Fatto: i link useranno ${r.public}.` : 'Indirizzo tolto: i link useranno quello di ogni dispositivo.');
     } catch (e) { toast(e.message.includes('400') ? 'Scrivi solo l\'indirizzo, per esempio https://armony.nome.ts.net' : e.message); }
   });
-  if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); }
+  if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); refreshYt(); }
   if (window.ARMONY_APP) AppUpdate.paint();
   Local.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
@@ -2793,6 +2794,41 @@ async function refreshUpdate(force) {
     ${busy ? '<span class="tag">Aggiornamento in corso…</span>' : u.available ? `<button class="btn primary" data-act="updrun">Aggiorna a ${esc(u.latest)}</button>` : u.latest ? '<span class="tag ok">Aggiornato</span>' : ''}</div>`;
   if (busy) setTimeout(() => refreshUpdate(), 5000);
   return u;
+}
+/* ================= YouTube: cookie di un account secondario e prova di download (solo amministratori) ================= */
+async function refreshYt(prova) {
+  const box = $('#ytBox'); if (!box) return;
+  let y; try { y = await dlApi('/api/youtube'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  const c = y.cookies, giorno = t => new Date(t * 1000).toLocaleDateString('it-IT');
+  const stato = !c.present ? '<span class="tag">Nessun cookie</span>'
+    : c.expired ? '<span class="tag err">Cookie scaduti</span>'
+    : !c.login ? '<span class="tag err">Cookie senza accesso</span>' : '<span class="tag ok">Cookie presenti</span>';
+  const nota = !c.present ? 'Senza cookie il server scarica come ospite: di solito basta, ma se YouTube lo scambia per un robot i download si fermano.'
+    : c.expired ? 'YouTube non li accetta più: esportali di nuovo e ricaricali.'
+    : !c.login ? 'Nel file non c\'è un accesso a YouTube: esportali mentre sei dentro con l\'account.'
+    : `Caricati il ${giorno(c.saved)}${c.expires ? `, validi fino al ${giorno(c.expires)}` : ''}. I download li usano.`;
+  if ($('#ytBox') !== box) return;
+  box.innerHTML = `<div class="row between"><b>Cookie di YouTube</b>${stato}</div>
+    <p class="small" style="color:var(--muted);margin:0">${esc(nota)}${y.pausa ? ` YouTube ha bloccato il server: i brani da scaricare aspettano ancora ${Math.ceil(y.pausa / 60)} min.` : ''}</p>
+    <p class="small" style="margin:0"><b>Usa un account secondario</b>, creato apposta: YouTube può sospendere l'account usato per scaricare. Esporta i cookie da una finestra in incognito con l'estensione «Get cookies.txt LOCALLY» mentre sei su youtube.com, poi chiudi la finestra senza uscire dall'account. Il server tiene solo i cookie di YouTube e Google.</p>
+    <div class="row"><button class="btn" data-yt="up">${ic('plus')} ${c.present ? 'Sostituisci i cookie' : 'Carica cookies.txt'}</button>${c.present ? `<button class="btn" data-yt="del">${ic('trash')} Togli i cookie</button>` : ''}<button class="btn" data-yt="try">Prova YouTube</button></div>
+    <p class="small" id="ytTry" style="margin:0;color:var(${prova && !prova.ok ? '--danger' : '--muted'})" aria-live="polite">${prova ? esc(prova.msg) : `yt-dlp ${esc(y.ytdlp)} · PO Token ${y.pot ? 'attivo' : 'non raggiungibile (servizio pot spento?)'}`}</p>`;
+  box.querySelectorAll('[data-yt]').forEach(b => b.onclick = async () => {
+    try {
+      if (b.dataset.yt === 'up') {
+        const f = await pickFile('.txt,text/plain'); if (!f) return;
+        const r = await dlApi('/api/youtube/cookies', { method: 'PUT', body: await f.text(), headers: { 'Content-Type': 'text/plain' } });
+        toast(r.cookies.expired ? 'Cookie salvati, ma sono già scaduti: esportali di nuovo.' : 'Cookie salvati: i download li useranno.'); refreshYt();
+      } else if (b.dataset.yt === 'del') {
+        if (!confirm('Togliere i cookie di YouTube dal server?')) return;
+        await dlApi('/api/youtube/cookies', { method: 'DELETE' }); toast('Cookie tolti.'); refreshYt();
+      } else {
+        b.disabled = true; $('#ytTry').textContent = 'Provo a scaricare un video di 19 secondi…';
+        const r = await dlApi('/api/youtube/prova', { method: 'POST' });
+        refreshYt({ ok: r.ok, msg: r.ok ? `Funziona: scaricato in ${String(r.secondi).replace('.', ',')} s (yt-dlp ${r.ytdlp}, PO Token ${r.pot ? 'attivo' : 'non raggiungibile'}).` : `Non funziona: ${r.error}` });
+      }
+    } catch (e) { b.disabled = false; toast(e.message); }
+  });
 }
 /* ================= registrazione degli amici (solo amministratori) ================= */
 const fmtCode = c => String(c).replace(/^(.{4})(.+)$/, '$1-$2');
