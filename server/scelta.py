@@ -198,6 +198,10 @@ def finale(path, o, why, come):
         metadati.scrivi_origine(path, o)
     except Exception as e:  # noqa: BLE001 — senza il tag il brano suona lo stesso
         diagnosi.avviso("scelta", f"origine non scritta: {e}")
+    try:
+        metadati.scrivi_replaygain(path, force=True)  # volume uniforme anche per i brani da YouTube
+    except Exception as e:  # noqa: BLE001
+        diagnosi.avviso("scelta", f"ReplayGain non scritto: {e}")
     return o
 
 

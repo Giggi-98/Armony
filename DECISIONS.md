@@ -27,6 +27,30 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Notifiche sul canale dal vivo, senza push
+
+**Contesto:** l'utente chiede notifiche su web e Android. Le notifiche push passano da servizi esterni (Firebase per Android, i server push dei browser per Web Push) con chiavi e account: già scartate per l'app (voci del 2026-10-10).
+**Scelta:** `server/notifiche.py`: tabella `notifiche` per utente (migrazione 12), creata dove nasce l'evento (fine di un download o di un gruppo in `jupdate`, Jam visibile aperta, dispositivo in attesa), mandata sul canale `/api/live`; campanella e pagina Notifiche nel client; con la pagina nascosta, avviso di sistema (Notification API del browser, plugin `ArmonyFiles.notify` su Android, canale «Avvisi»). Preferenze per tipo e per dispositivo.
+**Alternative scartate:** Firebase Cloud Messaging (servizio e chiavi esterni, Google Play Services); Web Push con VAPID (meno esterno, ma passa comunque dai server dei browser: resta nel piano, voce 9.7, da proporre); polling continuo dal client (batteria).
+**Conseguenze:** con app o browser chiusi del tutto gli avvisi non arrivano, restano nella campanella. Su Android arrivano mentre l'app è aperta o in riproduzione in sottofondo.
+**Da rivedere se:** si fa il canale nativo leggero (voce 2.9/9.6) o l'utente accetta Web Push.
+
+## 2026-10-11 — Ricerca fuori libreria, popolari e nuove uscite da Deezer; ReplayGain misurato da Armony
+
+**Contesto:** Cerca era un vicolo cieco per ciò che non è in libreria; «Popolari» vuoto senza Last.fm; volume diverso fra i brani scaricati.
+**Scelta:** `/api/catalogo`, `/api/popolari`, `/api/novita` usano la stessa API pubblica di Deezer già usata per metadati e discografie (cache limitata, 9 richieste al secondo), con il riconoscimento della libreria di `importa.Lib`. Anteprime di 30 s dai server di Deezer, nel client. Dopo ogni download `ffmpeg ebur128` misura il volume e `metadati.scrivi_replaygain` scrive i tag (riferimento −18 LUFS); per la libreria già presente uno script da lanciare a mano (`deploy/normalizza.py`), perché modifica i file dell'utente.
+**Alternative scartate:** Spotify Web API (scartata nel 2026-10-09); calcolare il volume nel client (ogni dispositivo rifarebbe il lavoro, e Navidrome non lo saprebbe); normalizzare la libreria in sottofondo da solo all'avvio (modificherebbe migliaia di file senza che l'utente lo chieda).
+**Conseguenze:** le anteprime partono da internet (Deezer) e non dal server; un download aggiunge ~3 s di analisi.
+**Da rivedere se:** Deezer chiude o limita l'API pubblica.
+
+## 2026-10-11 — Riordino a mano delle playlist, anche importate
+
+**Contesto:** le playlist non si riordinavano; quelle importate tornavano all'ordine di Spotify a ogni brano nuovo.
+**Scelta:** `POST /api/playlist/ordina` riscrive la playlist con `scrivi` (prima aggiunge, poi toglie) dopo aver controllato che le voci siano le stesse; nelle importate segna `manual` nello stato, e la riconciliazione da lì aggiunge i brani nuovi in fondo invece di riordinare. Nel client un foglio con maniglie da trascinare (pointer events, niente librerie) e frecce da tastiera.
+**Alternative scartate:** trascinare direttamente nelle righe della pagina (conflitti con il tocco che suona e col tenere premuto per il menu); spostare con `updatePlaylist` voce per voce (Subsonic non ha lo spostamento: una rimozione e un'aggiunta per brano).
+**Conseguenze:** una playlist importata riordinata non torna più all'ordine di Spotify.
+**Da rivedere se:** Navidrome aggiunge lo spostamento delle voci all'API.
+
 ## 2026-10-11 — Telefono riorganizzato come Spotify (ribalta le voci sul lettore a due righe e su «Altro»)
 
 **Contesto:** l'utente chiede di riorganizzare l'app sul telefono «prendendo super spunto da Spotify moderno»: voci, disposizione e interazioni col lettore. Ribalta tre scelte: «Telefono: navigazione in basso, attaccata al lettore» (2026-10-08, che aveva scartato «lettore a una riga con i comandi solo in In riproduzione»), «Telefono: … lettore che si riduce» (2026-10-09) e «Radio sezione a sé, barra in basso scelta dall'utente» (2026-10-10) per la parte «"Altro" sempre ultimo».

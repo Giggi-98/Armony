@@ -604,6 +604,18 @@ dialog.bio .biotxt{color:var(--ink);opacity:.9;line-height:1.65;font-size:1rem;w
 .lcards.list .lcard b{align-self:end}
 .lcards.list .lcard small{align-self:start;-webkit-line-clamp:1}
 .qhead{font-size:1rem;margin:var(--s5) 0 var(--s2)}
+/* Cerca: brani fuori dalla libreria, con l'anteprima sulla copertina */
+.catlist{display:flex;flex-direction:column;gap:2px;margin-bottom:var(--s4)}
+.catrow{display:flex;align-items:center;gap:var(--s3);padding:var(--s1) var(--s2);border-radius:var(--r-s)}
+.catrow .grow{flex:1;min-width:0}
+.catrow b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.catrow small{display:block;color:var(--muted);font-size:var(--fs-small);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.catart{position:relative;width:48px;height:48px;border-radius:var(--r-s);overflow:hidden;background:var(--surface2);flex:none}
+.catart img{width:100%;height:100%;object-fit:cover}
+.catprev{position:absolute;inset:0;display:grid;place-items:center;border:0;background:rgb(0 0 0 / .35);color:#fff;cursor:pointer}
+.catprev svg{width:20px;height:20px}
+.catprev.on{background:rgb(0 0 0 / .55)}
+@media (max-width:520px){.catrow .btn span{display:none}.catrow .btn{padding:0;width:var(--hit);justify-content:center}}
 /* notifiche: campanella (sul computer accanto al tema, in alto a destra; sul telefono nell'intestazione) e pagina */
 #hBell{position:fixed;top:calc(var(--sat) + var(--s4));right:calc(var(--s5) + 48px);z-index:5;width:40px;height:40px;border-radius:50%;background:var(--surface);border:1px solid var(--line);color:var(--ink);box-shadow:var(--shadow-float)}
 body:has(#themeBtn[hidden]) #hBell{right:var(--s5)}
@@ -621,6 +633,17 @@ body:has(#themeBtn[hidden]) #hBell{right:var(--s5)}
 .nhint{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s4)}
 @media (hover:hover) and (pointer:fine){.nrow:hover{background:var(--surface2)}}
 .qhead:first-child{margin-top:0}
+/* riordinare una playlist: elenco nel foglio, maniglie da trascinare */
+dialog.sheet.reord{display:flex;flex-direction:column;max-height:88vh;max-height:88dvh}
+.rolist{overflow-y:auto;overscroll-behavior:contain;padding:0 var(--s2) var(--s2)}
+.rorow{display:flex;align-items:center;gap:var(--s3);padding:var(--s1) var(--s2);border-radius:var(--r-s);background:var(--surface);position:relative}
+.rorow.drag{z-index:2;box-shadow:var(--shadow-float);background:var(--surface2)}
+.rorow .pic{width:44px;height:44px;border-radius:4px;overflow:hidden;background:var(--surface2);flex:none}
+.rorow .pic img{width:100%;height:100%;object-fit:cover}
+.rorow .grow{flex:1;min-width:0}
+.rorow b,.rorow small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rorow small{color:var(--muted);font-size:var(--fs-small)}
+.rohandle{touch-action:none;cursor:grab;color:var(--muted)}
 .lhead{display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
 .lhead h1{margin-bottom:0}
 @media (min-width:861px){body:has(#themeBtn:not([hidden])) .lhead,body:has(#hBell:not([hidden])) .lhead{padding-right:52px}body:has(#themeBtn:not([hidden])):has(#hBell:not([hidden])) .lhead{padding-right:100px}}

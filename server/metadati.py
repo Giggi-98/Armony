@@ -285,6 +285,60 @@ def scrivi_origine(path, d):
     f.save()
 
 
+# ─── PERCHÉ ReplayGain scritto da Armony ───
+# I brani da YouTube e dalle importazioni (gran parte della libreria) arrivano senza ReplayGain: la normalizzazione del
+# client non aveva niente da usare e il volume saltava da un brano all'altro. Dopo ogni download si misura il volume
+# percepito (EBU R128, ffmpeg) e si scrivono i tag che Navidrome legge e passa ai client. Riferimento -18 LUFS (RG 2.0)
+RG_REF = -18.0
+
+
+def loudness(path):
+    """(LUFS integrati, picco reale lineare) del file, o None. Circa un secondo per un brano di quattro minuti."""
+    import subprocess
+    try:
+        r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", path, "-af", "ebur128=peak=true", "-f", "null", "-"],
+                           capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    tail = r.stderr[r.stderr.rfind("Summary:"):] if "Summary:" in r.stderr else ""
+    mi = re.search(r"I:\s*(-?[\d.]+) LUFS", tail)
+    mp = re.search(r"Peak:\s*(-?[\d.]+|-inf) dBFS", tail)
+    if not mi:
+        return None
+    peak = 10 ** (float(mp.group(1)) / 20) if mp and mp.group(1) != "-inf" else 1.0
+    return float(mi.group(1)), peak
+
+
+def scrivi_replaygain(path, force=False):
+    """Scrive REPLAYGAIN_TRACK_GAIN/PEAK nel file (MP4, MP3, Vorbis/Opus/FLAC). False se c'era già o non si misura."""
+    f = mutagen.File(path)
+    if f is None:
+        return False
+    if f.tags is None:
+        f.add_tags()
+    kind = type(f).__name__
+    keys = {"MP4": "----:com.apple.iTunes:REPLAYGAIN_TRACK_GAIN", "MP3": "TXXX:REPLAYGAIN_TRACK_GAIN"}
+    if not force and any(k in f.tags for k in (keys.get(kind, ""), "REPLAYGAIN_TRACK_GAIN", "replaygain_track_gain")):
+        return False
+    lp = loudness(path)
+    if not lp:
+        return False
+    gain, peak = f"{RG_REF - lp[0]:+.2f} dB", f"{lp[1]:.6f}"
+    if kind == "MP4":
+        from mutagen.mp4 import MP4FreeForm
+        f.tags["----:com.apple.iTunes:REPLAYGAIN_TRACK_GAIN"] = [MP4FreeForm(gain.encode())]
+        f.tags["----:com.apple.iTunes:REPLAYGAIN_TRACK_PEAK"] = [MP4FreeForm(peak.encode())]
+    elif kind == "MP3":
+        from mutagen.id3 import TXXX
+        f.tags.add(TXXX(encoding=3, desc="REPLAYGAIN_TRACK_GAIN", text=[gain]))
+        f.tags.add(TXXX(encoding=3, desc="REPLAYGAIN_TRACK_PEAK", text=[peak]))
+    else:
+        f.tags["REPLAYGAIN_TRACK_GAIN"] = [gain]
+        f.tags["REPLAYGAIN_TRACK_PEAK"] = [peak]
+    f.save()
+    return True
+
+
 def leggi_origine(path):
     try:
         f = mutagen.File(path)

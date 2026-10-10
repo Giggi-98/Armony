@@ -102,6 +102,7 @@ function ask(title, value = '', label = '') {
 const I = {
   pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   chev: '<path d="M6 9l6 6 6-6"/>',
+  grip: '<circle cx="9" cy="6" r="1.2" fill="currentColor"/><circle cx="15" cy="6" r="1.2" fill="currentColor"/><circle cx="9" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="12" r="1.2" fill="currentColor"/><circle cx="9" cy="18" r="1.2" fill="currentColor"/><circle cx="15" cy="18" r="1.2" fill="currentColor"/>',
   grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
   speaker: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="14" r="4"/><path d="M12 6h.01"/>',
   phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
@@ -480,7 +481,7 @@ function albumGrid(albums, opts = {}) {
   return head + `<div class="cards${opts.strip ? ' shelf' : ''}">${albums.map(a => `
     <div class="card">
       <div class="art">${imgTag(a.coverArt, 300, opts.sid)}<button class="card-play" data-act="playalbum" data-id="${esc(a.id)}"${opts.sid ? ` data-sid="${esc(opts.sid)}"` : ''} aria-label="Riproduci ${esc(a.name || a.title)}">${ic('play')}</button></div>
-      <button class="card-go" data-act="album" data-id="${esc(a.id)}"><b>${esc(a.name || a.title)}</b></button>
+      <button class="card-go" data-act="album" data-id="${esc(a.id)}"><b>${esc((a.name || a.title) === '[Unknown Album]' ? 'Brani senza album' : a.name || a.title)}</b></button>
       <small>${esc(a.artist || '')}${a.year ? ' · ' + a.year : ''}</small>
     </div>`).join('')}</div>`;
 }
@@ -738,7 +739,8 @@ async function vHome() {
     ${L(recent).length ? secHead('Ascoltati di recente') + albumGrid(L(recent), { strip: true }) : ''}
     ${secHead('Aggiunti di recente', 'newest')}${albumGrid(L(nw), { strip: true })}
     ${L(freq).length ? secHead('I più ascoltati', 'frequent') + albumGrid(L(freq), { strip: true }) : ''}
-    ${secHead('Da riscoprire', 'random')}${albumGrid(L(rnd), { strip: true })}`;
+    ${secHead('Da riscoprire', 'random')}${albumGrid(L(rnd), { strip: true })}<div id="newRel"></div>`;
+  newReleases(n);
   if (Radio.ok()) { window.autoAnimate?.($('#radioRow')); Radio.paintAll(); if (!Live.es) Radio.load(); }
   QSync.check().then(q => {
     if (!q || !$('#resume')) return;
@@ -752,13 +754,38 @@ async function vHome() {
     box.innerHTML = `<a class="hbanner" href="#/amici">${ic('friends')}<span class="grow"><small>Amici in ascolto</small><b>${list.slice(0, 2).map(f => `${esc(f.username)}: ${esc(f.title)}`).join(' · ')}${list.length > 2 ? ` e altri ${list.length - 2}` : ''}</b></span>${ic('chevr')}</a>`;
   });
 }
+// "Nuove uscite" in Home, come il Release Radar: dischi degli ultimi 60 giorni dei tuoi 15 artisti più ascoltati negli
+// ultimi 90 giorni, che non sono ancora in libreria (capacità "novita"); si aprono e si scaricano da Deezer
+async function newReleases(n) {
+  if (!dlSrv()?.me?.caps?.includes('novita')) return;
+  const from = Date.now() - 90 * 864e5, c = new Map();
+  // niente segnaposto ("NA" di alcuni CSV, "Unknown", "Various Artists"): darebbero gli artisti sbagliati su Deezer
+  const junk = a => a.length < 2 || /^(n\/?a|unknown( artist)?|\[unknown.*\]|various artists|artisti vari)$/i.test(a);
+  (await Stats.all()).forEach(x => { if (x.ts >= from && x.artist) { const a = x.artist.split(/\s*[,•&]\s*|\s+feat\.?\s+/i)[0].trim(); if (!junk(a)) c.set(a, (c.get(a) || 0) + 1); } });
+  const top = [...c].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([a]) => a);
+  if (!top.length) return;
+  let r; try { r = await dlApi('/api/novita?artists=' + encodeURIComponent(top.join('|'))); } catch { return; }
+  const box = $('#newRel'); if (!box || stale(n) || !r.items.length) return;
+  box.innerHTML = `<div class="shelf-head"><h2>Nuove uscite</h2></div><div class="cards shelf">${r.items.map(a => discoCard({ type: a.type, year: a.date?.slice(0, 4), x: { id: a.dz, cover: a.cover, title: a.title } }).replace('</small></div>', ` · ${esc(a.artist)}</small></div>`)).join('')}</div>`;
+}
 async function vLibrary(tab) {
   if (!srv()) return noServer();
   tab = tab || 'playlist';
   const n = Scene.nav;
   // tempo reale: artisti, album e generi arrivati con un download compaiono da soli (evento 'libreria')
   const live = f => { const on = () => { Bus.removeEventListener('libreria', on); if (!stale(n)) f(); }; Bus.addEventListener('libreria', on); };
-  const tabs = `<div class="lhead"><h1>Libreria</h1>${can('playlist') ? `<button class="icon-btn" data-act="libplus" aria-label="Crea o importa una playlist">${ic('plus')}</button>` : ''}</div><div class="lpills" role="navigation" aria-label="Sezioni della libreria">${[['playlist', 'Playlist'], ['artisti', 'Artisti'], ['album', 'Album'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>`;
+  const tabs = `<div class="lhead"><h1>Libreria</h1>${can('playlist') ? `<button class="icon-btn" data-act="libplus" aria-label="Crea o importa una playlist">${ic('plus')}</button>` : ''}</div><div class="lpills" role="navigation" aria-label="Sezioni della libreria">${[['playlist', 'Playlist'], ['artisti', 'Artisti'], ['album', 'Album'], ['cronologia', 'Cronologia'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>`;
+  if (tab === 'cronologia') {
+    // gli ultimi ascolti, per giorno (lo storico è quello di tutti i tuoi dispositivi se la sincronizzazione è accesa)
+    const h = (await Stats.all()).sort((a, b) => b.ts - a.ts).slice(0, 400);
+    if (stale(n)) return;
+    const today = new Date().toDateString(), yest = new Date(Date.now() - 864e5).toDateString();
+    const days = new Map();
+    h.forEach(x => { const d = new Date(x.ts), k = d.toDateString(); if (!days.has(k)) days.set(k, { label: k === today ? 'Oggi' : k === yest ? 'Ieri' : d.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' }), list: [] }); days.get(k).list.push({ ...x, duration: x.duration || 0 }); });
+    view.innerHTML = tabs + (h.length ? [...days.values()].map(d => `<h2 class="qhead">${esc(d.label)}</h2>${songList(d.list.filter(t => srv(t.serverId)), { empty: '' })}`).join('')
+      : '<div class="empty"><h3>Ancora nessun ascolto</h3><p>Qui trovi i brani che ascolti, giorno per giorno.</p></div>');
+    return;
+  }
   if (tab === 'playlist') {
     view.innerHTML = tabs + '<div id="plBox"></div>';
     await playlistsInto($('#plBox'), n);
@@ -805,8 +832,13 @@ async function vArtist(id) {
   const a = (await api('getArtist', { id })).artist;
   // la discografia di Deezer arriva insieme al resto; se tarda più di 3 s la pagina esce senza e la aggiunge dopo
   const dzP = discoOk() ? Promise.all([dlApi('/api/discografia?artist=' + encodeURIComponent(a.name)), libNames()]).catch(() => null) : null;
-  let info = null; try { info = (await api('getArtistInfo2', { id, count: 12 })).artistInfo2; } catch {}
-  let top = []; try { top = arr((await api('getTopSongs', { artist: a.name, count: 10 })).topSongs?.song).map(x => norm(x)); } catch {}
+  // informazioni e popolari insieme (prima una dopo l'altra: Navidrome può chiederle a Last.fm, lente)
+  let [info, top] = await Promise.all([api('getArtistInfo2', { id, count: 12 }).then(r => r.artistInfo2).catch(() => null),
+    api('getTopSongs', { artist: a.name, count: 10 }).then(r => arr(r.topSongs?.song).map(x => norm(x))).catch(() => [])]);
+  // senza Last.fm su Navidrome i popolari sono vuoti: si prendono quelli di Deezer che sono in libreria
+  if (!top.length && dlSrv()?.me?.caps?.includes('catalogo')) {
+    try { const ids = (await dlApi('/api/popolari?artist=' + encodeURIComponent(a.name))).ids; top = (await Promise.all(ids.map(sid => api('getSong', { id: sid }).then(r => norm(r.song)).catch(() => null)))).filter(Boolean); } catch {}
+  }
   const early = dzP && await Promise.race([dzP, new Promise(r => setTimeout(r, 3000))]);
   if (stale(n)) return;
   const bio = (info?.biography || '').replace(/<a[^>]*>.*?<\/a>/g, '').replace(/<[^>]+>/g, '').trim();
@@ -1127,8 +1159,8 @@ async function vSearch() {
       const ar = arr(r.artist), al = arr(r.album), so = arr(r.song).map(x => norm(x)), V = cleanTxt(v);
       if (!ar.length && !al.length && !so.length) {
         $('#res').innerHTML = `<div class="empty hres"><h3>Nessun risultato per "${esc(v)}"</h3><p>Controlla come l'hai scritto, oppure cercalo online e scaricalo.</p>
-          <a class="btn primary" href="#/scarica/cerca/${encodeURIComponent(v)}">${ic('down')} Cerca "${esc(v)}" online</a></div><div id="netRes"></div>`;
-        return netSearch(v, n, q);
+          <a class="btn primary" href="#/scarica/cerca/${encodeURIComponent(v)}">${ic('down')} Cerca "${esc(v)}" online</a></div><div id="catRes"></div><div id="netRes"></div>`;
+        catSearch(v, n, q); return netSearch(v, n, q);
       }
       // risultato migliore: l'artista se il nome coincide con la ricerca, altrimenti il primo album, altrimenti il primo brano
       const bestA = ar.find(a => cleanTxt(a.name) === V) || (ar[0] && cleanTxt(ar[0].name).startsWith(V) ? ar[0] : null);
@@ -1144,8 +1176,8 @@ async function vSearch() {
         ${top.length ? `<section class="hbest-songs"><div class="hsec"><h2>Brani</h2>${so.length > 4 ? `<button class="hsec-more" id="allSongs">Mostra tutti (${so.length})</button>` : ''}</div><div id="songsBox">${songList(top)}</div></section>` : ''}
         </div>
         ${ar.length ? `<div class="hsec"><h2>Artisti</h2></div><div class="hgrid shelf">${ar.map(lArtistCard).join('')}</div>` : ''}
-        ${al.length ? `<div class="hsec"><h2>Album</h2></div>${albumGrid(al, { strip: true })}` : ''}<div id="netRes"></div></div>`;
-      netSearch(v, n, q);
+        ${al.length ? `<div class="hsec"><h2>Album</h2></div>${albumGrid(al, { strip: true })}` : ''}<div id="catRes"></div><div id="netRes"></div></div>`;
+      catSearch(v, n, q); netSearch(v, n, q);
       $('#allSongs')?.addEventListener('click', e => { $('#songsBox').innerHTML = listActions() + songList(so); e.target.remove(); $('#res .hbest-wrap').classList.add('open'); });
     } catch (e) { $('#res').innerHTML = `<p class="sub">${esc(e.message)}</p>`; }
   };
@@ -1153,6 +1185,46 @@ async function vSearch() {
   q.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(t); run(); } });
   run();
 }
+/* ---- fuori dalla libreria (capacità "catalogo", /api/catalogo): brani e album di Deezer, anteprima e "Scarica" ---- */
+async function catSearch(v, n, q) {
+  if (!dlSrv()?.me?.caps?.includes('catalogo') || !access().download) return;
+  let r; try { r = await dlApi('/api/catalogo?q=' + encodeURIComponent(v)); } catch { return; }
+  const box = $('#catRes'); if (!box || q.value.trim() !== v || stale(n)) return;
+  const tr = r.tracks.filter(t => !t.inlib).slice(0, 8), al = r.albums.slice(0, 10);
+  if (!tr.length && !al.length) return;
+  box.innerHTML = `${tr.length ? `<div class="hsec"><h2>Non in libreria</h2></div><div class="catlist">${tr.map((t, i) => `<div class="catrow">
+      <span class="catart">${t.cover ? `<img src="${esc(t.cover)}" alt="" loading="lazy" onerror="this.remove()">` : ''}${t.preview ? `<button class="catprev" data-cp="${i}" aria-label="Ascolta 30 secondi di ${esc(t.title)}">${ic('play', true)}</button>` : ''}</span>
+      <span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artists.join(', '))}${t.album ? ' · ' + esc(t.album) : ''}${t.duration ? ' · ' + fmt(t.duration) : ''}</small></span>
+      <button class="btn sm" data-cd="${i}">${ic('down')}<span>Scarica</span></button></div>`).join('')}</div>` : ''}
+    ${al.length ? `<div class="hsec"><h2>Album da scaricare</h2></div><div class="cards shelf">${al.map(a => discoCard({ type: a.type, x: { id: a.dz, cover: a.cover, title: a.title } }).replace('</small></div>', ` · ${esc(a.artist)}</small></div>`)).join('')}</div>` : ''}`;
+  box.querySelectorAll('[data-cp]').forEach(b => b.onclick = () => Preview.toggle(tr[+b.dataset.cp].preview, b));
+  box.querySelectorAll('[data-cd]').forEach(b => b.onclick = async () => {
+    const t = tr[+b.dataset.cd]; b.disabled = true;
+    try {
+      const r = await dlApi('/api/import', { method: 'POST', body: JSON.stringify({ tracks: [{ title: t.title, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover }], folder: store.get('impDir', 'Spotify'), label: t.title }) });
+      if (r.jobs?.[0]) { b.outerHTML = JobBar.html(r.jobs[0]); JobBar.watch(); } else b.outerHTML = '<span class="tag">in coda</span>';
+      toast('In arrivo: lo trovi in libreria appena scaricato.');
+    } catch (e) { b.disabled = false; toast(e.message); }
+  });
+}
+// anteprime di 30 secondi: un elemento audio a parte; la musica in corso si mette in pausa e riparte alla fine
+const Preview = {
+  a: null, btn: null, resume: false,
+  toggle(url, btn) {
+    if (this.btn === btn && this.a && !this.a.paused) return this.stop();
+    this.stop();
+    this.a = new Audio(url); this.btn = btn; this.resume = !Engine.el.paused && !Live.remote();
+    if (this.resume) Engine.el.pause();
+    btn.innerHTML = ic('pause', true); btn.classList.add('on');
+    this.a.onended = () => this.stop(); this.a.play().catch(() => this.stop());
+  },
+  stop() {
+    if (this.a) { this.a.pause(); this.a = null; }
+    if (this.btn) { this.btn.innerHTML = ic('play', true); this.btn.classList.remove('on'); this.btn = null; }
+    if (this.resume) { this.resume = false; Engine.el.play().catch(() => {}); }
+  }
+};
+Bus.addEventListener('route', () => Preview.stop());
 /* ---- rete: le librerie dei server collegati, e degli amici degli amici (server/federazione.py) ---- */
 // con "Questo telefono" in uso la rete passa dal server di backup (dlSrv), come i download
 const netOk = () => !!(dlSrv()?.session && dlSrv().me?.caps?.includes('federazione')) && can('rete');
@@ -1258,6 +1330,51 @@ async function vPlaylists() {
   Bus.addEventListener('playlists', again);
 }
 // le playlist come in "La tua libreria" di Spotify: Preferiti fissato in cima, cerca, ordina (recenti, alfabetico, creatore)
+// riordinare una playlist trascinando (dito o mouse) la maniglia di ogni brano, o con le frecce dalla tastiera;
+// "Fatto" la riscrive sul server (POST /api/playlist/ordina, capacità "plordina")
+async function reorderPl(id) {
+  const p = (await api('getPlaylist', { id })).playlist, l = arr(p.entry).map(x => norm(x));
+  if (l.length < 2) return toast('Non c\'è niente da riordinare.');
+  const d = $('#dlg'); d.className = 'sheet reord';
+  d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">Riordina «${esc(p.name)}»</b><small style="color:var(--muted)">Trascina la maniglia a destra di un brano</small></span><button class="btn sm primary" id="roOk">Fatto</button></div>
+    <div class="rolist" id="roList">${l.map((t, i) => `<div class="rorow" data-i="${i}"><span class="pic">${imgTag(t.coverArt, 84, t.serverId)}</span><span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></span><button class="icon-btn rohandle" aria-label="Sposta ${esc(t.title)} (frecce su e giù)">${ic('grip')}</button></div>`).join('')}</div>`;
+  const list = $('#roList');
+  let row = null, y0 = 0, scroller = null;
+  list.addEventListener('pointerdown', e => {
+    const h = e.target.closest('.rohandle'); if (!h) return;
+    e.preventDefault(); row = h.closest('.rorow'); y0 = e.clientY; row.classList.add('drag'); h.setPointerCapture(e.pointerId);
+  });
+  list.addEventListener('pointermove', e => {
+    if (!row) return;
+    const half = row.offsetHeight / 2;
+    let dy = e.clientY - y0;
+    for (let n = row.nextElementSibling; n && dy > half; n = row.nextElementSibling) { list.insertBefore(n, row); y0 += n.offsetHeight; dy = e.clientY - y0; }
+    for (let n = row.previousElementSibling; n && dy < -half; n = row.previousElementSibling) { list.insertBefore(row, n); y0 -= n.offsetHeight; dy = e.clientY - y0; }
+    row.style.transform = `translateY(${dy}px)`;
+    // vicino ai bordi la lista scorre da sola
+    const r = list.getBoundingClientRect(); clearInterval(scroller);
+    const v = e.clientY < r.top + 50 ? -10 : e.clientY > r.bottom - 50 ? 10 : 0;
+    if (v) scroller = setInterval(() => { const before = list.scrollTop; list.scrollTop += v; y0 -= list.scrollTop - before; }, 16);  // solo quanto ha scorso davvero
+  });
+  const end = () => { if (!row) return; clearInterval(scroller); row.style.transform = ''; row.classList.remove('drag'); row = null; };
+  list.addEventListener('pointerup', end); list.addEventListener('pointercancel', end);
+  list.addEventListener('keydown', e => {
+    const h = e.target.closest('.rohandle'); if (!h || !['ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault(); const r = h.closest('.rorow');
+    if (e.key === 'ArrowUp' && r.previousElementSibling) list.insertBefore(r, r.previousElementSibling);
+    if (e.key === 'ArrowDown' && r.nextElementSibling) list.insertBefore(r.nextElementSibling, r);
+    h.focus();
+  });
+  $('#roOk').onclick = async () => {
+    const ids = [...list.children].map(r => l[+r.dataset.i].id);
+    if (ids.join() === l.map(t => t.id).join()) return d.close();
+    $('#roOk').disabled = true;
+    try { await srvApi(srv(), '/api/playlist/ordina', { method: 'POST', body: JSON.stringify({ pid: id, ids }) }); d.close(); toast('Nuovo ordine salvato.'); route(); }
+    catch (e) { $('#roOk').disabled = false; toast(/409/.test(e.message) ? 'La playlist è cambiata nel frattempo: riapri «Riordina».' : e.message); }
+  };
+  d.onclose = () => { clearInterval(scroller); d.className = ''; d.onclose = null; };
+  d.showModal();
+}
 // "+" della Libreria, come Spotify: crea una playlist o importala
 function libPlus() {
   const d = $('#dlg'); d.className = 'sheet';
@@ -1311,6 +1428,7 @@ async function vPlaylist(id) {
       !srv().local && can('condividi') && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: p.name } },
       { act: 'exportpl', label: 'Esporta (M3U, JSON, CSV)', icon: 'down', data: { id } },
       mine && { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
+      mine && !srv().local && srv().me?.caps?.includes('plordina') && { act: 'reorderpl', label: 'Riordina i brani', icon: 'grip', data: { id } },
       mine && !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
       mine && { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
     `<div id="impSt"></div>${songs.length > 1 ? Ord.bar(ok) : ''}<div id="lList">${songList(Ord.apply(songs, Ord.get(ok)), popts)}</div>`;
@@ -4546,6 +4664,7 @@ view.addEventListener('click', async e => {
       case 'newpl': { const name = await ask('Nuova playlist', '', 'Nome'); if (name) { await api('createPlaylist', { name }); route(); } break; }
       case 'importpl': importPlaylist(); break;
       case 'libplus': libPlus(); break;
+      case 'reorderpl': reorderPl(id); break;
       case 'exportpl': { const p = (await api('getPlaylist', { id })).playlist; exportTracks(p.name, arr(p.entry).map(x => norm(x))); break; }
       case 'editpl': {
         const m = JSON.parse(view.dataset.plMeta || '{}'); const d = $('#dlg2');

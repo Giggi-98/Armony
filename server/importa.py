@@ -183,11 +183,16 @@ def stato_di(imp, L=None, write=True):
             new = [x for x in want if x not in set(cur)]
             # si riscrive al primo giro dopo l'importazione (ordine del file), se c'è qualcosa da aggiungere o se ci sono
             # doppioni; altrimenti un riordino fatto a mano resta finché non arriva un brano nuovo
-            if new or not old.get("put") or len(cur) != len(set(cur)) or all_entries(imp["pid"]) != len(cur):
+            if old.get("manual"):
+                # riordinata a mano (POST /api/playlist/ordina): l'ordine è dell'utente, i brani nuovi vanno in fondo
+                for i in range(0, len(new), 200):
+                    A.federazione.nd_get("updatePlaylist", playlistId=imp["pid"], songIdToAdd=new[i:i + 200])
+            elif new or not old.get("put") or len(cur) != len(set(cur)) or all_entries(imp["pid"]) != len(cur):
                 extra = [x for x in dict.fromkeys(cur) if x not in set(want)]
                 scrivi(imp["pid"], want + extra, cur)
             put = (put - gone) | set(want)
-    st = {"total": len(items), "inlib": inlib, "dl": dl, "err": len(err), "miss": len(miss), "failed": err[:50], "at": time.time(), "put": sorted(put)}
+    st = {"total": len(items), "inlib": inlib, "dl": dl, "err": len(err), "miss": len(miss), "failed": err[:50], "at": time.time(), "put": sorted(put),
+          "manual": bool(old.get("manual"))}
     db.run("UPDATE imports SET state = ? WHERE pid = ?", json.dumps(st), imp["pid"])
     return st, miss, want
 
@@ -262,6 +267,39 @@ def togli():
     if own:
         A.live_put(own, {"type": "libreria", "playlists": [{"id": pid, "added": 0}]})
     return jsonify(ok=True, index=i)
+
+
+@bp.post("/api/playlist/ordina")
+def ordina():
+    """Nuovo ordine di una playlist (riordino a mano): ids = tutte le voci, nell'ordine voluto. Si riscrive con la strada
+    sicura (scrivi: prima si aggiunge, poi si toglie). Una playlist importata da quel momento tiene l'ordine dell'utente."""
+    d = request.get_json(silent=True) or {}
+    pid, ids = str(d.get("pid") or ""), [str(x) for x in (d.get("ids") or [])][:10000]
+    if not A.ID_RE.match(pid) or not all(A.ID_RE.match(x) for x in ids):
+        return jsonify(error="Richiesta non valida"), 400
+    own, u = owner_of(pid), g.who.get("user") or ""
+    if own is None:
+        return jsonify(error="Playlist non trovata"), 404
+    if not g.who["admin"] and (own.lower() != u.lower() or not g.who["perm"].get("playlist", True)):
+        return jsonify(error="Non puoi modificare questa playlist."), 403
+    if not A.nd_admin():
+        return jsonify(error="Serve l'amministratore di Navidrome", code="nd"), 409
+    with plock(pid):
+        c = nd()
+        try:
+            now = [r[0] for r in c.execute("SELECT media_file_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY id", (pid,))]
+        finally:
+            c.close()
+        if sorted(now) != sorted(ids):
+            return jsonify(error="La playlist è cambiata nel frattempo: ricarica e riprova.", code="cambiata"), 409
+        scrivi(pid, ids, now)
+        r = db.one("SELECT state FROM imports WHERE pid = ?", pid)
+        if r:
+            st = json.loads(r["state"] or "{}")
+            st["manual"] = True
+            db.run("UPDATE imports SET state = ? WHERE pid = ?", json.dumps(st), pid)
+    A.live_put(own, {"type": "libreria", "playlists": [{"id": pid, "added": 0}]})
+    return jsonify(ok=True)
 
 
 @bp.post("/api/import/playlist")

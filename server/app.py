@@ -43,6 +43,9 @@ Armony - server di supporto.
   /api/youtube          stato di YouTube per i download (solo amministratori): cookie di un account secondario
                         (PUT/DELETE /api/youtube/cookies, in data/armony/youtube-cookies.txt), servizio PO Token,
                         pausa dopo un blocco; POST /api/youtube/prova scarica un video di 19 secondi come prova
+  /api/novita           uscite degli ultimi 60 giorni degli artisti più ascoltati, non ancora in libreria (Deezer)
+  /api/popolari         i brani più ascoltati di un artista (Deezer) che sono in libreria, se Navidrome non ha Last.fm
+  /api/catalogo         ricerca fuori dalla libreria (Deezer): brani con anteprima e "già in libreria", album (permesso "download")
   /api/discografia      tutta la discografia di un artista e un suo album, da Deezer (permesso "download")
   /api/import           brani da Spotify (Exportify): metadati completati, ricerca per durata, tag e cartelle per album.
                         Con "pids" per brano (capacità "plserver") il server li aggiunge da sé alle playlist quando entrano
@@ -59,6 +62,7 @@ Armony - server di supporto.
                         Fra i server, /fed/v1/canale: canale inverso per chi è dietro NAT (federazione.py)
   /api/notifiche        notifiche dell'utente (notifiche.py): elenco, non lette, segnate come lette; arrivano anche sul
                         canale /api/live ({"type": "notifica"}). Capacità "notifiche"
+  /api/playlist/ordina  nuovo ordine di una playlist, riscritta in modo sicuro (importa.py, capacità "plordina")
   /api/playlist/togli   toglie un brano da una playlist per id, non per posizione (importa.py, capacità "pltogli")
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
                         Navidrome, playlist completata e riordinata a ogni brano nuovo; capacità "importsrv"
@@ -140,10 +144,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/notifiche", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -1606,6 +1610,76 @@ def album_scaletta():
     if not s or not s["tracks"]:
         return jsonify(error="Scaletta dell'album non trovata"), 404
     return jsonify(s)
+
+
+@app.get("/api/catalogo")
+def catalogo():
+    """Cerca fuori dalla libreria (capacità "catalogo"): brani e album di Deezer per la pagina Cerca, ciascuno con
+    l'id del brano se è già in libreria (inlib). Corregge anche gli errori di battitura che search3 di Navidrome non
+    perdona. preview = 30 secondi di anteprima, dai server di Deezer."""
+    q = (request.args.get("q") or "").strip()[:120]
+    if len(q) < 2:
+        return jsonify(tracks=[], albums=[])
+    enc = urllib.parse.quote(q)
+    tr = (metadati.deezer(f"search/track?q={enc}&limit=15") or {}).get("data") or []
+    al = (metadati.deezer(f"search/album?q={enc}&limit=10") or {}).get("data") or []
+    L = importa.lib()
+    tracks = []
+    for t in tr:
+        x = {"title": t.get("title") or "", "artists": [(t.get("artist") or {}).get("name") or ""], "album": (t.get("album") or {}).get("title") or "",
+             "duration": t.get("duration") or 0}
+        tracks.append({**x, "dz": t.get("id"), "cover": (t.get("album") or {}).get("cover_medium") or "", "albumDz": (t.get("album") or {}).get("id"),
+                       "preview": t.get("preview") or "", "inlib": L.match(x)})
+    albums = [{"dz": a.get("id"), "title": a.get("title") or "", "artist": (a.get("artist") or {}).get("name") or "", "cover": a.get("cover_medium") or "",
+               "tracks": a.get("nb_tracks") or 0, "type": a.get("record_type") or ""} for a in al]
+    return jsonify(tracks=tracks, albums=albums)
+
+
+@app.get("/api/novita")
+def novita():
+    """Uscite degli ultimi 60 giorni degli artisti indicati (?artists=a|b|c, i più ascoltati dal client), da Deezer, che
+    non sono già in libreria: lo scaffale «Nuove uscite» della Home (come il Release Radar). Capacità "novita"."""
+    names = [n.strip() for n in (request.args.get("artists") or "").split("|") if len(n.strip()) > 1 and n.strip().upper() not in ("NA", "N/A")][:15]
+    since = time.strftime("%Y-%m-%d", time.localtime(time.time() - 60 * 86400))
+    c = importa.nd()
+    try:
+        have = {metadati.norm(r[0]) for r in c.execute("SELECT name FROM album")}
+    finally:
+        c.close()
+    out, seen = [], set()
+    for nome in names:
+        hit = (metadati.deezer(f"search/artist?q={urllib.parse.quote(nome)}&limit=3") or {}).get("data") or []
+        art = next((x for x in hit if metadati.norm(x.get("name")) == metadati.norm(nome)), None)
+        if not art:
+            continue
+        for a in (metadati.deezer(f"artist/{art['id']}/albums?limit=100") or {}).get("data") or []:
+            rd = a.get("release_date") or ""
+            if rd >= since and a.get("id") not in seen and metadati.norm(a.get("title")) not in have:
+                seen.add(a["id"])
+                out.append({"dz": a["id"], "title": a.get("title") or "", "artist": art.get("name") or nome, "cover": a.get("cover_medium") or "",
+                            "date": rd, "type": a.get("record_type") or "album"})
+    out.sort(key=lambda x: x["date"], reverse=True)
+    return jsonify(items=out[:24])
+
+
+@app.get("/api/popolari")
+def popolari():
+    """I brani più ascoltati di un artista secondo Deezer che sono in libreria (id di Navidrome, in ordine): la sezione
+    «Popolari» quando Navidrome non ha Last.fm e getTopSongs è vuoto. Capacità "catalogo"."""
+    nome = (request.args.get("artist") or "").strip()[:200]
+    if not nome:
+        return jsonify(ids=[])
+    hit = ((metadati.deezer(f"search/artist?q={urllib.parse.quote(nome)}&limit=3") or {}).get("data") or [])
+    art = next((x for x in hit if metadati.norm(x.get("name")) == metadati.norm(nome)), None)
+    if not art:
+        return jsonify(ids=[])
+    top = (metadati.deezer(f"artist/{art['id']}/top?limit=25") or {}).get("data") or []
+    L, ids = importa.lib(), []
+    for t in top:
+        sid = L.match({"title": t.get("title"), "artists": [nome], "duration": t.get("duration")})
+        if sid and sid not in ids:
+            ids.append(sid)
+    return jsonify(ids=ids[:10])
 
 
 @app.get("/api/discografia")
