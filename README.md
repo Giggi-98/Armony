@@ -16,6 +16,8 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - Web app (si installa come app sul telefono e sul PC) e app Android, con lo stesso aspetto: Home, Cerca, Libreria, playlist, artisti con la discografia completa.
 - Qualità fino all'originale (FLAC), dissolvenza fra i brani, normalizzazione del volume, equalizzatore a 10 bande con modalità **automatica** che si regola su ogni brano, protezione dai gracchi, volume notte, timer.
 - Testi sincronizzati in stile karaoke, visualizzatore, radio da un brano o da un artista, mix pronti.
+- **Cache dei brani** come Spotify: i prossimi della coda arrivano prima che servano e partono subito, anche senza rete. L'app si apre all'istante anche in 5G.
+- Sul computer, **tasto destro** su brani, album, artisti e playlist per tutte le azioni.
 
 **Più dispositivi, una sola musica**
 - Avvii sul telefono e il PC diventa il telecomando, o viceversa; "Dove suona" sposta la musica da un dispositivo all'altro dallo stesso punto. Se un'app si chiude male, si riaggancia da sola.
@@ -29,12 +31,16 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 
 **La libreria**
 - Download da YouTube, SoundCloud e centinaia di siti (yt-dlp), con copertina e metadati; caricamento di file dal dispositivo.
-- **Importazione da Spotify** (CSV di Exportify): riconosce i brani che hai, scarica i mancanti e li mette nelle playlist.
+- **Importazione da Spotify** (CSV di Exportify): la fa il server in pochi secondi anche con migliaia di brani, scarica i mancanti e tiene le playlist complete e nell'ordine di Spotify mentre arrivano, anche ad app chiusa. «Brani che ti piacciono» diventano anche i tuoi Preferiti.
 - Album completi: le tracce che mancano compaiono al loro posto e si scaricano con un tocco.
-- Modifica di titoli, artisti e copertine; eliminazione dei brani; statistiche d'ascolto.
+- Modifica di titoli, artisti e copertine; eliminazione dei brani; statistiche d'ascolto, tue e di tutto il server (quante volte è stato ascoltato ogni brano e da chi).
+
+**Per chi gestisce il server**
+- **Stato del server**: processore, memoria, rete, chi sta ascoltando cosa, dispositivi collegati, coda dei download, con l'andamento dell'ultima ora e del giorno.
+- **Registro eventi**: errori e situazioni incerte del server e dei telefoni in un posto solo, da copiare e mandare a chi ripara.
 
 **Server collegati**
-- Colleghi il tuo server a quello di un amico (con un codice di sicurezza da confrontare): in Cerca compare "Nella rete" con i loro brani, anche degli amici dei vostri amici. Li ascolti subito o li copi nella tua libreria. La pagina **Rete** mostra la mappa.
+- Colleghi il tuo server a quello di un amico (con un codice di sicurezza da confrontare): in Cerca compare "Nella rete" con i loro brani, anche degli amici dei vostri amici. Li ascolti subito o li copi nella tua libreria. La pagina **Rete** mostra la mappa. Per ogni collegamento scegli il verso: vi vedete a vicenda, solo tu offri o solo tu ricevi.
 
 **App Android**
 - Musica a schermo spento, comandi nella notifica, aggiornamenti dall'app stessa.

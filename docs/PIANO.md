@@ -54,6 +54,16 @@ realtà e avvio rapido anche in 5G.
 - `LEGGIMI.md`, `README.md`, `DECISIONS.md`, docstring di `app.py`, `CAPS`.
 - Note di rilascio scritte a mano (`docs/rilasci/vX.Y.Z.md`, lette dalla Action dell'APK).
 
+## Richieste aggiunte durante la notte
+- Menu col tasto destro su ogni voce, sul computer. **Fatto.**
+- Ascolti: contati dal server (totale e per utente), più la popolarità esterna dove si può avere. **Fatto** (indice di
+  Deezer; gli stream di Spotify non sono pubblici).
+- Note di rilascio curate per ogni versione e README allineato. **Fatto** (`docs/rilasci/`, letto dalla Action).
+- Federazione: topologia a maglia o a stella secondo la rete del server. Analisi fatta; fatte le correzioni rapide e il
+  verso dei collegamenti. **Da decidere:** il canale inverso che permette a un server dietro NAT/CGNAT di partecipare
+  appoggiandosi a uno pubblico (stella). Ribalta la scelta «relay propri scartati» (DECISIONS, 2026-10-08) e costa un
+  thread per foglia sull'hub: proposta pronta, serve il sì dell'utente.
+
 ## Dopo (proposte, non in questa notte)
 - Preferiti da «Liked Songs» di Spotify (stella su Navidrome invece di una playlist).
 - Mix giornalieri calcolati dallo storico (tipo *Daily Mix*), testi tradotti, crossfade intelligente.

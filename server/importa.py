@@ -159,7 +159,7 @@ def stato_di(imp, L=None, write=True):
                 scrivi(imp["pid"], goal, len(cur))
     st = {"total": len(items), "inlib": inlib, "dl": dl, "err": len(err), "miss": len(miss), "failed": err[:50], "at": time.time()}
     db.run("UPDATE imports SET state = ? WHERE pid = ?", json.dumps(st), imp["pid"])
-    return st, miss
+    return st, miss, want
 
 
 def scrivi(pid, ids, before):
@@ -211,14 +211,14 @@ def importa():
            "ON CONFLICT(pid) DO UPDATE SET items = excluded.items, name = excluded.name, updated = excluded.updated",
            pid, u, name, json.dumps(items), now, now)
     imp = db.one("SELECT * FROM imports WHERE pid = ?", pid)
-    st, miss = stato_di(imp)
+    st, miss, ids = stato_di(imp)
     queued = 0
     if miss and d.get("download") and g.who["download"]:
         fmt = d.get("format") if d.get("format") in A.AUDIO_FORMATS else "m4a"
         r = A.accoda(miss, fmt, d.get("folder") or "Spotify", "Spotify: " + name, u)
         queued = r["added"]
-        st, _ = stato_di(imp, write=False)
-    return jsonify(pid=pid, queued=queued, **{k: v for k, v in st.items() if k != "failed"},
+        st, _, _ = stato_di(imp, write=False)
+    return jsonify(pid=pid, queued=queued, **{k: v for k, v in st.items() if k != "failed"}, **({"ids": ids} if d.get("ids") else {}),
                    missing=[f"{', '.join(t.get('artists') or [])} - {t['title']}" for t in miss[:40]] if not queued else [])
 
 

@@ -50,6 +50,12 @@ Armony - server di supporto.
   /fed/hello, /fed/v1/*  federazione fra server (federazione.py): richieste firmate Ed25519 dai nodi collegati
   /api/fed/*            collegamenti fra server, solo amministratori (federazione.py)
   /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download"
+  /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
+                        Navidrome, playlist completata e riordinata a ogni brano nuovo; capacità "importsrv"
+  /api/ascolti/*        ascolti contati dal server, per brano, per utente, gli ultimi (ascolti.py); capacità "ascolti"
+  /api/log, /api/stato  registro eventi (POST da ogni client, lettura dell'amministratore) e risorse del server
+                        (diagnosi.py); capacità "diagnosi". Le eccezioni non gestite delle rotte finiscono nel registro
+  /api/fed/nodes/<id>/verso   verso di un collegamento fra server: entrambi, offro, ricevo (federazione.py)
   /api/radio/*          Jam Radio (radio.py): stazioni che girano sul server, a orario; ci si sintonizza.
                         /api/rete/radio/* quelle dei server collegati, /fed/v1/radio* e /fed/v1/ora fra i nodi;
                         ascoltatori e stazioni in tempo reale sul canale /api/live ({"type": "radio"})
@@ -139,7 +145,8 @@ def cors(resp):
 
 
 # gzip per JSON e file del client: in 5G l'app (570 kB di HTML e JS) e gli elenchi lunghi pesano un quarto.
-# Mai su audio, video, copertine e canali in streaming. I file statici compressi restano in memoria finché non cambiano
+# Anche il JSON di Navidrome dal proxy (/rest: una playlist da 900 brani sono 600 kB). Mai su audio, video, copertine e
+# canali in streaming (non sono fra i tipi). I file statici compressi restano in memoria finché non cambiano
 GZ_TYPES = ("application/json", "text/javascript", "application/javascript", "text/css", "text/html", "text/plain", "image/svg+xml", "application/manifest+json")
 gz_cache = {}
 
@@ -147,7 +154,8 @@ gz_cache = {}
 @app.after_request
 def comprimi(resp):
     if (resp.status_code != 200 or resp.is_streamed and not resp.direct_passthrough or "gzip" not in request.headers.get("Accept-Encoding", "")
-            or resp.headers.get("Content-Encoding") or resp.mimetype not in GZ_TYPES or request.path.startswith(("/rest/", "/share/"))):
+            or resp.headers.get("Content-Encoding") or resp.mimetype not in GZ_TYPES or request.path.startswith("/share/")
+            or int(resp.headers.get("Content-Length") or 0) > 8_000_000):
         return resp
     tag = resp.headers.get("ETag")
     if resp.direct_passthrough:  # file del client (send_from_directory)

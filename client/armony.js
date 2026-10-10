@@ -2592,14 +2592,18 @@ async function importOnServer(lists) {
   const d = $('#dlg'); d.className = '';
   d.innerHTML = `<h3>Importo ${lists.length > 1 ? `${lists.length} playlist` : `"${esc(lists[0].title)}"`}</h3><p class="sub" id="impMsg">Riconosco i brani sul server…</p><div class="bar"><i id="impBar" style="width:4%"></i></div>`; d.showModal();
   const me = srv().user, mine = arr((await api('getPlaylists').catch(() => null))?.playlists?.playlist).filter(p => !p.owner || p.owner === me);
-  const send = (x, download) => dlApi('/api/import/playlist', { method: 'POST', body: JSON.stringify({ pid: x.pid, name: x.title, items: x.items, download, folder: store.get('impDir', 'Spotify'), format: 'm4a' }) });
+  const send = (x, download) => dlApi('/api/import/playlist', { method: 'POST', body: JSON.stringify({ pid: x.pid, name: x.title, items: x.items, download, ids: !!x.ids, folder: store.get('impDir', 'Spotify'), format: 'm4a' }) });
   const done = [];
   for (const [i, l] of lists.entries()) {
     $('#impMsg').textContent = `${l.title} · ${i + 1} di ${lists.length}`;
     try {
       const pid = mine.find(p => p.name === l.title)?.id || await createPlaylist(l.title, []);
       const items = l.items.map(it => ({ ...it, artists: it.artists?.length ? it.artists : [it.artist].filter(Boolean) }));
-      done.push({ title: l.title, pid, items, r: await send({ pid, title: l.title, items }, false) });
+      const liked = /^(liked[ _]?songs|brani che ti piacciono|saved[ _]?tracks)$/i.test(l.title.trim());
+      const r = await send({ pid, title: l.title, items, ids: liked }, false);
+      // "Brani che ti piacciono" di Spotify: oltre alla playlist, i brani riconosciuti prendono il cuore (Preferiti)
+      if (liked && r.ids?.length) { for (let k = 0; k < r.ids.length; k += 100) await api('star', { id: r.ids.slice(k, k + 100) }).catch(() => {}); r.starred = r.ids.length; }
+      done.push({ title: l.title, pid, items, r });
     } catch (e) { done.push({ title: l.title, err: e.message }); }
     $('#impBar').style.width = ((i + 1) / lists.length * 100) + '%';
   }
@@ -2608,7 +2612,7 @@ async function importOnServer(lists) {
   const miss = ok.reduce((n, x) => n + x.r.miss, 0), canDl = !!S.dl.url && access().download;
   d.innerHTML = `<h3>Importazione conclusa</h3>
     <p>${have.toLocaleString('it-IT')} brani su ${tot.toLocaleString('it-IT')} erano già in libreria${ok.length > 1 ? `, in ${ok.length} playlist` : ''}: sono già al loro posto.</p>
-    ${done.length > 1 || done.some(x => x.err) ? `<div class="code" style="font-family:inherit;font-size:.88rem;max-height:180px">${done.map(x => x.err ? `${esc(x.title)}: <span style="color:var(--danger)">${esc(x.err)}</span>` : `${esc(x.title)}: ${x.r.inlib} di ${x.r.total}`).join('<br>')}</div>` : ''}
+    ${done.length > 1 || done.some(x => x.err) ? `<div class="code" style="font-family:inherit;font-size:.88rem;max-height:180px">${done.map(x => x.err ? `${esc(x.title)}: <span style="color:var(--danger)">${esc(x.err)}</span>` : `${esc(x.title)}: ${x.r.inlib} di ${x.r.total}${x.r.starred ? ` · ${x.r.starred} nei Preferiti` : ''}`).join('<br>')}</div>` : ''}
     ${miss ? `<p class="sub" style="margin:12px 0 6px">${miss} brani mancano sul server${ok.length === 1 && ok[0].r.missing?.length ? ':' : '.'}</p>
       ${ok.length === 1 && ok[0].r.missing?.length ? `<div class="code" style="font-family:inherit;font-size:.88rem;max-height:160px">${ok[0].r.missing.map(esc).join('<br>')}${miss > ok[0].r.missing.length ? '<br>…' : ''}</div>` : ''}
       <p class="small" style="color:var(--muted)">${canDl ? 'Armony li cerca online con la durata giusta e li scarica con copertina, album e numero di traccia. Entrano nella playlist al loro posto appena arrivano, anche se chiudi l\'app.' : 'Per scaricarli serve il permesso di download.'}</p>` : ''}

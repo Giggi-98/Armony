@@ -27,6 +27,46 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Importazioni ricordate dal server e riconciliate a ogni giro; riconoscimento sul DB di Navidrome
+
+**Contesto:** dopo l'importazione le playlist restavano quasi vuote (GgHerz 10 brani su 940, GGroove 8 su 494) con 700 brani già in libreria: i lavori nati prima di `plserver`, o importati da un altro dispositivo, non sapevano in che playlist andare, e il telefono che li ricordava doveva restare aperto. Il riconoscimento dal telefono faceva 900 `search3` in sequenza in 5G.
+**Scelta:** `server/importa.py`. Il client legge il file e crea la playlist (così è dell'utente), il server riconosce i brani leggendo il DB di Navidrome (ISRC, poi titolo normalizzato Unicode con e senza parentesi + artista; la durata sceglie fra più candidati, non esclude), ricorda l'elenco in `imports` (migrazione 8) e a ogni giro riscrive la playlist nell'ordine del file se è cambiata, con i brani aggiunti a mano in fondo. Lo stato (in libreria, in download, non trovati) si mostra nella pagina della playlist. Ribalta l'alternativa scartata «abbinamento per titolo/artista/durata (può sbagliare, richiede il client)» della voce *Playlist dei brani importati completate dal server* (2026-10-10): ora lo fa il server, e il percorso del file resta la prima prova per i brani scaricati da lì.
+**Alternative scartate:** continuare con `pids` sui lavori (non copre i brani già in libreria né le importazioni vecchie); far creare la playlist all'amministratore di Navidrome (sarebbe sua, non dell'utente); solo aggiungere in fondo senza riordinare (l'ordine di Spotify si perde); togliere i brani che non sono nel file (si perderebbero quelli aggiunti a mano).
+**Conseguenze:** una playlist importata non può tenere doppioni voluti; un brano con titolo diverso in libreria (traduzione, altro nome) resta «da scaricare»; la riscrittura usa `createPlaylist` con `playlistId` come amministratore. Le funzioni del client per i server senza `importsrv` (`matchTrack`, `pending`) restano per i server vecchi.
+**Da rivedere se:** Navidrome offre playlist «intelligenti» aggiornabili dall'esterno, o le librerie superano le decine di migliaia di brani (allora un indice persistente invece di uno rifatto a ogni scansione).
+
+## 2026-10-10 — Registro eventi e stato del server dentro Armony
+
+**Contesto:** per riparare un guasto bisognava leggere i log del container (illeggibili per l'avanzamento di yt-dlp) e gli errori dei telefoni non si vedevano. Nessuna misura del carico, con 96 thread di waitress tenuti da dispositivi e flussi.
+**Scelta:** `server/diagnosi.py`: tabella `log` (migrazione 8) con i ripetuti sommati in una riga, alimentata dalle eccezioni non gestite (rotte, thread, `logging` di waitress), dalle ambiguità che il codice risolve da solo e dagli errori dei client (`client/diagnosi.js`: `onerror`, promesse, `console.error`, audio, rete), mandati a lotti. Stato: campioni da `/proc` ogni 5 s (ultima ora) e al minuto (24 ore) in memoria, richieste e flussi audio contati con `before_request`/`teardown_request`. Due schede per l'amministratore; «Spazio del server» confluisce in «Stato del server».
+**Alternative scartate:** Prometheus/Grafana o Netdata (un servizio in più da installare per un server fra amici); leggere i log di Docker dall'app (servirebbe il socket di Docker nel container); salvare i campioni su disco (bastano le ultime 24 ore).
+**Conseguenze:** CPU e memoria sono quelle di tutta la macchina (con la rete host è giusto così), la CPU di Navidrome non si separa; lo storico dello stato si perde al riavvio.
+**Da rivedere se:** servono avvisi fuori dall'app (notifiche, email) o storico di settimane.
+
+## 2026-10-10 — Cache dei brani sul dispositivo, service worker «prima la cache», gzip
+
+**Contesto:** in 5G l'app impiegava secondi ad aprirsi (shell da 570 kB «prima la rete», nessuna compressione) e ogni brano ripartiva dalla rete anche se appena ascoltato.
+**Scelta:** i prossimi brani della coda (2 col Wi-Fi, 1 in rete mobile) si scaricano interi in IndexedDB (`acache`, `ACache`) 6 s dopo il cambio di brano; un brano in cache si suona da un blob. Limite per dispositivo (`cacheMB`, 1 GB), via i meno recenti. Service worker: risposta dalla cache e controllo in sottofondo con ETag, sostituzione di tutti i file insieme. Il server comprime con gzip JSON (anche quello di Navidrome dal proxy) e file del client; il brano ripreso all'avvio carica solo i metadati.
+**Alternative scartate:** Cache Storage per l'audio (solo con HTTPS: in casa molti aprono Armony in http); salvare anche il brano in corso (doppio traffico: l'elemento audio non espone i byte); MediaSource per suonare mentre si scarica in cache (complessità e formati); service worker che aggiorna file per file (si mescolerebbero versioni diverse).
+**Conseguenze:** in rete mobile si scarica un brano in anticipo che si può saltare; la versione nuova del client si vede alla seconda apertura.
+**Da rivedere se:** la riproduzione diventa nativa nell'app Android (allora la cache va lì).
+
+## 2026-10-10 — Federazione: verso dei collegamenti, epoca del catalogo, aggiornamenti in parallelo
+
+**Contesto:** analisi della federazione: un nodo che perde il DB non veniva riscaricato da capo, un errore a metà dell'aggiornamento lasciava una transazione aperta, nodi spenti fermavano il giro per un minuto ciascuno, strutture in memoria senza limite, indirizzi interni accettati da `/pair`, nessun modo di condividere in un verso solo.
+**Scelta:** epoca casuale del catalogo (reset se cambia); `_store` con rollback; aggiornamenti in parallelo con attesa crescente fino a 6 ore; pulizia di `rate`, `pair_failed`, inviti scaduti; rifiuto di loopback e link-local; `caps` in `/fed/hello` per crescere senza alzare `PROTO`; colonna `fed_nodes.dir` (migrazione 8): `entrambi`, `offro` (non chiedo niente a lui), `ricevo` (lui non vede la mia libreria, 403 `verso`).
+**Alternative scartate:** alzare `PROTO` (chiude tutti i collegamenti esistenti); il verso deciso solo da chi invita (il verso è una scelta di ciascuno sulla propria libreria).
+**Conseguenze:** un server dietro NAT continua a non essere raggiungibile dagli altri: con «ricevo» il collegamento è almeno coerente. Il canale inverso verso un server pubblico (topologia a stella) resta da fare: tocca la scelta «relay propri scartati» di *Federazione: forma generale* (2026-10-08) e va deciso con l'utente.
+**Da rivedere se:** più server dietro CGNAT vogliono condividere (allora il canale inverso).
+
+## 2026-10-10 — Ascolti contati dal DB di Navidrome; menu col tasto destro
+
+**Contesto:** l'utente vuole il numero di ascolti dei brani (sul server, per utente, e quelli pubblici se esistono) e, sul computer, un menu col tasto destro su ogni voce.
+**Scelta:** `server/ascolti.py` legge `annotation` (totali per utente) e `scrobbles` (ogni ascolto con l'istante) di Navidrome, filtrando per nome chi ha spento la condivisione; dall'esterno solo l'indice `rank` di Deezer, dichiarato come indice. Menu contestuale proprio vicino al puntatore, solo con `pointer:fine`, con le azioni del tasto ⋯; Maiusc lascia quello del browser.
+**Alternative scartate:** lo storico di Armony (solo i client Armony con la sincronizzazione accesa); stream di Spotify o Last.fm (non pubblici, o con chiave API da registrare); riusare il foglio del telefono come menu (sul computer copre la pagina lontano dal puntatore).
+**Conseguenze:** i conteggi seguono gli scrobble: un ascolto conta dopo metà brano o 4 minuti.
+**Da rivedere se:** Navidrome cambia lo schema di `scrobbles`, o Deezer smette di dare `rank`.
+
 ## 2026-10-10 — Impostazioni del server solo con chiave o da casa; impostazioni in schede
 
 **Contesto:** l'utente non vuole che chi entra possa cambiare le impostazioni del server, e vuole le impostazioni divise fra dispositivo e server, in schede.

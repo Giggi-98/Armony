@@ -263,6 +263,10 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.19.0 (2026-10-10)**: importazioni ricordate dal server e playlist riconciliate; cache dei brani e service
+worker «prima la cache», gzip; stato del server e registro eventi; ascolti contati dal server; menu col tasto destro;
+federazione con verso dei collegamenti, epoca del catalogo e aggiornamenti in parallelo. Piano e analisi in `docs/PIANO.md`.
+
 **0.18.1–0.18.2 (2026-10-10)**: ripristino del dispositivo; QR con la fotocamera; nomi dei
 dispositivi distinti; impostazioni in schede (Questo dispositivo / Server); impostazioni del server
 solo con chiave o da casa.
