@@ -266,6 +266,9 @@ const coverUrl = (coverArt, size = 300, sid) => {
   if (String(coverArt).startsWith('rete|')) { const [, r, id] = coverArt.split('|'); return reteUrl(s, 'cover', { r, id, size }); }
   return apiUrl(s, 'getCoverArt', { id: coverArt, size, ...(coverBust ? { v: coverBust } : {}) });
 };
+// lo stesso brano anche se l'oggetto è un altro: da telecomando currentTrack() ne crea uno nuovo a ogni stato ricevuto,
+// e il confronto per identità faceva credere che il brano fosse cambiato (testi e dettagli non arrivavano mai)
+const sameTrack = (a, b) => !!a && !!b && key(a) === key(b);
 const streamUrl = (t, q = activeQuality()) => srv(t.serverId)?.local ? Local.stream(t.id)
   : t.fed ? reteUrl(srv(t.serverId), 'stream', { r: t.fed.r, id: t.fed.id, ...QUALITIES[q].params })
   : apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params, ...(Sost.bust[key(t)] ? { b: Sost.bust[key(t)] } : {}) });
@@ -1410,8 +1413,9 @@ const Offline = {
     for (const t of todo) {
       if (!quiet) toast(`Salvo per l'offline ${done + 1} di ${todo.length}…`, 60000);
       try {
-        const r = await fetch(streamUrl(t, P.offlineQ)); if (!r.ok) throw 0;
-        const blob = await r.blob();
+        // Subsonic risponde agli errori con 200 e un JSON: non deve finire salvato come brano (resterebbe muto per sempre)
+        const r = await fetch(streamUrl(t, P.offlineQ), { signal: AbortSignal.timeout?.(300000) }); if (!r.ok || /json|xml/.test(r.headers.get('content-type') || '')) throw 0;
+        const blob = await r.blob(); if (blob.size < 20000) throw 0;
         let cover = null;
         if (t.coverArt) { try { const c = await fetch(coverUrl(t.coverArt, 300, t.serverId)); if (c.ok) cover = await c.blob(); } catch {} }
         await DB.put('offline', { key: key(t), track: t, blob, cover, size: blob.size, q: P.offlineQ, added: Date.now() });
@@ -1473,6 +1477,13 @@ const ACache = {
   size() { return Object.values(this.idx).reduce((n, x) => n + x.size, 0); },
   ok(t) { return !!t && P.cacheMB !== 0 && !Offline.has(t) && !srv(t.serverId)?.local && !t.fed && !!srv(t.serverId); },
   has(t, q = activeQuality()) { return !!this.idx[this.k(t, q)]; },
+  // la qualità da usare: quella attiva se c'è, altrimenti la migliore già in cache (in Wi-Fi si salva a 192k, in 5G
+  // con "qualità in rete mobile" diversa quei brani valgono lo stesso: niente dati spesi per riscaricarli)
+  pick(t) {
+    if (!t || !this.ok(t)) return null;
+    const q = activeQuality(); if (this.idx[this.k(t, q)]) return q;
+    const order = Object.keys(QUALITIES); return order.find(x => this.idx[this.k(t, x)]) || null;
+  },
   async url(t, q = activeQuality()) {
     const k = this.k(t, q); if (!this.idx[k]) return null;
     try {
@@ -1486,7 +1497,8 @@ const ACache = {
     const k = this.k(t, q); if (!this.ok(t) || this.idx[k] || this.busy.has(k) || !navigator.onLine) return;
     this.busy.add(k);
     try {
-      const r = await fetch(streamUrl(t, q)); if (!r.ok) return;
+      // tempo massimo: una connessione appesa non deve bloccare la cache dei brani dopo
+      const r = await fetch(streamUrl(t, q), { signal: AbortSignal.timeout?.(180000) }); if (!r.ok || /json|xml/.test(r.headers.get('content-type') || '')) return;
       const blob = await r.blob(); if (blob.size < 20000) return;  // una risposta d'errore, non un brano
       await DB.put('acache', { k, blob, at: Date.now() });
       this.idx[k] = { size: blob.size, at: Date.now() }; this.trim();
@@ -1724,6 +1736,18 @@ const AutoEq = {
     Engine.applyEq(); this.onpaint?.();
   }
 };
+// ascolti che non sono arrivati al server (senza rete, server giù): si tengono e si rimandano con la loro ora,
+// così le statistiche "Sul server" contano anche quelli fatti in metropolitana
+const Scrob = {
+  keep(t, time) { const q = store.get('scrobq', []); q.push({ sid: t.serverId, id: t.id, time }); store.set('scrobq', q.slice(-500)); },
+  async flush() {
+    if (this.busy || !navigator.onLine) return;
+    const q = store.get('scrobq', []).filter(x => Date.now() - x.time < 14 * 864e5); if (!q.length) return;
+    this.busy = true; const left = [];
+    for (const x of q) { const s = srv(x.sid); if (!s) continue; try { await api('scrobble', { id: x.id, submission: true, time: x.time }, s); } catch { left.push(x); } }
+    store.set('scrobq', left); this.busy = false;
+  }
+};
 const Engine = {
   decks: [], gains: [], cur: 0, ctx: null, master: null, eq: [], comp: null, analyser: null, pre: null, tap: null, lim: null, shadow: [], dest: null, fading: false, blobUrls: [null, null], scrobbled: null, fails: 0,
   init() {
@@ -1732,7 +1756,7 @@ const Engine = {
       if (!P.compat) a.crossOrigin = 'anonymous';
       a.preservesPitch = true;
       document.body.append(a); this.decks.push(a);
-      for (const ev of ['timeupdate', 'play', 'pause', 'ended', 'error', 'loadedmetadata', 'playing']) a.addEventListener(ev, e => this.on(ev, i, e));
+      for (const ev of ['timeupdate', 'play', 'pause', 'ended', 'error', 'loadedmetadata', 'playing', 'waiting', 'stalled']) a.addEventListener(ev, e => this.on(ev, i, e));
     }
     this.applyVolume();
   },
@@ -1743,6 +1767,8 @@ const Engine = {
     if (P.compat) return;
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' }); this.ctx = ctx;
+      // sospeso dal sistema mentre l'elemento suona (cambio di uscita Bluetooth, interruzioni): il tempo andrebbe avanti muto
+      ctx.onstatechange = () => { if (ctx.state !== 'running' && ctx.state !== 'closed' && !this.el.paused) ctx.resume().catch(() => {}); };
       this.eq = EQ_FREQS.map((f, i) => { const b = ctx.createBiquadFilter(); b.type = i === 0 ? 'lowshelf' : i === 9 ? 'highshelf' : 'peaking'; b.frequency.value = f; b.Q.value = 1.1; return b; });
       // copie scollegate dei filtri: servono solo a calcolare la curva dell'EQ (getFrequencyResponse), non suonano
       this.shadow = EQ_FREQS.map((f, i) => { const b = ctx.createBiquadFilter(); b.type = this.eq[i].type; b.frequency.value = f; b.Q.value = 1.1; return b; });
@@ -1800,7 +1826,7 @@ const Engine = {
     const a = this.decks[i], k = key(t);
     a.preload = lazy ? 'metadata' : 'auto';
     a.dataset.key = k; a.dataset.q = activeQuality();
-    const blob = Offline.has(t) ? await Offline.url(t) : ACache.has(t) ? await ACache.url(t) : null;
+    const cq = !Offline.has(t) && ACache.pick(t), blob = Offline.has(t) ? await Offline.url(t) : cq ? await ACache.url(t, cq) : null;
     if (a.dataset.key !== k) { if (blob) URL.revokeObjectURL(blob); return false; }
     if (this.blobUrls[i]) URL.revokeObjectURL(this.blobUrls[i]);
     this.blobUrls[i] = blob;
@@ -1828,15 +1854,28 @@ const Engine = {
       if (!this.el.getAttribute('src')) return;
       const src = this.el.getAttribute('src'), sv = srv(currentTrack()?.serverId);
       if (sv?.armony && /[?&]k=/.test(src) && this.el._tk !== src) {
-        const el = this.el, at = el.currentTime, go = !el.paused; el._tk = src;
+        const el = this.el, at = el.currentTime, go = !el.paused || !!el.error; el._tk = src;  // dopo un errore risulta fermo: si riparte
         Disp.fresh(sv, true).then(() => { if (!sv.tk || sv.revoked || el.getAttribute('src') !== src) return; el.src = src.replace(/([?&]k=)[^&]*/, '$1' + encodeURIComponent(sv.tk)); el._tk = el.src; el.currentTime = at; if (go) el.play().catch(() => {}); });
         return;
       }
-      const off = !navigator.onLine, me = this.el.error;
-      // un errore del server di passaggio (Navidrome occupato, riavvio): stesso brano, una volta, dallo stesso punto
-      if (!off && this.el._again !== src) {
-        const el = this.el, at = el.currentTime; el._again = src;
-        setTimeout(() => { if (el.getAttribute('src') !== src) return; el.src = src; try { el.currentTime = at; } catch {} el.play().catch(() => {}); }, 1500);
+      const off = !navigator.onLine, me = this.el.error, el = this.el;
+      // senza rete: si aspetta che torni (stesso brano, stesso punto), salvo saltare a un brano che c'è sul dispositivo
+      if (off) {
+        const n = this.availableNext();
+        if (n != null) { toast('Senza rete: passo al prossimo brano salvato sul dispositivo.'); playIndex(n); return; }
+        toast('Senza rete: riprendo appena torna.', 5000);
+        addEventListener('online', () => { if (el.getAttribute('src') === src) this.reload(el, src); }, { once: true });
+        return;
+      }
+      // errore di rete o flusso interrotto (il Funnel che cade, Navidrome che riparte): stesso brano dallo stesso punto,
+      // con attese crescenti, finché non si rinuncia (circa un minuto). Un formato che non si apre si riprova una volta sola
+      const net = me?.code === 2 || me?.code === 3 || (me?.code === 4 && el.currentTime > 0);
+      // i tentativi ripartono da capo se dall'ultimo errore il brano è andato avanti (un errore fisso nello stesso punto no)
+      if (el._src === src && Math.abs(el.currentTime - (el._errAt ?? -99)) > 5) el._tries = 0;
+      el._tries = el._src === src ? (el._tries || 0) + 1 : 1; el._src = src; el._errAt = el.currentTime;
+      if (el._tries <= (net ? 6 : 1)) {
+        const wait = Math.min(30000, 1000 * 2 ** (el._tries - 1));
+        setTimeout(() => { if (el.getAttribute('src') === src) this.reload(el, src); }, wait);
         return;
       }
       if (!off) window.Diag?.report('errore', 'audio', `brano non riproducibile: ${currentTrack()?.title || '?'}`, `codice ${me?.code ?? '?'} ${me?.message || ''}\n${safeUrl(src)}`);
@@ -1851,17 +1890,44 @@ const Engine = {
       if (Jam.role !== 'guest' && !Radio.st) setTimeout(() => ctlNext(true), 1500);
       return;
     }
+    if (ev === 'waiting' || ev === 'stalled') return this.watchStall();
     if (ev === 'timeupdate') { this.tick(); emit('time'); }
-    else if (ev === 'play' || ev === 'playing') { if (ev === 'playing') this.fails = 0; paintButtons(); emit('play'); AutoEq.run(); }
+    else if (ev === 'play' || ev === 'playing') { if (ev === 'playing') { this.fails = 0; clearTimeout(this.stallT); } paintButtons(); emit('play'); AutoEq.run(); }
     else if (ev === 'pause') { paintButtons(); emit('pause'); QSync.schedule(); AutoEq.run(); }
     else if (ev === 'ended') this.ended();
     else if (ev === 'loadedmetadata') emit('time');
+  },
+  // ricarica lo stesso indirizzo dallo stesso punto; se nel frattempo il brano è finito in cache o offline, da lì
+  async reload(el, src, at = el.currentTime) {
+    const t = currentTrack(), go = !el.paused || !!el.error;  // dopo un errore l'elemento risulta fermo: si riparte
+    const blob = t && el === this.el ? (Offline.has(t) ? await Offline.url(t) : ACache.pick(t) ? await ACache.url(t, ACache.pick(t)) : null) : null;
+    if (el.getAttribute('src') !== src) { if (blob) URL.revokeObjectURL(blob); return; }
+    if (blob) { const i = this.decks.indexOf(el); if (this.blobUrls[i]) URL.revokeObjectURL(this.blobUrls[i]); this.blobUrls[i] = blob; }
+    el.src = blob || src;
+    el.addEventListener('loadedmetadata', () => { try { el.currentTime = at; } catch {} }, { once: true });
+    if (go) el.play().catch(() => {});
+  },
+  // il brano aspetta dati: se dopo 8 s è ancora fermo nello stesso punto la connessione è appesa (non arriva nessun
+  // errore), e lo si ricarica. Prima un brano poteva restare muto per minuti con il lettore "in riproduzione"
+  watchStall() {
+    const el = this.el, src = el.getAttribute('src'), at = el.currentTime; if (!src || src.startsWith('blob:')) return;
+    clearTimeout(this.stallT);
+    this.stallT = setTimeout(() => {
+      if (el !== this.el || el.paused || el.getAttribute('src') !== src || Math.abs(el.currentTime - at) > .5) return;
+      window.Diag?.report('avviso', 'audio', 'flusso fermo da 8 s: ricarico', safeUrl(src));
+      this.reload(el, src, at);
+    }, 8000);
+  },
+  // il primo brano dopo questo che si può ascoltare senza rete (salvato offline o nella cache dei brani)
+  availableNext() {
+    for (let i = S.index + 1; i < S.queue.length; i++) { const t = S.queue[i]; if (Offline.has(t) || ACache.pick(t) || srv(t.serverId)?.local) return i; }
+    return null;
   },
   tick() {
     const a = this.el, t = currentTrack(); if (!t) return;
     if (this.scrobbled !== key(t) + '@' + S.index && a.currentTime > Math.min(240, (t.duration || 60) / 2)) {
       this.scrobbled = key(t) + '@' + S.index;
-      if (srv(t.serverId) && !t.fed) api('scrobble', { id: t.id, submission: true }, srv(t.serverId)).catch(() => {});
+      if (srv(t.serverId) && !t.fed) { const at = Date.now(); api('scrobble', { id: t.id, submission: true }, srv(t.serverId)).catch(() => Scrob.keep(t, at)); }
       Stats.add(t);
     }
     if (Radio.st) return;  // la radio la manda avanti radio.js, secondo l'orario del server
@@ -2216,7 +2282,7 @@ const Glow = {
   // la traccia nel lettore: il colore del brano in riproduzione sulla barra di avanzamento
   async track(t) {
     const url = t && t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 300, t.serverId) : '';
-    const c = await this.colors(url), seek = $('#seekWave'); if (!seek || currentTrack() !== t) return;
+    const c = await this.colors(url), seek = $('#seekWave'); if (!seek || !sameTrack(currentTrack(), t)) return;
     if (this.usable(c)) seek.style.setProperty('--tint', this.tone(c.c1, .9, c.neutral)); else seek.style.removeProperty('--tint');
   }
 };
@@ -2284,13 +2350,13 @@ async function vNow() {
   if (tab === 'lyr') {
     pane.innerHTML = '<p class="sub">Cerco il testo…</p>';
     lyr = await Lyrics.get(t);
-    if (currentTrack() !== t || !$('#nowPane')) return;
+    if (!sameTrack(currentTrack(), t) || !$('#nowPane')) return;
     if (!lyr || lyr.instrumental) {
       // senza testo, al suo posto i prossimi brani: niente mezzo schermo vuoto
-      const up = Jam.role === 'guest' ? Jam.queue.slice(0, 12) : Radio.st ? Radio.next() : S.queue.slice(S.index + 1, S.index + 13);
+      const up = Jam.role === 'guest' ? Jam.queue.slice(0, 12) : Radio.st ? Radio.next() : Live.remote() ? arr(Live.st()?.next).slice(0, 12).map(w => Live.loc(w)).filter(Boolean) : S.queue.slice(S.index + 1, S.index + 13);
       pane.innerHTML = `<p class="sub">${lyr ? 'Brano strumentale.' : `Nessun testo per questo brano.${P.lyricsOnline ? '' : ' Attiva la ricerca online dei testi nelle impostazioni.'}`}</p>
         ${up.length ? `<h2 style="margin-top:8px">Prossimi</h2>${songList(up)}` : ''}`;
-      if (up.length && Jam.role !== 'guest' && !Radio.st) { S.lastList = up; pane.querySelectorAll('.song').forEach(el => el.dataset.act = 'qplayoff'); }
+      if (up.length && Jam.role !== 'guest' && !Radio.st && !Live.remote()) { S.lastList = up; pane.querySelectorAll('.song').forEach(el => el.dataset.act = 'qplayoff'); }
     }
     else {
       const off = store.get('lyrOff:' + key(t), 0);
@@ -2318,7 +2384,7 @@ async function vNow() {
       const a = await srvApi(s, '/api/ascolti/brano?dz=1&id=' + encodeURIComponent(t.id)).catch(() => null);
       if (a) rows.splice(rows.length - 1, 0, ['Ascolti sul server', `${a.total.toLocaleString('it-IT')}${a.users.length ? ' · ' + a.users.map(u => `${u.name} ${u.plays}`).join(', ') : ''}${a.hidden ? ` · altri ${a.hidden}` : ''}`],
         ...(a.deezer?.rank ? [['Popolarità su Deezer', `${a.deezer.rank.toLocaleString('it-IT')} (indice da 0 a 1.000.000, non il numero di stream)`]] : []));
-      if (currentTrack() !== t || !$('#nowPane')) return;
+      if (!sameTrack(currentTrack(), t) || !$('#nowPane')) return;
     }
     pane.innerHTML = `<div id="origBox"></div><div class="panel">${rows.map(([a, b]) => `<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:16px"><span style="color:var(--muted)">${a}</span><span style="text-align:right;word-break:break-word">${esc(b)}</span></div>`).join('')}</div>`;
     origBox(s, t);
@@ -2352,7 +2418,7 @@ const canPick = sid => !!srv(sid)?.me?.caps?.includes('scelta') && (access().adm
 async function origBox(s, t, any = false) {
   if (!s?.me?.caps?.includes('scelta') || t.fed || s.local) return;
   const r = await srvApi(s, '/api/origine?id=' + encodeURIComponent(t.id)).catch(() => null), box = $('#origBox');
-  if (!r || !box || (!any && currentTrack() !== t)) return;
+  if (!r || !box || (!any && !sameTrack(currentTrack(), t))) return;
   const o = r.origine || {}, [icon, label] = SRC_UI[r.kind === 'rete' ? 'rete' : o.src] || ['down', o.src || 'Sconosciuta'];
   const conv = o.da && o.a ? `${fmtQ(o.da)} → ${fmtQ(o.a)}` : r.file ? fmtQ(r.file) : '';
   box.innerHTML = `<div class="panel origin"><div class="orig-h"><span class="orig-ic src-${esc(o.src || r.kind)}">${ic(icon)}</span><span class="grow"><b>${esc(label)}</b>
@@ -4229,7 +4295,11 @@ view.addEventListener('click', async e => {
       case 'qdn': if (i < S.queue.length - 1) { [S.queue[i + 1], S.queue[i]] = [S.queue[i], S.queue[i + 1]]; if (S.index === i) S.index++; else if (S.index === i + 1) S.index--; persistQueue(); vQueue(); } break;
       case 'qrm':
         S.queue.splice(i, 1);
-        if (i < S.index) S.index--; else if (i === S.index) { Engine.stop(); S.index = Math.min(S.index, S.queue.length - 1); updateNowPlaying(); }
+        if (i < S.index) S.index--;
+        else if (i === S.index) {  // si toglie quello che suona: parte il successivo (come Spotify), non il silenzio
+          const go = isPlaying(); Engine.stop(); S.index = Math.min(S.index, S.queue.length - 1);
+          if (go && S.queue[S.index]) playIndex(S.index); else updateNowPlaying();
+        }
         persistQueue(); vQueue(); emit('queue'); break;
       case 'clearqueue': if (confirm('Svuotare la coda?')) { S.queue = []; S.index = -1; Engine.stop(); persistQueue(); updateNowPlaying(); vQueue(); emit('queue'); } break;
       case 'dedupe': { const seen = new Set(), cur = S.queue[S.index]; S.queue = S.queue.filter(t => !seen.has(key(t)) && seen.add(key(t))); S.index = cur ? S.queue.findIndex(t => key(t) === key(cur)) : -1; persistQueue(); vQueue(); emit('queue'); break; }
@@ -5127,12 +5197,12 @@ async function boot() {
   Jam.init();
   route();
   setTimeout(resolvePending, 8000);
-  addEventListener('online', () => { HistSync.run(); Live.wake(true); });
+  addEventListener('online', () => { HistSync.run(); Live.wake(true); Scrob.flush(); });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
   addEventListener('focus', () => Live.wake());
   $('#themeBtn').onclick = () => { P.theme = THEMES[P.theme]?.[2] || 'auto'; savePrefs(); applyTheme(); toast(`Tema ${THEMES[P.theme][0].toLowerCase()}.`); };
   paintTheme();  // sul computer: due finestre visibili, il canale va a quella che si usa
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); HistSync.repair(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
+  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); HistSync.repair(); Scrob.flush(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
 }

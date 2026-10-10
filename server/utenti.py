@@ -173,7 +173,9 @@ def users():
     devs = {r["user"].lower(): r for r in db.all_("SELECT user, count(*) n, max(seen) seen, max(admin) admin FROM devices "
                                                      "WHERE state = 'fidato' GROUP BY lower(user)")}
     names = {u["userName"]: bool(u.get("isAdmin")) for u in nd}
-    for r in db.all_("SELECT DISTINCT user FROM devices UNION SELECT user FROM perms"):
+    # anche chi è entrato da Armony ma Navidrome non lo elenca (amministratore di Navidrome non configurato); non i
+    # dispositivi revocati: un utente eliminato ricompariva per quelli
+    for r in db.all_("SELECT DISTINCT user FROM devices WHERE state != 'revocato' UNION SELECT user FROM perms"):
         if r["user"] and not any(r["user"].lower() == n.lower() for n in names):
             names[r["user"]] = bool((devs.get(r["user"].lower()) or {"admin": 0})["admin"])
     out = []
@@ -240,19 +242,20 @@ def delete(name):
         return nd_err(e)
     revoke(name, "account eliminato")
     for t in ("perms", "history", "prefs", "fed_subs", "imports"):
-        db.run(f"DELETE FROM {t} WHERE {'owner' if t in ('fed_subs', 'imports') else 'user'} = ?", name)
-    db.run("DELETE FROM pairings WHERE user = ?", name)
+        db.run(f"DELETE FROM {t} WHERE lower({'owner' if t in ('fed_subs', 'imports') else 'user'}) = lower(?)", name)
+    db.run("DELETE FROM pairings WHERE lower(user) = lower(?)", name)
+    db.run("DELETE FROM devices WHERE lower(user) = lower(?)", name)  # già revocati e tagliati qui sopra
     dispositivi.event("utente", name, g.who.get("dev"), f"eliminato da {g.who.get('user') or 'emergenza'}")
     return jsonify(ok=True)
 
 
 def revoke(name, why=None):
     # un dispositivo con chiave rifarebbe la sessione da solo: si revocano i dispositivi, non solo le sessioni
-    for d in db.all_("SELECT * FROM devices WHERE user = ? AND state != 'revocato'", name):
+    for d in db.all_("SELECT * FROM devices WHERE lower(user) = lower(?) AND state != 'revocato'", name):
         db.run("UPDATE devices SET state = 'revocato', revoked = ? WHERE id = ?", time.time(), d["id"])
         dispositivi.cut(d)
         dispositivi.event("revocato", name, d["id"], f"{d['name']}, {why or 'tutti i dispositivi'}, da {g.who.get('user') or 'emergenza'}")
-    db.run("DELETE FROM sessions WHERE user = ?", name)
+    db.run("DELETE FROM sessions WHERE lower(user) = lower(?)", name)
     dispositivi.notify(name)
 
 
