@@ -2,7 +2,8 @@
 Armony - server di supporto.
 
   /                     client web (cartella client)
-  /rest/*, /share/*     proxy verso Navidrome: tutto su un'unica porta e un'unica origine
+  /rest/*, /share/*     proxy verso Navidrome: tutto su un'unica porta e un'unica origine. /rest vuole un
+                        dispositivo fidato (gettone ?k= o X-Token); /share resta pubblica
   /api/jam/*            segnalazione per la Jam, e nel modo "tramite il server" tutti i suoi messaggi;
                         /api/jam/ora è l'orologio comune. Il server inoltra solo messaggi cifrati
                         dai client con la chiave della stanza: non può leggerli né falsificarli
@@ -10,7 +11,10 @@ Armony - server di supporto.
   /api/info            pubblica: nome, versione, livello di API, capacità e indirizzo pubblico del server
   /api/indirizzo        l'indirizzo pubblico del server, deciso dall'amministratore (vale per tutti i dispositivi)
   /api/login, /api/logout, /api/me   accesso con le credenziali Navidrome (token + sale
-                        Subsonic); la sessione va nell'intestazione X-Token
+                        Subsonic) e la chiave del dispositivo; la sessione va nell'intestazione X-Token
+  /api/chiave/*         pubbliche: sfida, sessione con la firma del dispositivo, abbinamento con codice (dispositivi.py)
+  /api/dispositivi      i miei dispositivi: approva, rinomina, revoca, rigenera, codice di abbinamento
+  /api/sicurezza        solo amministratori: registro degli eventi, client senza chiave (sempre/locale/mai)
   /api/users            permessi per utente (solo amministratori)
   /api/register         un amico si crea l'account (pubblica: info e registrazione con invito);
                         /api/register/settings e /invites solo amministratori
@@ -72,6 +76,7 @@ from flask import Flask, Response, abort, g, jsonify, request, send_from_directo
 from yt_dlp.postprocessor.metadataparser import MetadataParserPP
 
 import db
+import dispositivi
 import federazione
 import metadati
 import radio
@@ -100,9 +105,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
-RULES = (("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+# None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
+RULES = (("/api/chiave", None), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -123,22 +129,13 @@ def cors(resp):
     return resp
 
 
-def identity(tok=None):
-    tok = tok or request.headers.get("X-Token") or request.args.get("token") or ""
-    if not tok:
-        return None
-    # ARMONY_TOKEN resta come accesso di emergenza dell'amministratore
-    if TOKEN and secrets.compare_digest(tok, TOKEN):
-        return dict(user=None, admin=True, upload=True, download=True, delete=True)
-    s = db.one("SELECT s.user, s.admin, s.seen, coalesce(p.upload, 1) upload, coalesce(p.download, 1) download, coalesce(p.del, 0) del "
-               "FROM sessions s LEFT JOIN perms p ON p.user = s.user WHERE s.token = ?", tok)
-    if not s or time.time() - s["seen"] > SESSION_DAYS * 86400:
-        return None
-    if time.time() - s["seen"] > 3600:
-        db.run("UPDATE sessions SET seen = ? WHERE token = ?", time.time(), tok)
-    admin = bool(s["admin"])
-    return dict(user=s["user"], admin=admin, upload=admin or bool(s["upload"]), download=admin or bool(s["download"]),
-                delete=admin or bool(s["del"]))
+def identity(tok=None, k=None):
+    # sessione del dispositivo (X-Token, ?token=) o gettone per audio e copertine (?k=): dispositivi.py
+    return dispositivi.identity(tok, k)
+
+
+def client_ip():
+    return dispositivi.client_ip()
 
 
 @app.before_request
@@ -150,7 +147,7 @@ def guard():
         return None
     g.who = identity()
     if not g.who:
-        return jsonify(error="Accesso richiesto: entra con il tuo utente."), 401
+        return dispositivi.deny()
     if need != "user" and not g.who["admin" if need == "admin" else need]:
         return jsonify(error={"admin": "Serve un amministratore.", "upload": "Il caricamento non è abilitato per il tuo utente.",
                               "download": "I download non sono abilitati per il tuo utente.",
@@ -159,38 +156,10 @@ def guard():
 
 
 # ------------------------------------------------------------------ accesso
-failed = {}  # ip -> [istanti dei tentativi falliti]
-
-
+# /api/login, sfide, rinnovo con la firma del dispositivo e abbinamenti: dispositivi.py
 @app.get("/api/info")
 def info():
     return jsonify(name=NAME, version=VERSION, api=API_LEVEL, caps=caps(), armony=True, public=public_url() or None)
-
-
-@app.post("/api/login")
-def login():
-    # il client manda token + sale Subsonic, mai la password: Armony li verifica con Navidrome
-    ip = request.remote_addr or ""
-    recent = [t for t in failed.get(ip, []) if time.time() - t < 600]
-    if len(recent) >= 10:
-        return jsonify(error="Troppi tentativi falliti: riprova fra qualche minuto."), 429
-    d = request.get_json(silent=True) or {}
-    u, t, s = (str(d.get(k) or "")[:100] for k in ("u", "t", "s"))
-    if not (u and t and s):
-        return jsonify(error="Utente e credenziali obbligatori"), 400
-    try:
-        r = http.get(f"{NAVIDROME_URL}/rest/getUser", timeout=10,
-                     params=dict(u=u, t=t, s=s, v="1.16.1", c="armony", f="json", username=u)).json()["subsonic-response"]
-    except (requests.RequestException, ValueError, KeyError):
-        return jsonify(error="Il server musicale non risponde"), 502
-    if r.get("status") != "ok":
-        failed[ip] = recent + [time.time()]
-        return jsonify(error="Utente o password errati"), 401
-    admin = bool(r.get("user", {}).get("adminRole"))
-    tok = secrets.token_urlsafe(32)
-    db.run("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)", tok, u, int(admin), str(d.get("device") or "")[:40], time.time(), time.time())
-    g.who = identity(tok)
-    return jsonify(session=tok, **me_payload())
 
 
 # indirizzo pubblico del server (es. https://armony.nome.ts.net): lo decide l'amministratore una volta e vale per tutti
@@ -202,7 +171,7 @@ def public_url():
 
 def me_payload():
     return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"], delete=g.who["delete"],
-                name=NAME, version=VERSION, api=API_LEVEL, caps=caps(), public=public_url())
+                name=NAME, version=VERSION, api=API_LEVEL, caps=caps(), public=public_url(), **dispositivi.me_extra(g.who))
 
 
 def caps():
@@ -252,7 +221,13 @@ def set_user(name):
 
 @app.delete("/api/users/<name>/sessions")
 def revoke_user(name):
+    # un dispositivo con chiave rifarebbe la sessione da solo: "disconnetti" revoca tutti i dispositivi dell'utente
+    for d in db.all_("SELECT * FROM devices WHERE user = ? AND state != 'revocato'", name):
+        db.run("UPDATE devices SET state = 'revocato', revoked = ? WHERE id = ?", time.time(), d["id"])
+        dispositivi.cut(d)
+        dispositivi.event("revocato", name, d["id"], f"{d['name']}, tutti i dispositivi, da {g.who['user'] or 'emergenza'}")
     db.run("DELETE FROM sessions WHERE user = ?", name)
+    dispositivi.notify(name)
     return jsonify(ok=True)
 
 
@@ -327,7 +302,7 @@ def register_info():
 
 @app.post("/api/register")
 def register():
-    ip, now = request.remote_addr or "", time.time()
+    ip, now = client_ip(), time.time()
     recent = [t for t in reg_failed.get(ip, []) if now - t < 600]
     if len(recent) >= 10:
         return jsonify(error="Troppi tentativi: riprova fra qualche minuto."), 429
@@ -372,7 +347,8 @@ def register():
         msg = str(e) if isinstance(e, PermissionError) else "Il server musicale non risponde"
         return jsonify(error=msg + ": avvisa chi gestisce il server."), 502
     reg_done[ip] = made + [now]
-    return jsonify(ok=True, username=username), 201
+    # con l'invito il primo accesso entra fidato, senza aspettare l'approvazione
+    return jsonify(ok=True, username=username, **({"grant": dispositivi.registered(username)} if mode == "invito" else {})), 201
 
 
 @app.get("/api/register/settings")
@@ -451,13 +427,31 @@ PASS_RESP = ("content-type", "content-length", "content-range", "accept-ranges",
 @app.route("/share/<path:p>", methods=["GET"])
 def proxy(p):
     prefix = request.path.split("/")[1]
+    dev, args = None, request.args
+    if prefix == "rest":
+        # /share resta pubblica (link condivisi di Navidrome); /rest vuole un dispositivo fidato: gettone k (audio e
+        # copertine non mandano intestazioni) o X-Token. Le credenziali Subsonic da sole valgono solo per i client
+        # senza chiave, se l'amministratore li accetta da qui, e mai col sale di un dispositivo revocato o con chiave
+        form = urllib.parse.parse_qs(request.get_data(cache=True, as_text=True)) if request.method == "POST" and "form" in (request.content_type or "") else {}
+        val = lambda n: args.get(n) or (form.get(n) or [""])[0]
+        who = identity(request.headers.get("X-Token"), val("k"))
+        if who:
+            if who["user"] and val("u") and val("u") != who["user"]:
+                return jsonify(error="Questo dispositivo è di un altro utente."), 403
+            dev = who["dev"]
+        elif g.why or val("k") or dispositivi.rest_salt_blocked(val("s")):  # un gettone che non vale non ripiega sulle credenziali
+            return dispositivi.deny()
+        elif not dispositivi.legacy_ok():
+            g.why = dispositivi.legacy_why()
+            return dispositivi.deny()
+        args = [(a, b) for a, b in request.args.items(multi=True) if a != "k"]  # il gettone non arriva a Navidrome
     headers = {k: v for k, v in request.headers.items() if k.lower() in PASS_REQ}
     headers["Accept-Encoding"] = "identity"
-    headers["X-Forwarded-For"] = request.remote_addr or ""
+    headers["X-Forwarded-For"] = client_ip()
     headers["X-Forwarded-Host"] = request.host
     headers["X-Forwarded-Proto"] = request.scheme
     try:
-        r = http.request(request.method, f"{NAVIDROME_URL}/{prefix}/{p}", params=request.args,
+        r = http.request(request.method, f"{NAVIDROME_URL}/{prefix}/{p}", params=args,
                          data=request.get_data() if request.method == "POST" else None,
                          headers=headers, stream=True, timeout=(5, 600))
     except requests.RequestException:
@@ -473,8 +467,13 @@ def proxy(p):
                 q.setdefault(k, []).extend(v)
         threading.Thread(target=pl_attivita, args=(m, q, body), daemon=True).start()
         return Response(body, status=r.status_code, headers=out)
-    return Response(stream_with_context(r.iter_content(64 * 1024)), status=r.status_code,
-                    headers=out, direct_passthrough=True)
+    def body():
+        for chunk in r.iter_content(64 * 1024):
+            if dev and dev in dispositivi.CUT:
+                break  # revocato mentre ascoltava: l'audio si ferma qui, non a fine brano
+            yield chunk
+        r.close()
+    return Response(stream_with_context(body()), status=r.status_code, headers=out, direct_passthrough=True)
 
 
 # ------------------------------------------------------------------ Jam: segnalazione
@@ -520,7 +519,7 @@ def jam_open(rid):
         new = rid not in rooms
         rooms[rid] = dict(id=rid, host=host, name=str(d.get("name", "Jam"))[:60],
                           hostName=str(d.get("hostName", ""))[:40], visible=bool(d.get("visible")),
-                          ip=request.remote_addr, created=time.time(), seen=time.time(),
+                          ip=client_ip(), created=time.time(), seen=time.time(),
                           queues=rooms.get(rid, {}).get("queues", {}))
     # il server non conosce il segreto (sta dopo il # del link): annuncia al più il nome di una Jam visibile
     who = identity() if new and request.headers.get("X-Token") else None
@@ -592,7 +591,7 @@ def jam_ora():
 
 @app.get("/api/jam/nearby")
 def jam_nearby():
-    me = request.remote_addr
+    me = client_ip()  # dal Funnel tutte le richieste vengono da 127.0.0.1: conta l'indirizzo vero
     with cond:
         local = [dict(id=r["id"], name=r["name"], hostName=r["hostName"], base="")
                  for r in rooms.values() if r["visible"] and same_net(me, r["ip"])]
@@ -739,6 +738,33 @@ def live_put(user, msg, only=None, skip=None):
                 pass  # un dispositivo che non legge non deve bloccare gli altri
 
 
+def live_kick(match, msg):
+    """Chiude subito i canali dal vivo che corrispondono (dispositivo revocato): ricevono msg e non si ricollegano."""
+    data = json.dumps(msg)
+    with llock:
+        for conns in lconns.values():
+            for c in conns.values():
+                if match(c):
+                    c["stop"] = True
+                    try:
+                        c["q"].put_nowait(data)
+                    except queue.Full:
+                        pass
+
+
+def live_notify(user, msg):
+    # ai dispositivi dell'utente e a quelli degli amministratori
+    data = json.dumps(msg)
+    with llock:
+        for u, conns in lconns.items():
+            for c in conns.values():
+                if u == user or c.get("admin"):
+                    try:
+                        c["q"].put_nowait(data)
+                    except queue.Full:
+                        pass
+
+
 @app.get("/api/live")
 def live_stream():
     u = user_or_400()
@@ -749,7 +775,8 @@ def live_stream():
     # hb=1: il client manda battiti (/api/live/beat) e riceve {"type":"ping"} al posto del commento
     hb = request.args.get("hb") == "1"
     cid, q = uuid.uuid4().hex, queue.Queue(maxsize=200)
-    me = {"device": dev, "name": name, "q": q, "hb": hb, "seen": time.time()}
+    me = {"device": dev, "name": name, "q": q, "hb": hb, "seen": time.time(),
+          "dev": g.who.get("dev"), "admin": g.who["admin"], "keyed": g.who.get("keyed", True), "net": dispositivi.net()}
     with llock:
         old = [c for c in lconns.get(u, {}).values() if c["device"] == dev]
         if hb:
@@ -2115,6 +2142,7 @@ def delete_video(p):
 
 # federazione fra server: rotte /fed e /api/fed, /api/rete (usano da qui http, credenziali Navidrome, lavori)
 federazione.init(app, sys.modules[__name__])
+dispositivi.init(app, sys.modules[__name__])
 radio.init(app, sys.modules[__name__])
 
 
@@ -2151,4 +2179,7 @@ if __name__ == "__main__":
     from waitress import serve
     print(f"Armony '{NAME}' sulla porta {PORT}, multicast {'attivo' if MULTICAST else 'spento'}")
     # ogni dispositivo collegato tiene un thread per il canale dal vivo (/api/live), oltre a flussi audio e Jam
-    serve(app, host="0.0.0.0", port=PORT, threads=96, channel_timeout=600)
+    # dal Funnel e da `tailscale serve` le richieste arrivano da tailscaled su 127.0.0.1: l'indirizzo vero è in X-Forwarded-For
+    # (dispositivi.client_ip: limiti dei tentativi, registro, Jam vicine). Da altri indirizzi l'intestazione si scarta
+    serve(app, host="0.0.0.0", port=PORT, threads=96, channel_timeout=600,
+          trusted_proxy="127.0.0.1", trusted_proxy_headers={"x-forwarded-for"}, trusted_proxy_count=1)

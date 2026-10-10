@@ -187,7 +187,8 @@ function absUrl(u) { try { return new URL(u, location.href).toString().replace(/
 function apiParams(s, params = {}) {
   const p = new URLSearchParams();
   const auth = s.tok ? { t: s.tok, s: s.salt } : { p: 'enc:' + hex(s.pass || '') };
-  const all = { u: s.user, ...auth, v: '1.16.1', c: S.device, f: 'json', ...params };
+  // k: gettone del dispositivo (dispositivi.js), l'unico modo per audio e copertine di dire chi sono
+  const all = { u: s.user, ...auth, v: '1.16.1', c: S.device, f: 'json', ...(s.tk ? { k: s.tk } : {}), ...params };
   for (const [k, v] of Object.entries(all)) {
     if (Array.isArray(v)) v.forEach(x => p.append(k, x)); else if (v !== undefined && v !== null && v !== '') p.set(k, v);
   }
@@ -195,15 +196,23 @@ function apiParams(s, params = {}) {
 }
 const apiBase = (s, method) => absUrl(s.url) + '/rest/' + method;
 const apiUrl = (s, method, params) => apiBase(s, method) + '?' + apiParams(s, params);
-async function api(method, params, s = srv(), post = false) {
+async function api(method, params, s = srv(), post = false, again = false) {
   if (!s) throw new Error('Nessun server configurato. Aggiungine uno in Impostazioni.');
   if (s.local) return Local.api(method, params);
+  if (s.pending || s.revoked) throw new Error(s.revoked ? 'Questo dispositivo è stato revocato.' : 'Questo dispositivo aspetta l\'approvazione.');
   await NetDns.need(s.url);
   let r;
   try {
     r = post ? await fetch(apiBase(s, method), { method: 'POST', body: apiParams(s, params) })
       : await fetch(apiUrl(s, method, params));
   } catch { throw new Error(`Non riesco a raggiungere ${s.name}. Controlla indirizzo e connessione.`); }
+  if (r.status === 401 && s.armony && !again) {
+    const j = await r.clone().json().catch(() => ({}));
+    if (j.code === 'revocato') { Disp.revoke(s, true); throw new Error(j.error); }
+    await Disp.fresh(s, true);
+    if (s.session) return api(method, params, s, post, true);
+    throw new Error(s.pending ? 'Questo dispositivo aspetta l\'approvazione.' : j.error || 'Accesso scaduto: in Impostazioni modifica il server e reinserisci la password.');
+  }
   if (!r.ok) throw new Error(`${s.name} ha risposto con errore ${r.status}.`);
   const sr = (await r.json())['subsonic-response'];
   if (sr.status !== 'ok') throw new Error(sr.error?.code === 40 ? 'Utente o password errati.' : sr.error?.message || 'Il server ha rifiutato la richiesta.');
@@ -222,7 +231,7 @@ const norm = (x, sid = S.active) => ({
 // coverBust: dopo aver cambiato una copertina, l'indirizzo cambia e il browser non mostra quella vecchia dalla cache
 let coverBust = 0;
 // brani della rete (server collegati, /api/rete): copertina e audio passano dal mio server Armony, che fa da proxy firmato
-const reteUrl = (s, path, p) => absUrl(s.url) + '/api/rete/' + path + '?' + new URLSearchParams({ ...p, token: s.session || '' });
+const reteUrl = (s, path, p) => absUrl(s.url) + '/api/rete/' + path + '?' + new URLSearchParams({ ...p, ...(s.tk ? { k: s.tk } : { token: s.session || '' }) });
 const coverUrl = (coverArt, size = 300, sid) => {
   const s = srv(sid); if (!coverArt || !s) return '';
   if (s.local) return Local.cover(coverArt, size);
@@ -240,6 +249,7 @@ async function armonyLogin(s) {
   const info = await fetch(base + '/api/info').then(r => r.ok ? r.json() : null).catch(() => undefined);
   if (info === undefined) return null;  // irraggiungibile: si riprova al prossimo avvio
   if (!info?.armony) { s.armony = false; delete s.session; delete s.me; return null; }  // Subsonic senza Armony, o Armony 0.2
+  if (info.caps?.includes('dispositivi')) return Disp.login(s);  // chiave del dispositivo, attesa, revoca
   const r = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ u: s.user, t: s.tok, s: s.salt, device: S.device }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `Errore ${r.status}`);
@@ -248,10 +258,15 @@ async function armonyLogin(s) {
 }
 async function syncSessions() {
   for (const s of S.servers) {
-    if (!s.tok) continue;  // anche i server "senza Armony": potrebbero averlo installato nel frattempo
+    if (!s.tok || s.revoked) continue;  // anche i server "senza Armony": potrebbero averlo installato nel frattempo
     if (s.session) {
       const r = await fetch(absUrl(s.url) + '/api/me', { headers: { 'X-Token': s.session } }).catch(() => null);
-      if (r?.ok) { s.me = await r.json(); continue; }
+      if (r?.ok) {
+        s.me = await r.json(); s.tk = s.me.ticket; s.dev = s.me.dev || s.dev;
+        // client aggiornato che entrava senza chiave: se la crea adesso, senza chiedere niente
+        if (Disp.ok(s) && !s.me.keyed && Disp.can()) await Disp.setKey(s).catch(() => {});
+        continue;
+      }
       if (r?.status !== 401) continue;
       delete s.session;
     }
@@ -369,10 +384,10 @@ async function route() {
   const id = rest.join('/');
   markNav(r);
   $$('#sidePl a').forEach(a => a.classList.toggle('on', r === 'playlist' && a.dataset.pl === id));
-  const fn = {
+  const fn = Disp.gate(r) || {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio
+    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav; Scene.hash = location.hash; Scene.r = r;
   const run = async () => {
@@ -1162,7 +1177,7 @@ const DB = {
   _db: null,
   open() {
     return this._db ||= new Promise((res, rej) => {
-      const r = indexedDB.open('armony', 2);
+      const r = indexedDB.open('armony', 3);
       r.onupgradeneeded = e => {
         const d = r.result;
         if (e.oldVersion < 1) {
@@ -1170,6 +1185,7 @@ const DB = {
           d.createObjectStore('history', { keyPath: 'n', autoIncrement: true }).createIndex('ts', 'ts');
         }
         if (e.oldVersion < 2) d.createObjectStore('telefono', { keyPath: 'k' });  // telefono.js
+        if (e.oldVersion < 3) d.createObjectStore('chiavi', { keyPath: 'k' });  // dispositivi.js: chiavi private non esportabili
       };
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     });
@@ -1526,6 +1542,12 @@ const Engine = {
     if (i !== this.cur) return;
     if (ev === 'error') {
       if (!this.el.getAttribute('src')) return;
+      const src = this.el.getAttribute('src'), sv = srv(currentTrack()?.serverId);
+      if (sv?.armony && /[?&]k=/.test(src) && this.el._tk !== src) {
+        const el = this.el, at = el.currentTime, go = !el.paused; el._tk = src;
+        Disp.fresh(sv, true).then(() => { if (!sv.tk || sv.revoked || el.getAttribute('src') !== src) return; el.src = src.replace(/([?&]k=)[^&]*/, '$1' + encodeURIComponent(sv.tk)); el._tk = el.src; el.currentTime = at; if (go) el.play().catch(() => {}); });
+        return;
+      }
       const off = !navigator.onLine;
       toast(off ? 'Sei offline e questo brano non è salvato sul dispositivo.' : 'Impossibile riprodurre questo brano, passo al successivo.');
       if (Jam.role !== 'guest' && !Radio.st) setTimeout(() => ctlNext(true), 1500);
@@ -2088,7 +2110,8 @@ async function dlApi(path, opts = {}, retry = true) {
   if (!S.dl.url) throw new Error(srv() ? 'Questo server non ha Armony: download, caricamenti e aggiornamenti non sono disponibili.' : 'Aggiungi un server in Impostazioni.');
   const r = await fetch(S.dl.url.replace(/\/+$/, '') + path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Token': S.dl.token, ...(opts.headers || {}) } });
   if (r.status === 401) {
-    const s = srv();
+    const s = srv(), j = await r.clone().json().catch(() => ({}));
+    if (j.code === 'revocato' && s) { Disp.revoke(s, true); throw new Error(j.error); }
     if (retry && s?.session) { delete s.session; await armonyLogin(s).catch(() => {}); persistServers(); if (s.session) return dlApi(path, opts, false); }
     throw new Error('Accesso scaduto: in Impostazioni modifica il server e reinserisci la password.');
   }
@@ -2724,6 +2747,7 @@ function vSettings() {
     <label class="f">Indirizzo pubblico di questo server<input type="url" id="pubUrl" value="${esc(srv().me.public || '')}" placeholder="https://armony.nome-rete.ts.net"></label>
     <p class="small" style="color:var(--muted);margin:0">Quello con cui gli altri raggiungono Armony (Tailscale, dominio). Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati lo usano al posto dell'indirizzo di casa.</p>
     <div class="row"><button class="btn" id="pubSave">Salva</button></div></div>` : ''}`)}
+  ${srv()?.session && Disp.ok(srv()) ? grp('dispositivi', 'Dispositivi e sicurezza', 'dispositivi sicurezza chiave abbina codice revoca approva attesa sessioni registro accessi', '<div id="devBox"><p class="sub">Caricamento…</p></div>') : ''}
   ${Local.p ? grp('telefono', 'Questo telefono', 'musica telefono memoria backup copia caricamento wifi', '<div class="panel stack" id="phoneBox"></div>') : ''}
 
   ${grp('spazio', 'Spazio', 'memoria disco spazio occupato libero gb archiviazione', '<div class="panel stack" id="spazioBox"><p class="sub">Calcolo…</p></div>')}
@@ -2791,7 +2815,7 @@ function vSettings() {
   });
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  refreshSpazio(); refreshApk();
+  refreshSpazio(); refreshApk(); Disp.paint();
   $('#pubSave')?.addEventListener('click', async () => {
     const s = srv();
     try {
@@ -3043,7 +3067,7 @@ async function refreshUsers() {
     <label class="check box" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="upload" ${u.upload || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Caricamento</span></label>
     <label class="check box" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="download" ${u.download || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Download</span></label>
     <label class="check box" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="delete" ${u.delete || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Modifica ed eliminazione</span></label>
-    ${u.sessions ? `<button class="btn sm" data-act="usrrevoke" data-user="${esc(u.user)}">Disconnetti</button>` : ''}</div>`).join('')
+    ${u.sessions ? `<button class="btn sm" data-act="usrrevoke" data-user="${esc(u.user)}">${Disp.ok(srv()) ? 'Revoca i dispositivi' : 'Disconnetti'}</button>` : ''}</div>`).join('')
     : '<div class="empty">Nessun utente ha ancora fatto accesso da Armony.</div>';
   box.querySelectorAll('[data-usr]').forEach(el => el.onchange = async () => {
     const name = el.dataset.usr, v = p => box.querySelector(`[data-usr="${CSS.escape(name)}"][data-perm="${p}"]`).checked;
@@ -3062,7 +3086,7 @@ function serverDialog(s, preset = {}) {
   const d = $('#dlg'); d.className = '';
   d.innerHTML = `<h3>${editing ? 'Modifica server' : 'Nuovo server'}</h3><div class="stack">
     <label class="f">Indirizzo<input type="url" id="sUrl" value="${esc(s.url)}" placeholder="http://192.168.1.10:8080" autocapitalize="none" autocorrect="off" inputmode="url"></label>
-    <div class="seg" id="sMode" role="radiogroup" aria-label="Accesso" hidden><label><input type="radio" name="smode" value="accedi" checked><span>Accedi</span></label><label><input type="radio" name="smode" value="crea"><span>Crea un account</span></label></div>
+    <div class="seg" id="sMode" role="radiogroup" aria-label="Accesso" hidden><label><input type="radio" name="smode" value="accedi" checked><span>Accedi</span></label><label id="sCreaL"><input type="radio" name="smode" value="crea"><span>Crea un account</span></label><label id="sCodL" hidden><input type="radio" name="smode" value="codice"><span>Con un codice</span></label></div>
     <div class="stack" id="sLogin">
       <label class="f">Utente<input type="text" id="sUser" value="${esc(s.user)}" autocomplete="username" autocapitalize="none" autocorrect="off"></label>
       <label class="f">Password<input type="password" id="sPass" value="" autocomplete="current-password" ${s.tok ? 'placeholder="Lascia vuoto per non cambiarla"' : ''}></label>
@@ -3071,7 +3095,11 @@ function serverDialog(s, preset = {}) {
       <label class="f">Scegli un nome utente<input type="text" id="rUser" autocomplete="username" autocapitalize="none" autocorrect="off" maxlength="32" placeholder="es. giulia"></label>
       <label class="f">Scegli una password<input type="password" id="rPass" autocomplete="new-password" placeholder="Almeno 8 caratteri"></label>
       <label class="f">Ripeti la password<input type="password" id="rPass2" autocomplete="new-password"></label>
-      <label class="f" id="rCodeL">Codice d'invito<input type="text" id="rCode" value="${esc(preset.code || '')}" autocapitalize="characters" autocorrect="off" placeholder="XXXX-XXXX"></label>
+      <label class="f" id="rCodeL">Codice d'invito<input type="text" id="rCode" value="${esc(preset.mode === 'codice' ? '' : preset.code || '')}" autocapitalize="characters" autocorrect="off" placeholder="XXXX-XXXX"></label>
+    </div>
+    <div class="stack" id="sPair" hidden>
+      <label class="f">Codice di abbinamento<input type="text" id="pCode" value="${esc(preset.mode === 'codice' ? preset.code || '' : '')}" autocapitalize="characters" autocorrect="off" autocomplete="one-time-code" placeholder="XXXX-XXXX"></label>
+      <p class="small" style="margin:0;color:var(--muted)">Crealo da un tuo dispositivo già collegato: Impostazioni → Dispositivi e sicurezza → Abbina un dispositivo. Entri senza password.</p>
     </div>
     <label class="f">Nome del server<input type="text" id="sName" value="${esc(s.name)}" placeholder="Casa di Marco"></label>
     <details><summary class="small" style="cursor:pointer;color:var(--muted)">Avanzate</summary>
@@ -3082,20 +3110,26 @@ function serverDialog(s, preset = {}) {
   const mode = () => d.querySelector('[name=smode]:checked')?.value || 'accedi';
   let reg = null;
   const paintMode = () => {
-    const crea = mode() === 'crea';
-    $('#sLogin').hidden = crea; $('#sCreate').hidden = !crea; $('#sTest').hidden = crea;
+    const crea = mode() === 'crea', cod = mode() === 'codice';
+    $('#sLogin').hidden = crea || cod; $('#sCreate').hidden = !crea; $('#sPair').hidden = !cod; $('#sTest').hidden = crea || cod;
+    $('#sName').closest('label').hidden = cod; d.querySelector('details').hidden = cod;
     $('#rCodeL').hidden = !reg?.needsCode;
-    $('#sSave').textContent = editing ? 'Salva' : crea ? 'Crea l\'account' : 'Accedi';
+    $('#sSave').textContent = editing ? 'Salva' : crea ? 'Crea l\'account' : cod ? 'Abbina' : 'Accedi';
     msg('');
   };
   d.querySelectorAll('[name=smode]').forEach(r => r.onchange = paintMode);
   // la registrazione si offre solo se il server la permette (/api/register/info è pubblica)
   const checkReg = async () => {
     const url = $('#sUrl').value.trim().replace(/\/+$/, ''); reg = null;
-    if (!editing && url && /^https?:\/\/./.test(absUrl(url))) { await NetDns.need(url); reg = await fetch(absUrl(url) + '/api/register/info').then(r => r.ok ? r.json() : null).catch(() => null); }
-    $('#sMode').hidden = !reg?.open;
-    if (!reg?.open && mode() === 'crea') d.querySelector('[name=smode][value=accedi]').checked = true;
-    if (reg?.open && preset.mode === 'crea' && !paintMode.done) { d.querySelector('[name=smode][value=crea]').checked = true; paintMode.done = true; }
+    let pair = false;
+    if (!editing && url && /^https?:\/\/./.test(absUrl(url))) {
+      await NetDns.need(url);
+      [reg, pair] = await Promise.all([fetch(absUrl(url) + '/api/register/info').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(absUrl(url) + '/api/info').then(r => r.ok ? r.json() : null).then(i => !!i?.caps?.includes('dispositivi')).catch(() => false)]);
+    }
+    $('#sMode').hidden = !reg?.open && !pair; $('#sCreaL').hidden = !reg?.open; $('#sCodL').hidden = !pair;
+    if ((!reg?.open && mode() === 'crea') || (!pair && mode() === 'codice')) d.querySelector('[name=smode][value=accedi]').checked = true;
+    if (!paintMode.done && ((reg?.open && preset.mode === 'crea') || (pair && preset.mode === 'codice'))) { d.querySelector(`[name=smode][value=${preset.mode}]`).checked = true; paintMode.done = true; }
     paintMode();
   };
   $('#sUrl').onchange = checkReg;
@@ -3104,22 +3138,28 @@ function serverDialog(s, preset = {}) {
     const n = { ...s, name: $('#sName').value.trim() || reg?.name || $('#sUrl').value.trim(), url: $('#sUrl').value.trim().replace(/\/+$/, ''), user, shareBase: $('#sShare').value.trim() };
     if (pass) Object.assign(n, subsonicCreds(pass));
     else if (user !== s.user) delete n.tok;  // utente cambiato senza password: credenziali vecchie non valide
+    if (user !== s.user) delete n.dev;  // la chiave del dispositivo è legata all'utente di prima
+    if (grant) n.grant = grant;
     return n;
   };
+  let grant = null;
   $('#sTest').onclick = async () => { msg('Provo…'); try { await api('ping', {}, read()); msg('Connessione riuscita.'); } catch (e) { msg(e.message); } };
   const save = async welcome => {
     const n = read(); if (!n.url || !n.user || !n.tok) return msg('Indirizzo, utente e password sono obbligatori.');
     msg('Verifico…');
-    try { await api('ping', {}, n); } catch (e) { if (welcome || !confirm(`${e.message}\nSalvare comunque?`)) return msg(e.message); }
-    delete n.session; delete n.armony; delete n.me;
-    try { await armonyLogin(n); } catch (e) { return msg('Armony: ' + e.message); }
+    delete n.session; delete n.armony; delete n.me; delete n.pending; delete n.revoked; delete n.tk;
+    if (!n.dev) await Disp.forget(n);
+    // con Armony davanti il proxy vuole un dispositivo fidato: prima l'accesso, il ping solo per i server Subsonic
+    let arm = null;
+    try { arm = await armonyLogin(n); } catch (e) { if (!n.pending) return msg('Armony: ' + e.message); }
+    if (!arm && !n.pending) { try { await api('ping', {}, n); } catch (e) { if (welcome || !confirm(`${e.message}\nSalvare comunque?`)) return msg(e.message); } }
     const i = S.servers.findIndex(x => x.id === n.id); if (i >= 0) S.servers[i] = n; else S.servers.push(n);
     if (!S.active || welcome || S.active === Local.id) S.active = n.id;
     if (n.session && S.active === n.id) store.set('downloader', null);
     persistServers(); d.close();
     if (location.hash.startsWith('#/invito')) location.hash = '#/home'; else route();
     Live.connect?.();
-    toast(welcome ? `Benvenuto in Armony, ${n.user}!` : n.me ? `Collegato a ${n.name}${n.me.admin ? ' come amministratore' : ''}.` : `Collegato a ${n.name}: solo ascolto, il server non ha Armony.`);
+    toast(n.pending ? 'Dispositivo registrato: aspetta l\'approvazione.' : welcome ? `Benvenuto in Armony, ${n.user}!` : n.me ? `Collegato a ${n.name}${n.me.admin ? ' come amministratore' : ''}.` : `Collegato a ${n.name}: solo ascolto, il server non ha Armony.`);
   };
   const create = async () => {
     const url = absUrl($('#sUrl').value.trim().replace(/\/+$/, '')), u = $('#rUser').value.trim(), p1 = $('#rPass').value, code = $('#rCode').value.trim();
@@ -3132,13 +3172,26 @@ function serverDialog(s, preset = {}) {
       const r = await fetch(url + '/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p1, code }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) return msg(j.error || `Errore ${r.status}`);
-      // account creato: si entra come se l'avesse scritto nei campi di accesso
-      $('#sUser').value = u; $('#sPass').value = p1;
+      // account creato: si entra come se l'avesse scritto nei campi di accesso (con l'invito, già fidato)
+      $('#sUser').value = u; $('#sPass').value = p1; grant = j.grant || null;
       await save(true);
     } catch { msg('Non riesco a raggiungere il server.'); }
     finally { $('#sSave').disabled = false; }
   };
-  $('#sSave').onclick = () => mode() === 'crea' ? create() : save(false);
+  // con il codice di un dispositivo fidato: niente password, la chiave nasce qui (dispositivi.js)
+  const pairNow = async () => {
+    const url = $('#sUrl').value.trim().replace(/\/+$/, ''), code = $('#pCode').value.trim();
+    if (!url || !code) return msg('Indirizzo e codice sono obbligatori.');
+    msg('Abbino…'); $('#sSave').disabled = true;
+    try {
+      const n = await Disp.pair(url, code);
+      S.servers.push(n); S.active = n.id; persistServers(); d.close();
+      location.hash = '#/home'; route(); Live.connect?.();
+      toast(`Dispositivo abbinato: benvenuto, ${n.user}.`);
+    } catch (e) { msg(e.message); }
+    finally { $('#sSave').disabled = false; }
+  };
+  $('#sSave').onclick = () => mode() === 'crea' ? create() : mode() === 'codice' ? pairNow() : save(false);
   d.showModal();
   checkReg();
 }
@@ -3172,7 +3225,8 @@ function moreSheet() {
   const cur = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
   const items = NAV.filter(([h]) => inMore(h));
   if (matchMedia('(any-hover:hover)').matches) items.push(['tasti', 'Scorciatoie da tastiera', 'more']);
-  const dot = h => h === 'amici' && Presence.on() && Presence.playingCount() ? '<i class="dot pdot" aria-label="qualcuno sta ascoltando"></i>' : '';
+  const dot = h => h === 'amici' && Presence.on() && Presence.playingCount() ? '<i class="dot pdot" aria-label="qualcuno sta ascoltando"></i>'
+    : h === 'impostazioni' && srv()?.me?.pending ? '<i class="dot pdot" aria-label="dispositivi in attesa"></i>' : '';
   d.innerHTML = `<div class="head"><b>Altre sezioni</b></div>${items.map(([h, l, i]) => `<a class="mi ${h === cur ? 'on' : ''}" href="#/${h}" ${h === cur ? 'aria-current="page"' : ''}>${ic(i)}${l}${dot(h)}</a>`).join('')}`;
   d.querySelectorAll('a').forEach(a => a.onclick = () => d.close());
   closeOutside(d); d.showModal();
@@ -3428,11 +3482,11 @@ Codice di sicurezza: ${el.dataset.safety}
 Deve essere uguale a quello che vede l'altro amministratore.`)) { await dlApi(`/api/fed/nodes/${el.dataset.id}/accept`, { method: 'POST' }); toast('Collegato: la sua libreria arriva fra pochi secondi.'); setTimeout(refreshFed, 2500); refreshFed(); } break;
       case 'fedsync': await dlApi(`/api/fed/nodes/${el.dataset.id}/refresh`, { method: 'POST' }); refreshFed(); toast('Aggiornato.'); break;
       case 'fedrm': if (confirm(`Scollegare ${el.dataset.name}? Non vedrete più le vostre librerie; i brani già copiati restano.`)) { await dlApi(`/api/fed/nodes/${el.dataset.id}`, { method: 'DELETE' }); refreshFed(); } break;
-      case 'usrrevoke': if (confirm(`Disconnettere ${el.dataset.user} da tutti i dispositivi? Dovrà rifare l'accesso.`)) { await dlApi(`/api/users/${encodeURIComponent(el.dataset.user)}/sessions`, { method: 'DELETE' }); refreshUsers(); } break;
+      case 'usrrevoke': if (confirm(`${Disp.ok(srv()) ? `Revocare tutti i dispositivi di ${el.dataset.user}? Smettono subito di funzionare e per rientrare servirà un'approvazione.` : `Disconnettere ${el.dataset.user} da tutti i dispositivi? Dovrà rifare l'accesso.`}`)) { await dlApi(`/api/users/${encodeURIComponent(el.dataset.user)}/sessions`, { method: 'DELETE' }); refreshUsers(); } break;
       case 'exportset': {
         const withPw = confirm('Includere le credenziali nel file?\nOK = sì (conservalo al sicuro), Annulla = no');
         // mai la sessione: è di questo dispositivo. Le credenziali sono token + sale, non la password
-        const strip = ({ session, me, armony, tok, salt, ...rest }) => withPw ? { ...rest, tok, salt } : rest;
+        const strip = ({ session, me, armony, tok, salt, dev, tk, pending, revoked, grant, ...rest }) => withPw ? { ...rest, tok, salt } : rest;
         saveFile('armony-impostazioni.json', JSON.stringify({ app: 'armony', version: 3, prefs: { ...P, turn: { ...P.turn, pass: withPw ? P.turn.pass : '' } },
           servers: S.servers.map(strip) }, null, 2), 'application/json');
         break;
@@ -3442,7 +3496,7 @@ Deve essere uguale a quello che vede l'altro amministratore.`)) { await dlApi(`/
         const j = JSON.parse(await f.text());
         if (!['armony', 'cerchia'].includes(j.app)) return toast('Questo file non contiene impostazioni di Armony.');
         for (const s of migrateCreds(arr(j.servers))) {
-          delete s.session; delete s.me; delete s.armony;
+          delete s.session; delete s.me; delete s.armony; delete s.dev; delete s.tk; delete s.pending; delete s.revoked;
           const ex = S.servers.find(x => absUrl(x.url) === absUrl(s.url) && x.user === s.user);
           if (ex) Object.assign(ex, { ...s, id: ex.id, tok: s.tok || ex.tok, salt: s.tok ? s.salt : ex.salt }); else S.servers.push({ ...s, id: uid(8) });
         }
@@ -3738,6 +3792,10 @@ const Live = {
     const now = Date.now(), before = this.track()?.id;
     if (m.type === 'ping') return;
     if (m.type === 'kicked') return this.stop();  // un'altra scheda di questo dispositivo ha preso il canale
+    if (m.type === 'revocato') return Disp.revoke(srv(), true);  // dispositivi.js: fuori subito
+    if (m.type === 'rekey') { this.stop(); return Disp.fresh(srv(), true).then(() => this.connect()); }
+    if (m.type === 'chiave' || m.type === 'mai') { this.stop(); return toast('Il server ora accetta solo dispositivi con chiave: aggiorna Armony o aprila con HTTPS.', 8000); }
+    if (m.type === 'dispositivi') return Disp.changed();
     if (m.type === 'presence' || m.type === 'activity') return Presence.recv(m);  // gli altri utenti del server
     if (m.type === 'radio') return Radio.recv(m);  // stazioni e ascoltatori della Jam Radio
     if (m.type === 'libreria') { emitSoon('libreria'); if (m.playlists) emitSoon('playlists'); return; }  // brani nuovi, playlist completate dal server
@@ -4144,6 +4202,7 @@ async function boot() {
   Wave.init();
   Engine.init(); wirePlayer();
   await Offline.init(); await Local.init();
+  if (srv()?.session && Disp.ok(srv()) && Disp.stale(srv())) await Promise.race([Disp.fresh(srv(), true), sleep(4000)]);
   if (Local.on() && !navigator.onLine && !srv()?.local) S.active = Local.id;  // senza rete suona il telefono
   fillSelectors(); updateNowPlaying(); paintTime();
   const t = S.queue[S.index];
@@ -4161,5 +4220,5 @@ async function boot() {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
+  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
 }

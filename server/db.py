@@ -59,6 +59,35 @@ MIGRATIONS = [
     CREATE TABLE radio (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner TEXT NOT NULL, source TEXT NOT NULL,
                         created REAL NOT NULL, start REAL NOT NULL, seed INTEGER NOT NULL, paused REAL, tracks TEXT NOT NULL);
     """,
+    # 7: dispositivi (dispositivi.py). Ogni dispositivo ha la sua chiave pubblica ECDSA P-256 (pub; NULL = client
+    # senza chiave) e uno stato: attesa, fidato, revocato. cid = l'identificativo che il client si dà da solo
+    # (S.device), salt = il sale Subsonic che usa: serve a rifiutare le credenziali di un dispositivo revocato.
+    # Le sessioni si legano al dispositivo (dev) e quelle con chiave scadono (exp). Abbinamenti monouso (solo
+    # l'hash del codice) e registro degli eventi. Le sessioni già aperte diventano dispositivi fidati senza chiave,
+    # e si concede un periodo di transizione di 14 giorni ai client vecchi, solo se c'era già qualcuno
+    """
+    CREATE TABLE devices (id TEXT PRIMARY KEY, user TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT '',
+                          pub TEXT, cid TEXT NOT NULL DEFAULT '', salt TEXT, admin INTEGER NOT NULL DEFAULT 0,
+                          state TEXT NOT NULL, created REAL NOT NULL, approved REAL, by TEXT, seen REAL, ip TEXT,
+                          net TEXT, gen INTEGER NOT NULL DEFAULT 0, rekey INTEGER NOT NULL DEFAULT 0, revoked REAL);
+    CREATE INDEX devices_user ON devices(user);
+    CREATE UNIQUE INDEX devices_pub ON devices(pub) WHERE pub IS NOT NULL;
+    ALTER TABLE sessions ADD COLUMN dev TEXT;
+    ALTER TABLE sessions ADD COLUMN exp REAL;
+    CREATE INDEX sessions_dev ON sessions(dev);
+    CREATE TABLE pairings (hash TEXT PRIMARY KEY, user TEXT NOT NULL, by_dev TEXT NOT NULL, t TEXT NOT NULL, s TEXT NOT NULL,
+                           created REAL NOT NULL, expires REAL NOT NULL, used_by TEXT);
+    CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, kind TEXT NOT NULL, user TEXT, dev TEXT,
+                         ip TEXT, net TEXT, detail TEXT);
+    CREATE INDEX events_ts ON events(ts);
+    INSERT INTO devices (id, user, name, kind, cid, admin, state, created, approved, by, seen)
+      SELECT lower(hex(randomblob(12))), user, 'Dispositivo già collegato', '', coalesce(device, ''), max(admin), 'fidato',
+             min(created), min(created), 'prima dei dispositivi', max(seen)
+      FROM sessions GROUP BY user, coalesce(device, '');
+    UPDATE sessions SET dev = (SELECT d.id FROM devices d WHERE d.user = sessions.user AND d.cid = coalesce(sessions.device, ''));
+    INSERT INTO settings (key, value) SELECT 'legacy_grace', CAST(strftime('%s', 'now') + 14 * 86400 AS TEXT)
+      WHERE EXISTS (SELECT 1 FROM sessions);
+    """,
 ]
 
 _local = threading.local()

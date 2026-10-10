@@ -242,6 +242,39 @@ label.check small{display:block;color:var(--muted)}
 .tag.acc{background:var(--accent-soft);color:var(--ink)}
 .banner{display:flex;gap:var(--s3) var(--s4);align-items:center;background:var(--accent-soft);border-radius:var(--r-l);padding:var(--s4) var(--s5);margin-bottom:var(--s4);flex-wrap:wrap}
 .banner .grow{flex:1;min-width:200px}
+/* dispositivi e sicurezza (dispositivi.js): elenco, questo dispositivo, schermata di attesa o revoca */
+.dv{cursor:default;align-items:flex-start;padding:var(--s3) var(--s2)}
+.dv .grow small{display:block;line-height:1.45}
+.dv.wait{background:var(--accent-soft);border-radius:var(--r-m);border-bottom:0;margin-bottom:var(--s2)}
+.dv .btn{flex:none}
+.dv .icon-btn{margin-top:-4px}
+.dv.wait{flex-wrap:wrap}
+.dv.wait .grow{flex:1 1 14rem}
+.dv-ic{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--surface2);color:var(--muted)}
+.dv-ic svg{width:20px;height:20px}
+.dv-tags{display:flex;gap:var(--s1);flex-wrap:wrap;margin-top:var(--s1)}
+.dv-me{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s3)}
+.dv-me .grow{min-width:0}
+.dv-me .grow>b{display:block;font-size:1.05rem}
+.dv-me small{color:var(--muted)}
+.dv-me .dv-ic{background:var(--accent);color:var(--on-accent)}
+.fp{font-variant-numeric:tabular-nums;letter-spacing:.06em;font-weight:700;color:var(--ink)}
+.dv-h{margin:var(--s5) 0 var(--s2);font-size:1rem}
+.dv-note{color:var(--muted);margin:0 0 var(--s3);max-width:62ch}
+.dv-more{margin-top:var(--s4)}
+.dv-more>summary{cursor:pointer;color:var(--muted);font-weight:600;min-height:var(--hit);display:flex;align-items:center}
+.dv-log{list-style:none;margin:0;padding:0}
+.dv-log li{padding:var(--s2) 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.dv-log small{display:block;color:var(--muted)}
+.pair-code{font:800 2rem/1 var(--display);letter-spacing:.06em;margin:0 0 var(--s3);font-variant-numeric:tabular-nums}
+.gate{max-width:34rem;margin:var(--s7) auto;text-align:center;display:grid;justify-items:center;gap:var(--s2)}
+.gate .sub{margin:0 0 var(--s3)}
+.gate .row{justify-content:center}
+.gate-ic{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent-text)}
+.gate-ic svg{width:30px;height:30px}
+.gate-fp{display:grid;gap:var(--s1);background:var(--surface);border-radius:var(--r-l);padding:var(--s4) var(--s5);margin:0}
+.gate-fp b{font:800 1.8rem/1.1 var(--display);letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.gate-fp small,.gate-wait{color:var(--muted)}
 
 /* === F: fondamenta === */
 /* schede di copertine (albumGrid, artistCard): la copertina occupa la colonna, il fondo si accende al passaggio */
@@ -1188,6 +1221,7 @@ dialog.sheet .head .icon-btn{margin:-6px 0 -6px -6px}
 <script src="jam.js"></script>
 <script src="radio.js"></script>
 <script src="telefono.js"></script>
+<script src="dispositivi.js"></script>
 <script>boot();</script>
 </body>
 </html>
