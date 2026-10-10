@@ -198,6 +198,7 @@ const apiUrl = (s, method, params) => apiBase(s, method) + '?' + apiParams(s, pa
 async function api(method, params, s = srv(), post = false) {
   if (!s) throw new Error('Nessun server configurato. Aggiungine uno in Impostazioni.');
   if (s.local) return Local.api(method, params);
+  await NetDns.need(s.url);
   let r;
   try {
     r = post ? await fetch(apiBase(s, method), { method: 'POST', body: apiParams(s, params) })
@@ -2754,7 +2755,7 @@ function vSettings() {
 
   ${access().admin && srv()?.session ? grp('utenti', 'Utenti', 'permessi caricamento download disconnetti amministratore', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div><h3 style="margin-top:var(--s5)">Registrazione</h3><div id="regBox"><p class="sub">Caricamento…</p></div>') : ''}
   ${access().admin && netOk() ? grp('rete', 'Librerie collegate', 'federazione rete server amici collegare invito codice sicurezza', '<p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare subito o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>') : ''}
-  ${window.ARMONY_APP ? grp('app', 'App Android', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div><div id="apkBox"></div>')
+  ${window.ARMONY_APP ? grp('app', 'App Android', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div><div id="dnsBox"></div><div id="apkBox"></div>')
     : grp('app', 'App Android', 'apk app android telefono scarica installa qr', '<div class="panel" id="apkBox"><p class="sub">Controllo…</p></div>')}
   ${access().admin ? grp('aggiornamenti', 'Aggiornamenti', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>') : ''}
   ${access().admin && srv()?.me?.caps?.includes('youtube') ? grp('youtube', 'YouTube', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>') : ''}
@@ -2795,7 +2796,7 @@ function vSettings() {
     } catch (e) { toast(e.message.includes('400') ? 'Scrivi solo l\'indirizzo, per esempio https://armony.nome.ts.net' : e.message); }
   });
   if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); refreshYt(); }
-  if (window.ARMONY_APP) AppUpdate.paint();
+  if (window.ARMONY_APP) { AppUpdate.paint(); NetDns.paint(); }
   Local.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
 }
@@ -3087,7 +3088,7 @@ function serverDialog(s, preset = {}) {
   // la registrazione si offre solo se il server la permette (/api/register/info è pubblica)
   const checkReg = async () => {
     const url = $('#sUrl').value.trim().replace(/\/+$/, ''); reg = null;
-    if (!editing && url && /^https?:\/\/./.test(absUrl(url))) reg = await fetch(absUrl(url) + '/api/register/info').then(r => r.ok ? r.json() : null).catch(() => null);
+    if (!editing && url && /^https?:\/\/./.test(absUrl(url))) { await NetDns.need(url); reg = await fetch(absUrl(url) + '/api/register/info').then(r => r.ok ? r.json() : null).catch(() => null); }
     $('#sMode').hidden = !reg?.open;
     if (!reg?.open && mode() === 'crea') d.querySelector('[name=smode][value=accedi]').checked = true;
     if (reg?.open && preset.mode === 'crea' && !paintMode.done) { d.querySelector('[name=smode][value=crea]').checked = true; paintMode.done = true; }
@@ -3581,6 +3582,31 @@ const AppUpdate = {
       ${!u ? '<p class="sub">Non riesco a controllare gli aggiornamenti adesso.</p>' : !u.latest ? '<p class="sub">Su GitHub non c\'è ancora nessuna versione dell\'app.</p>' : ''}
       <div class="row">${u?.available ? `<button class="btn primary" id="appUpd">Aggiorna ora a ${esc(u.latest.replace(/^v/, ''))}</button>` : u?.latest ? '<span class="tag ok">Aggiornata</span>' : ''}</div>`;
     $('#appUpd')?.addEventListener('click', () => this.offer(u, true));
+  }
+};
+// DNS di riserva dell'app (ArmonyNetPlugin.java): se il DNS del telefono non trova un server, l'app lo cerca con un
+// DNS pubblico. Il plugin vuole sapere quali host sono server di Armony: solo quelli passano dal suo proxy
+const NetDns = {
+  p: undefined, hosts: new Set(), ready: null,
+  host(u) { try { const x = new URL(absUrl(u)); return x.protocol === 'https:' ? x.host : ''; } catch { return ''; } },
+  sync() {
+    S.servers.forEach(s => { const h = this.host(s.url); if (h) this.hosts.add(h); });
+    return this.ready = this.p.set({ hosts: [...this.hosts] }).catch(() => {});
+  },
+  // prima richiesta a un server nuovo (anche dalla finestra di accesso): aspetta che la WebView abbia la regola
+  need(u) {
+    if (this.p === undefined && (this.p = NATIVE ? window.Capacitor?.Plugins?.ArmonyNet || null : null)) this.sync();
+    const h = this.p && this.host(u); if (!h) return;
+    if (this.hosts.has(h)) return this.ready;
+    this.hosts.add(h); return this.sync();
+  },
+  async paint() {
+    const box = $('#dnsBox'); NetDns.need(''); if (!box || !this.p) return;
+    const st = await this.p.get().catch(() => null); if (!st || $('#dnsBox') !== box) return;
+    box.innerHTML = `<label class="check"><input type="checkbox" id="dnsOn" ${st.on && st.supported ? 'checked' : ''} ${st.supported ? '' : 'disabled'}><span>Se il DNS del telefono non trova il server, usa un DNS pubblico<small>${st.supported ? 'Utile con il «DNS privato» di Android o i filtri pubblicitari: vale solo per i tuoi server e per gli aggiornamenti da GitHub.' : 'Serve una versione più recente di «Android System WebView»: aggiornala dal Play Store.'}</small></span></label>
+      <label class="f" ${st.on && st.supported ? '' : 'hidden'}>DNS pubblico<select id="dnsVia">${[['cloudflare', 'Cloudflare (1.1.1.1)'], ['google', 'Google (8.8.8.8)'], ['quad9', 'Quad9 (9.9.9.9)']].map(([v, l]) => `<option value="${v}" ${st.via === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
+    $('#dnsOn').onchange = e => this.p.set({ on: e.target.checked }).then(() => this.paint());
+    $('#dnsVia').onchange = e => this.p.set({ via: e.target.value });
   }
 };
 function nativeBack() {
@@ -4123,7 +4149,7 @@ async function boot() {
   addEventListener('offline', () => toast('Sei offline: puoi ascoltare i brani salvati.'));
   navigator.connection?.addEventListener?.('change', fillSelectors);
   if ('serviceWorker' in navigator && /^https?:/.test(location.protocol) && !NATIVE) navigator.serviceWorker.register('sw.js').catch(() => {});
-  NativeMedia.init(); Phone.init(); if (NATIVE) { nativeBack(); AppUpdate.init(); }
+  NativeMedia.init(); Phone.init(); if (NATIVE) { nativeBack(); AppUpdate.init(); NetDns.need(''); }
   Jam.init();
   route();
   setTimeout(resolvePending, 8000);

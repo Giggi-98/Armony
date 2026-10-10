@@ -38,7 +38,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -177,7 +176,7 @@ public class ArmonyLibraryPlugin extends Plugin {
             try (AssetFileDescriptor fd = getContext().getContentResolver().openAssetFileDescriptor(ContentUris.withAppendedId(MEDIA, Long.parseLong(id)), "r")) {
                 if (fd == null) throw new IOException("File non trovato");
                 long len = fd.getLength();
-                c = (HttpURLConnection) new URL(url).openConnection();
+                c = ArmonyNetPlugin.open(url);
                 c.setRequestMethod("PUT");
                 c.setDoOutput(true);
                 c.setConnectTimeout(15000);

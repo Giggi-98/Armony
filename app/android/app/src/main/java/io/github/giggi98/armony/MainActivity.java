@@ -12,6 +12,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ArmonyUpdatePlugin.class);
         registerPlugin(ArmonyInsetsPlugin.class);
         registerPlugin(ArmonyLibraryPlugin.class);
+        registerPlugin(ArmonyNetPlugin.class);
+        // DNS di riserva: il proxy locale è pronto prima che il client chiami i server
+        ArmonyNetPlugin.init(this);
         super.onCreate(savedInstanceState);
         // audio e copertine della musica del telefono all'indirizzo dell'app (/_armony_/…), il resto come prima
         bridge.setWebViewClient(new ArmonyLibraryPlugin.Web(bridge));
