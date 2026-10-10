@@ -140,7 +140,12 @@ const Users = {
     d.querySelectorAll('[data-u]').forEach(b => b.onclick = async () => {
       const a = b.dataset.u, name = encodeURIComponent(u.user);
       try {
-        if (a === 'link') { d.close(); this.welcome(await dlApi(`/api/users/${name}/accesso`, { method: 'POST' }), false); }
+        if (a === 'link') {
+          // per un telefono perso o rubato i dispositivi di prima vanno revocati: con la chiave continuerebbero a entrare
+          const revoca = confirm(`Revocare anche i dispositivi attuali di ${u.user}?\n\nOK se ha perso il telefono o non vuoi che quelli di prima funzionino ancora; Annulla per tenerli.`);
+          d.close(); this.welcome(await dlApi(`/api/users/${name}/accesso`, { method: 'POST', body: JSON.stringify({ revoca }) }), false);
+          if (revoca) toast(`Dispositivi di ${u.user} revocati.`);
+        }
         else if (a === 'revoke' && confirm(`Revocare tutti i dispositivi di ${u.user}? Smettono subito di funzionare.`)) { await dlApi(`/api/users/${name}/sessions`, { method: 'DELETE' }); d.close(); toast('Dispositivi revocati.'); refreshUsers(); }
         else if (a === 'del' && prompt(`Per eliminare ${u.user}, le sue playlist e il suo storico scrivi il suo nome:`) === u.user) { await dlApi(`/api/users/${name}`, { method: 'DELETE' }); d.close(); toast(`${u.user} eliminato.`); refreshUsers(); }
       } catch (e) { toast(e.message); }

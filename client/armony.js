@@ -661,7 +661,9 @@ function lLive(n, fetch, opts, after) {
     if (sig(S.lastList) === sig(songs)) return;
     lMerge(songs, opts); after?.(songs);
   };
-  viewInterval(check, 20000); Bus.addEventListener('libreria', check);
+  // col canale dal vivo aperto gli arrivi li annuncia il server (evento 'libreria'): niente richiesta intera ogni 20 s,
+  // che in 5G su una playlist da mille brani erano centinaia di kB a vuoto. Senza canale, o a pagina nascosta, come prima
+  viewInterval(() => { if (!document.hidden && !Live.alive()) check(); }, 20000); Bus.addEventListener('libreria', check);
 }
 function lMerge(songs, opts) {
   const host = $('#lList'); if (!host) return;
@@ -705,7 +707,7 @@ async function vHome() {
     api('getAlbumList2', { type: 'random', size: 18 }),
     api('getAlbumList2', { type: 'frequent', size: 18 }).catch(() => null),
     api('getAlbumList2', { type: 'recent', size: 18 }).catch(() => null),
-    Stats.all()
+    Stats.since(30)  // solo l'ultimo mese: con anni di ascolti la Home rallentava sul telefono
   ]);
   // mix del giorno: i tre artisti che ascolti di più nell'ultimo mese (storico di tutti i tuoi dispositivi), ognuno con i simili
   const top = new Map(); hist.filter(x => x.ts > Date.now() - 30 * 864e5 && x.artistId && x.serverId === s.id).forEach(x => { const e = top.get(x.artistId) || { n: 0, name: x.artist }; e.n++; top.set(x.artistId, e); });
@@ -761,7 +763,7 @@ async function newReleases(n) {
   const from = Date.now() - 90 * 864e5, c = new Map();
   // niente segnaposto ("NA" di alcuni CSV, "Unknown", "Various Artists"): darebbero gli artisti sbagliati su Deezer
   const junk = a => a.length < 2 || /^(n\/?a|unknown( artist)?|\[unknown.*\]|various artists|artisti vari)$/i.test(a);
-  (await Stats.all()).forEach(x => { if (x.ts >= from && x.artist) { const a = x.artist.split(/\s*[,•&]\s*|\s+feat\.?\s+/i)[0].trim(); if (!junk(a)) c.set(a, (c.get(a) || 0) + 1); } });
+  (await Stats.since(90)).forEach(x => { if (x.ts >= from && x.artist) { const a = x.artist.split(/\s*[,•&]\s*|\s+feat\.?\s+/i)[0].trim(); if (!junk(a)) c.set(a, (c.get(a) || 0) + 1); } });
   const top = [...c].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([a]) => a);
   if (!top.length) return;
   let r; try { r = await dlApi('/api/novita?artists=' + encodeURIComponent(top.join('|'))); } catch { return; }
@@ -1561,6 +1563,8 @@ const DB = {
   put: (st, v) => DB.run(st, 'readwrite', s => s.put(v)),
   del: (st, k) => DB.run(st, 'readwrite', s => s.delete(k)),
   all: st => DB.run(st, 'readonly', s => s.getAll()),
+  // dall'indice, solo da un valore in su (lo storico recente senza leggere anni di ascolti)
+  since: (st, idx, from) => DB.run(st, 'readonly', s => s.index(idx).getAll(IDBKeyRange.lowerBound(from))),
   keys: st => DB.run(st, 'readonly', s => s.getAllKeys()),
   clear: st => DB.run(st, 'readwrite', s => s.clear()),
   putMany: (st, list) => DB.run(st, 'readwrite', s => { list.forEach(v => s.put(v)); })
@@ -1702,7 +1706,8 @@ const Stats = {
     try { await DB.put('history', { ts, hid: `${S.device}:${ts}`, synced: false, key: key(t), id: t.id, serverId: t.serverId, title: t.title, artist: t.artist, artistId: t.artistId, album: t.album, albumId: t.albumId, coverArt: t.coverArt, duration: t.duration || 0, genre: t.genre || '' }); } catch {}
     HistSync.schedule();
   },
-  all() { return DB.all('history').catch(() => []); }
+  all() { return DB.all('history').catch(() => []); },
+  since(days) { return DB.since('history', 'ts', Date.now() - days * 864e5).catch(() => this.all()); }
 };
 
 /* ================= storico e preferenze condivisi fra i dispositivi (sul server, per utente) ================= */
@@ -3906,7 +3911,10 @@ function vSettings(id = location.hash.split('/')[2]) {
   const ds = dlSrv(), adm = !!access().admin, caps = ds?.me?.caps || [];
   // [area, id, titolo, icona, parole per la ricerca, contenuto]
   const T = [
-  ['dev', 'profilo', 'Profilo', 'user', 'nome nick sincronizzazione dispositivi', `<div class="panel stack"><label class="f">Il tuo nome nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
+  ['dev', 'profilo', 'Profilo', 'user', 'nome nick foto profilo avatar immagine sincronizzazione dispositivi password', `<div class="panel stack">
+    ${Avatar.ok() ? `<div class="mecard">${pavatar({ user: srv().user, name: P.nick || srv().user }, 'xl')}<span class="grow"><b>${esc(P.nick || srv().user)}</b><small>${esc(srv().user)} · ${esc(srv().name)}</small>
+      <span class="row"><button class="btn sm" id="pAv">${ic('image')} Cambia foto</button><button class="btn sm" id="pAvDel">Togli</button></span></span></div>` : ''}
+    <label class="f">Il tuo nome per gli amici e nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
     <label class="check"><input type="checkbox" data-pb="sync" ${P.sync ? 'checked' : ''}><span>Stesse statistiche e impostazioni su tutti i dispositivi<small>Storico d'ascolto e preferenze vengono salvati sul server, legati al tuo utente. Chi gestisce il server può vederli. Volume e modalità compatibile restano di ogni dispositivo.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="live" ${P.live !== false ? 'checked' : ''}><span>Un solo dispositivo suona, gli altri lo comandano<small>Se avvii la musica qui, sugli altri tuoi dispositivi si ferma e il lettore mostra cosa suona qui. Da "Dove suona" nel lettore la sposti dove vuoi.</small></span></label>
     ${Presence.on() ? `<label class="check"><input type="checkbox" id="pShare" ${Presence.share ? 'checked' : ''}><span>Mostra agli altri cosa ascolto e cosa faccio<small>Gli utenti di questo server vedono il brano che ascolti e le tue attività (download, caricamenti, playlist pubbliche, Jam). Spento, non compari; tu vedi comunque gli altri.</small></span></label>` : ''}
@@ -4008,6 +4016,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   $('#pNick').onchange = e => { P.nick = e.target.value.trim(); savePrefs(); };
   $('#pDev').onchange = e => { P.deviceName = e.target.value.trim(); savePrefs(); Live.connect(); };
   if ($('#pPw')) $('#pPw').onclick = () => Amici.passwordSheet();
+  if ($('#pAv')) { $('#pAv').onclick = () => Avatar.choose(); $('#pAvDel').onclick = () => Avatar.remove(); }
   if ($('#pNotif')) $('#pNotif').onchange = async e => {
     if (e.target.checked && !(await Notif.permission())) { e.target.checked = false; toast(NATIVE ? 'Consenti le notifiche ad Armony nelle impostazioni del telefono.' : 'Il browser non ha consentito le notifiche: abilitale dal lucchetto accanto all\'indirizzo.', 7000); return; }
     P.notifOn = e.target.checked; savePrefs(); toast(P.notifOn ? 'Avvisi attivi su questo dispositivo.' : 'Avvisi spenti: le notifiche restano nella campanella.');
@@ -4702,7 +4711,7 @@ view.addEventListener('click', async e => {
       case 'radio': { const r = await api('getRandomSongs', { size: 80 }); setQueue(arr(r.randomSongs.song).map(x => norm(x)), 0); break; }
       case 'mixfav': { const r = (await api('getStarred2')).starred2; const so = arr(r.song).map(x => norm(x)); if (!so.length) return toast('Non hai ancora brani preferiti.'); setQueue(so, 0, true); break; }
       case 'mixforgot': {
-        const recent = new Set((await Stats.all()).filter(x => x.ts > Date.now() - 60 * 864e5).map(x => x.key));
+        const recent = new Set((await Stats.since(60)).map(x => x.key));
         const al = arr((await api('getAlbumList2', { type: 'frequent', size: 40, offset: 10 })).albumList2.album).concat(arr((await api('getAlbumList2', { type: 'random', size: 20 })).albumList2.album));
         const songs = (await Promise.all(shuffleArr(al).slice(0, 15).map(a => api('getAlbum', { id: a.id }).catch(() => null)))).flatMap(r => shuffleArr(arr(r?.album?.song)).slice(0, 3)).map(x => norm(x)).filter(t => !recent.has(key(t)));
         setQueue(songs, 0, true); toast('Brani che non senti da almeno due mesi.'); break;
@@ -4862,11 +4871,12 @@ Deve essere uguale a quello che vede l'altro amministratore.`)) { await dlApi(`/
       case 'resetapp': resetApp(); break;
       case 'scanqr': useScan(await scanQR()); break;
       case 'exportset': {
-        const withPw = confirm('Includere le credenziali nel file?\nOK = sì (conservalo al sicuro), Annulla = no');
-        // mai la sessione: è di questo dispositivo. Le credenziali sono token + sale, non la password
-        const strip = ({ session, me, armony, tok, salt, dev, tk, pending, revoked, grant, ...rest }) => withPw ? { ...rest, tok, salt } : rest;
-        saveFile('armony-impostazioni.json', JSON.stringify({ app: 'armony', version: 3, prefs: { ...P, turn: { ...P.turn, pass: withPw ? P.turn.pass : '' } },
-          servers: S.servers.map(strip) }, null, 2), 'application/json');
+        // per un amico: niente credenziali né nome utente (entrerebbe col tuo account), niente nome e nick tuoi; per un tuo
+        // dispositivo: le credenziali (token + sale, mai la password né la sessione, che è di questo dispositivo)
+        const mine = confirm('Per chi è il file?\n\nOK = per un mio dispositivo (con le credenziali: conservalo al sicuro)\nAnnulla = per un amico (senza il tuo account: lui entrerà col suo)');
+        const strip = ({ session, me, armony, tok, salt, dev, tk, pending, revoked, grant, user, ...rest }) => mine ? { ...rest, user, tok, salt } : rest;
+        const prefs = { ...P, turn: { ...P.turn, pass: mine ? P.turn.pass : '' } }; if (!mine) { prefs.nick = ''; prefs.deviceName = ''; }
+        saveFile(mine ? 'armony-impostazioni.json' : 'armony-per-un-amico.json', JSON.stringify({ app: 'armony', version: 3, prefs, servers: S.servers.map(strip) }, null, 2), 'application/json');
         break;
       }
       case 'importset': {
@@ -5208,6 +5218,8 @@ const Live = {
     if (m.type === 'rekey') { this.stop(); return Disp.fresh(srv(), true).then(() => this.connect()); }
     if (m.type === 'chiave' || m.type === 'mai') { this.stop(); return toast('Il server ora accetta solo dispositivi con chiave: aggiorna Armony o aprila con HTTPS.', 8000); }
     if (m.type === 'dispositivi') return Disp.changed();
+    if (m.type === 'avatar') return Avatar.refresh(m.user);  // un utente ha cambiato la foto profilo
+    if (m.type === 'riavvio') return toast('Il server si aggiorna fra poco: la musica può fermarsi per qualche secondo e riparte da sola.', 8000);
     if (m.type === 'presence' || m.type === 'activity') return Presence.recv(m);  // gli altri utenti del server
     if (m.type === 'radio') return Radio.recv(m);  // stazioni e ascoltatori della Jam Radio
     if (m.type === 'notifica') return Notif.recv(m);
@@ -5399,7 +5411,45 @@ const Live = {
    I disegni stanno dove serve: barra laterale, storie della Home, puntino su Amici, segni su righe e intestazioni. */
 const pkey = e => e.user + '|' + e.device;
 const pname = e => e.user === srv()?.user ? 'Tu' : e.name || e.user;
-const pavatar = (e, cls = '') => `<span class="pav ${cls}" style="--pav:${tileColor(e.user)}" aria-hidden="true">${esc(([...String(e.name || e.user || '?')][0] || '?').toUpperCase())}</span>`;
+// l'iniziale su un colore, o la foto profilo se l'utente ne ha una (Avatar la carica e la dipinge su tutte le copie)
+const pavatar = (e, cls = '') => { const u = String(e.user || '').toLowerCase(), bg = Avatar.bg(u);
+  return `<span class="pav ${cls}${bg ? ' img' : ''}" data-u="${esc(u)}" style="--pav:${tileColor(e.user)}${bg}" aria-hidden="true">${esc(([...String(e.name || e.user || '?')][0] || '?').toUpperCase())}</span>`; };
+// foto profilo (capacità "avatar"): /api/avatar/<utente> con la sessione, tenuta come blob; una sola richiesta per utente
+const Avatar = {
+  map: new Map(),
+  ok() { return !!srv()?.me?.caps?.includes('avatar') && !!srv()?.session && !srv()?.local; },
+  bg(u) {
+    if (!u) return '';
+    const v = this.map.get(u);
+    if (v === undefined && this.ok()) { this.map.set(u, 0); setTimeout(() => this.load(u), 0); }
+    return typeof v === 'string' ? `;background-image:url(${v})` : '';
+  },
+  async load(u) {
+    try {
+      const r = await netFetch(absUrl(srv().url) + '/api/avatar/' + encodeURIComponent(u), { headers: { 'X-Token': srv().session } });
+      if (!r.ok) { this.map.set(u, null); return; }
+      this.map.set(u, URL.createObjectURL(await r.blob()));
+    } catch { this.map.set(u, null); return; }
+    this.paint(u);
+  },
+  paint(u) {
+    const v = this.map.get(u);
+    $$(`.pav[data-u="${CSS.escape(u)}"]`).forEach(el => { el.style.backgroundImage = typeof v === 'string' ? `url(${v})` : ''; el.classList.toggle('img', typeof v === 'string'); });
+  },
+  // cambiata (da questo o da un altro dispositivo, o da un amico): si ricarica
+  refresh(u) { u = String(u || '').toLowerCase(); const v = this.map.get(u); if (typeof v === 'string') URL.revokeObjectURL(v); this.map.delete(u); this.map.set(u, 0); this.paint(u); this.load(u); },
+  // una foto scelta dal dispositivo: ritagliata al centro, 256×256, JPEG
+  async choose() {
+    const f = await pickFile('image/*'); if (!f) return;
+    try {
+      const im = await createImageBitmap(f), side = Math.min(im.width, im.height), c = document.createElement('canvas'); c.width = c.height = 256;
+      c.getContext('2d').drawImage(im, (im.width - side) / 2, (im.height - side) / 2, side, side, 0, 0, 256, 256);
+      await srvApi(srv(), '/api/profilo/avatar', { method: 'PUT', body: JSON.stringify({ data: c.toDataURL('image/jpeg', .86) }) });
+      this.refresh(srv().user); toast('Foto profilo aggiornata.');
+    } catch (e) { toast(e.message || 'Questa immagine non si apre.'); }
+  },
+  async remove() { try { await srvApi(srv(), '/api/profilo/avatar', { method: 'DELETE' }); this.refresh(srv().user); toast('Foto tolta.'); } catch (e) { toast(e.message); } }
+};
 const peq = on => `<span class="peq${on ? ' on' : ''}" aria-hidden="true"></span>`;
 const ago = ms => { const s = (Date.now() - ms) / 1000; return s < 60 ? 'adesso' : s < 3600 ? `${Math.floor(s / 60)} min fa` : s < 86400 ? `${Math.floor(s / 3600)} h fa` : `${Math.floor(s / 86400)} g fa`; };
 // elenco con chiavi: aggiorna, aggiunge, toglie e riordina i figli senza rifare tutto, così AutoAnimate anima solo ciò che cambia

@@ -1182,7 +1182,14 @@ dialog.drawer .mi{min-height:52px}
 @media (prefers-reduced-motion:reduce){dialog.drawer[open]{animation:none}}
 /* === P: presenza, chi ascolta cosa sul server (Presence in armony.js) === */
 .pav{--sz:32px;width:var(--sz);height:var(--sz);flex:none;border-radius:50%;display:inline-grid;place-items:center;background:var(--pav);color:#fff;font:700 calc(var(--sz) * .45)/1 var(--body)}
-.pav.xs{--sz:16px}.pav.s{--sz:24px}.pav.m{--sz:44px}.pav.l{--sz:56px}
+.pav.xs{--sz:16px}.pav.s{--sz:24px}.pav.m{--sz:44px}.pav.l{--sz:56px}.pav.xl{--sz:88px}
+/* foto profilo al posto dell'iniziale */
+.pav.img{background-size:cover;background-position:center;color:transparent}
+.mecard{display:flex;align-items:center;gap:var(--s4)}
+.mecard .grow{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mecard b{font-size:1.15rem}
+.mecard small{color:var(--muted)}
+.mecard .row{margin-top:var(--s2)}
 /* il piccolo equalizzatore di chi suona: le stesse barre della riga in riproduzione */
 .peq{display:none;width:11px;height:10px;margin-left:6px;flex:none;background:linear-gradient(var(--accent-text) 0 0) 0 100%/3px 55% no-repeat,linear-gradient(var(--accent-text) 0 0) 4px 100%/3px 100% no-repeat,linear-gradient(var(--accent-text) 0 0) 8px 100%/3px 35% no-repeat}
 .peq.on{display:inline-block;animation:eqbars .95s ease-in-out infinite alternate}

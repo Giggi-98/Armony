@@ -227,6 +227,9 @@ def reset_access(name):
     except (A.federazione.FedError, requests.RequestException) as e:
         return nd_err(e)
     dispositivi.event("utente", name, g.who.get("dev"), "nuovo link di benvenuto dall'amministratore")
+    # "telefono perso": i dispositivi di prima smettono subito di funzionare (con la chiave firmerebbero ancora da soli)
+    if (request.get_json(silent=True) or {}).get("revoca"):
+        revoke(u["userName"], "nuovo link di benvenuto (dispositivi di prima revocati)")
     return jsonify(user=u["userName"], **ingresso(u["userName"], g.who.get("dev")))
 
 

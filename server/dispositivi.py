@@ -731,6 +731,30 @@ def backup_notte():
     A.diagnosi.log("info", "backup", f"copia notturna dei database in {os.path.basename(dest)}")
 
 
+def ricontrolla():
+    """Una volta al giorno, con Navidrome: un utente eliminato là perde subito i dispositivi (con la chiave avrebbe
+    continuato a entrare: i rinnovi non passano da Navidrome); il ruolo di amministratore segue quello di Navidrome."""
+    if time.time() - float(setting("ricontrollo_at") or 0) < 86400:
+        return
+    nd = A.utenti.nd_users()
+    if not nd:
+        return  # senza l'amministratore di Navidrome (o con Navidrome giù) non si tocca niente
+    by = {u["userName"].lower(): u for u in nd if u.get("userName")}
+    for r in db.all_("SELECT DISTINCT user FROM devices WHERE state != 'revocato'"):
+        x = by.get(r["user"].lower())
+        if not x:
+            for d in db.all_("SELECT * FROM devices WHERE lower(user) = lower(?) AND state != 'revocato'", r["user"]):
+                db.run("UPDATE devices SET state = 'revocato', revoked = ? WHERE id = ?", time.time(), d["id"])
+                cut(d)
+                event("revocato", r["user"], d["id"], f"{d['name']}: l'utente non c'è più su Navidrome")
+            db.run("DELETE FROM sessions WHERE lower(user) = lower(?)", r["user"])
+        else:
+            adm = 1 if x.get("isAdmin") else 0
+            db.run("UPDATE devices SET admin = ? WHERE lower(user) = lower(?) AND admin != ?", adm, r["user"], adm)
+            db.run("UPDATE sessions SET admin = ? WHERE lower(user) = lower(?) AND admin != ?", adm, r["user"], adm)
+    db.run("INSERT INTO settings (key, value) VALUES ('ricontrollo_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", str(time.time()))
+
+
 def pulizia():
     """Ogni ora: sessioni scadute, credenziali rimaste negli abbinamenti scaduti (token e sale valgono la password per
     Subsonic), quote per indirizzo vecchie."""
@@ -745,6 +769,10 @@ def pulizia():
                     _hits.pop(k, None)
         except Exception as e:  # noqa: BLE001
             A.diagnosi.log("avviso", "dispositivi", f"pulizia oraria non riuscita: {e}")
+        try:
+            ricontrolla()
+        except Exception as e:  # noqa: BLE001
+            A.diagnosi.log("avviso", "dispositivi", f"ricontrollo degli utenti non riuscito: {e}")
         try:
             backup_notte()
         except Exception as e:  # noqa: BLE001

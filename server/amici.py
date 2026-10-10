@@ -12,18 +12,22 @@ Armony - fra amici dello stesso server (capacità "amici").
   GET  /api/manda                  ricevuti e mandati
   GET  /api/blend?con=…            il mix di due amici dai loro ascolti (scrobble di Navidrome), con l'affinità
   POST /api/password               {old, new}: cambio della propria password (verificata su Navidrome)
+  PUT  /api/profilo/avatar         {data}: la propria foto (JPEG quadrato, già ridotto dal client); DELETE la toglie
+  GET  /api/avatar/<utente>        la foto di un utente, solo a chi è collegato (404 se non ce l'ha)
 
 ─── PERCHÉ le modifiche dei collaboratori passano dal server ───
 Navidrome lascia modificare una playlist solo al proprietario. Armony controlla che chi chiede sia collaboratore e
 fa la modifica come amministratore di Navidrome (come la riconciliazione delle importazioni), sotto lo stesso blocco
 per playlist (importa.plock).
 """
+import base64
 import hashlib
+import os
 import secrets
 import time
 
 import requests
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, send_file
 
 import db
 
@@ -250,6 +254,54 @@ def password():
     A.live_put(u, {"type": "credenziali", "t": t2, "s": s2})
     A.dispositivi.event("password", u, g.who.get("dev"), "password cambiata da Armony")
     return jsonify(ok=True, t=t2, s=s2)
+
+
+# ------------------------------------------------------------------ foto profilo
+def av_path(user):
+    # nome del file dall'impronta del nome utente: niente percorsi costruiti con quello che scrive il client
+    return os.path.join(os.path.dirname(db.PATH), "avatar", hashlib.sha1(str(user).lower().encode()).hexdigest()[:20] + ".jpg")
+
+
+@bp.put("/api/profilo/avatar")
+def avatar_put():
+    u = g.who.get("user")
+    if not u:
+        return jsonify(error="Serve l'accesso di un utente."), 400
+    raw = str((request.get_json(silent=True) or {}).get("data") or "")
+    try:
+        img = base64.b64decode(raw.split(",", 1)[1] if raw.startswith("data:") else raw, validate=False)
+    except (ValueError, IndexError):
+        return jsonify(error="Immagine non valida"), 400
+    if not img.startswith(b"\xff\xd8\xff") or len(img) > 400_000:
+        return jsonify(error="Serve una foto JPEG sotto i 400 kB (l'app la riduce da sola)."), 400
+    p = av_path(u)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p + ".part", "wb") as f:
+        f.write(img)
+    os.replace(p + ".part", p)
+    A.pres_put({"type": "avatar", "user": u, "v": int(time.time())})  # gli altri aggiornano la foto senza ricaricare
+    return jsonify(ok=True, v=int(time.time()))
+
+
+@bp.delete("/api/profilo/avatar")
+def avatar_del():
+    u = g.who.get("user")
+    try:
+        os.remove(av_path(u))
+    except OSError:
+        pass
+    A.pres_put({"type": "avatar", "user": u, "v": 0})
+    return jsonify(ok=True)
+
+
+@bp.get("/api/avatar/<name>")
+def avatar_get(name):
+    p = av_path(name)
+    if not os.path.isfile(p):
+        return jsonify(error="Nessuna foto"), 404
+    r = send_file(p, mimetype="image/jpeg", max_age=3600)
+    r.headers["Cache-Control"] = "private, max-age=3600"
+    return r
 
 
 def init(flask_app, host):

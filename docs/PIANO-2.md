@@ -160,6 +160,7 @@ quindi le notifiche viaggiano sul canale dal vivo che i dispositivi tengono già
 - **0.24.0 (2026-10-11)**: telefono riorganizzato come Spotify (menu del profilo, mini lettore, lettore a tutto schermo, Libreria a elenco, tieni premuto); 2.1, 2.2, 2.4, 6.3, 6.4 (solo niente dissolvenza nello stesso album; il gapless vero resta da fare).
 - **0.25.0 (2026-10-11)**: 5.9 (download; script per la libreria), 6.1, 6.2, 6.5, 6.6, 6.7, fase 9 voci 9.1–9.5; guasto Android su file e importazioni.
 - **0.26.0 (2026-10-11)**: 7.1, 7.3, 7.5, 7.7. Restano della fase 7: 7.4 (attività che sopravvive al riavvio), 7.6 (TURN dal server), 7.8, 7.9.
+- **0.27.0 (2026-10-11)**: foto profilo (richiesta dell'utente), 3.7, 3.10, 3.11, 4.4, 4.5, 7.4, 8.2, 8.3.
 - In più, fuori piano: telecomando con testi, dettagli e bande; utenti eliminati che ricomparivano.
 
 ## Ordine proposto

@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Foto profilo servite solo a chi è collegato; utenti ricontrollati ogni giorno
+
+**Contesto:** l'utente vuole personalizzare la propria utenza con una foto. Dal piano: utenti eliminati o declassati su Navidrome restavano attivi in Armony.
+**Scelta:** la foto la ritaglia e riduce il client (256 px JPEG); il server la salva in `data/armony/avatar/` con un nome dall'impronta del nome utente e la dà su `/api/avatar/<utente>` solo con una sessione; il client la tiene come blob e la dipinge su tutti gli avatar (`.pav[data-u]`), e un messaggio `avatar` sul canale dal vivo la fa ricaricare a tutti. `dispositivi.ricontrolla` una volta al giorno revoca i dispositivi degli utenti spariti da Navidrome e allinea il ruolo di amministratore; con Navidrome irraggiungibile o senza amministratore non tocca niente.
+**Alternative scartate:** foto pubbliche per indirizzo (si vedrebbero da internet conoscendo i nomi utente); Gravatar o servizi esterni; foto nel database (pesa sul database e sui suoi backup per niente).
+**Conseguenze:** la prima apertura di una pagina con molti amici fa una richiesta per foto (poi in memoria).
+**Da rivedere se:** gli utenti diventano centinaia (allora un'unica richiesta con le foto in miniatura).
+
 ## 2026-10-11 — Fra amici: playlist collaborative, «Manda a un amico», mix di due amici, cambio password
 
 **Contesto:** fase 7 del piano: il gruppo di amici sullo stesso server.

@@ -60,6 +60,7 @@ Armony - server di supporto.
   /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download";
                         /api/rete/playlist e /api/rete/abbonati: abbonamenti a playlist pubbliche (capacità "abbonamenti").
                         Fra i server, /fed/v1/canale: canale inverso per chi è dietro NAT (federazione.py)
+  /api/profilo/avatar, /api/avatar/<utente>   foto profilo (amici.py, capacità "avatar"): solo a chi è collegato
   /api/amici/utenti, /api/collab, /api/manda, /api/blend, /api/password   fra amici (amici.py): playlist collaborative,
                         «Manda a un amico», il mix di due amici, cambio password. Capacità "amici"
   /api/notifiche        notifiche dell'utente (notifiche.py): elenco, non lette, segnate come lette; arrivano anche sul
@@ -147,10 +148,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -922,6 +923,7 @@ llock = threading.Lock()
 # con /api/live/stato?device=…; chi lo ha mandato ne chiede lo stato e, se lo annulla (DELETE), non parte più
 lcmds = {}     # utente -> {id: {"to", "cmd", "value", "from", "ts", "done"}}
 LIVE_CMD_TTL = 30
+LIVE_MAX_USER = 8  # canali dal vivo per utente (ognuno tiene un thread di waitress)
 LIVE_BEAT_MAX = 120  # secondi senza battito prima di dare per sparito un dispositivo (Android in sottofondo batte anche 1/min)
 LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat", "next", "left", "radio")
 
@@ -1000,6 +1002,15 @@ def live_stream():
             if old:
                 lstates.get(u, {}).pop(dev, None)  # lo stato era della sessione di prima
         lconns.setdefault(u, {})[cid] = me
+        # un utente con troppi canali aperti (schede dimenticate, un client difettoso) occupa i thread di tutti: oltre
+        # LIVE_MAX_USER si chiude il più vecchio, che riceve "kicked" come un'altra scheda dello stesso dispositivo
+        mine = sorted((c for c in lconns[u].values() if not c.get("stop")), key=lambda c: c["t0"])
+        for c in mine[:max(0, len(mine) - LIVE_MAX_USER)]:
+            c["stop"] = True
+            try:
+                c["q"].put_nowait(json.dumps({"type": "kicked"}))
+            except queue.Full:
+                pass
         others = {c["device"]: c["name"] for c in lconns[u].values() if c["device"] != dev}
         hello = {"type": "hello", "devices": [{"device": d, "name": n} for d, n in others.items()],
                  "states": [s for d, s in lstates.get(u, {}).items() if d != dev], "cmds": cmd_pending(u, dev, time.time())}
@@ -1227,7 +1238,22 @@ def attivita(u, kind, text, link=None, merge=None, many=None, inc=1, window=600)
         a["text"] = many.replace("{n}", str(a["n"])) if many and a["n"] > 1 else text
         acts.appendleft(a)
         out = act_pub(a)
+        keep = json.dumps(list(acts))
+    # salvate: dopo un riavvio (un aggiornamento) il diario degli amici non riparte vuoto
+    db.run("INSERT INTO settings (key, value) VALUES ('attivita', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", keep)
     pres_put({"type": "activity", "item": out})
+
+
+def carica_attivita():
+    """Le attività degli ultimi 7 giorni salvate prima del riavvio."""
+    r = db.one("SELECT value FROM settings WHERE key = 'attivita'")
+    try:
+        old = json.loads(r["value"]) if r else []
+    except ValueError:
+        old = []
+    with alock:
+        for a in reversed([a for a in old if isinstance(a, dict) and time.time() - a.get("at", 0) < 7 * 86400]):
+            acts.appendleft(a)
 
 
 @app.put("/api/live/privacy")
@@ -2227,6 +2253,8 @@ def update_request():
         return jsonify(error="Aggiornamento dal tasto non installato su questo server (vedi LEGGIMI)."), 503
     with open(os.path.join(UPDATE_DIR, "request"), "w") as f:
         json.dump({"ts": time.time(), "from": VERSION}, f)
+    # a tutti i collegati: fra poco il server si riavvia (Jam e ascolti si interrompono per qualche secondo)
+    pres_put({"type": "riavvio", "fra": 60})
     return jsonify(ok=True)
 
 
@@ -2533,6 +2561,7 @@ if __name__ == "__main__":
     db.migrate()
     utenti.unisci_nomi()
     utenti.ripara_storico()
+    carica_attivita()
     # i plugin di yt-dlp (PO Token) si caricano alla prima istanza: qui, prima che due esecutori li carichino insieme
     yt_dlp.YoutubeDL(yt_opts()).close()
     for _ in range(2):
