@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Dispositivi con chiave: attesa, abbinamento e revoca immediata
+
+**Contesto:** server esposto su internet (Tailscale Funnel). Le sessioni Armony si potevano revocare, ma `/rest` inoltrava a Navidrome token+sale senza chiedere una sessione: un dispositivo revocato continuava ad ascoltare. `ARMONY_TOKEN` valeva anche da internet; dietro tailscaled tutte le richieste risultavano da 127.0.0.1 (waitress scartava `X-Forwarded-For`), quindi i limiti dei tentativi contavano tutta internet come un solo indirizzo locale.
+**Scelta:** chiave ECDSA P-256 generata dal dispositivo (WebCrypto, non esportabile, IndexedDB); sessioni da firma su sfida, 24 ore, rinnovo silenzioso; un dispositivo nuovo con password resta in attesa (eccezioni: primo dispositivo da casa, account appena creato con invito); codice di abbinamento monouso da un dispositivo fidato. `/rest` vuole un gettone HMAC per dispositivo in query (finestre di 12 ore), ricontrollato a ogni richiesta; la revoca chiude sessioni, canale dal vivo e flussi audio subito. Client senza chiave: sempre/da casa e Tailscale/mai, con 14 giorni di transizione dopo l'aggiornamento; le sessioni esistenti diventano dispositivi fidati senza chiave che se la prendono al primo avvio. Funnel riconosciuto da `Tailscale-Funnel-Request`; waitress si fida di `X-Forwarded-For` solo da 127.0.0.1. Migrazione 7, modulo `server/dispositivi.py`, capacità `dispositivi`, `API_LEVEL` invariato. Scelte dell'utente: chiave generata dal dispositivo (non dal server, perché la privata non deve viaggiare), dispositivi nuovi in attesa.
+**Alternative scartate:** chiavi generate dal server (la privata passerebbe dalla rete); Ed25519 (WebCrypto lo ha solo da Chrome 137, le WebView vecchie no); cookie per audio e copertine (altre origini, cookie di terze parti bloccati); firma su ogni richiesta (`<img>` e `<audio>` non possono mandarla); JWT senza stato (non si revocano); alzare `API_LEVEL` chiudendo fuori subito le app vecchie.
+**Conseguenze:** senza HTTPS niente chiave; un client senza chiave revocato resta fuori solo dove la regola lo esclude, o cambiando la password; con «mai» le app Subsonic di terze parti tramite Armony smettono di funzionare; il primo amministratore deve entrare da casa; sessione e gettone rubati valgono al massimo 24 ore.
+**Da rivedere se:** Navidrome offre chiavi API revocabili; WebCrypto Ed25519 è ovunque; si vuole la firma per ogni richiesta (DPoP); si esce da tailscaled (allora va rivisto `trusted_proxy`).
+
 ## 2026-10-10 — Dispositivi gemellati: lo stesso server riconosciuto anche con indirizzi diversi
 
 **Contesto:** con il telefono su Tailscale e il PC sull'indirizzo di casa, i brani del telefono arrivavano al PC con un indirizzo di server sconosciuto: niente copertina né testo; il telecomando vedeva solo i prossimi 20 brani e sembrava che la coda fosse corta.
