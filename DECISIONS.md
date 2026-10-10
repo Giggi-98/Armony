@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Impostazioni del server solo con chiave o da casa; impostazioni in schede
+
+**Contesto:** l'utente non vuole che chi entra possa cambiare le impostazioni del server, e vuole le impostazioni divise fra dispositivo e server, in schede.
+**Scelta:** le rotte admin che cambiano qualcosa, e le azioni sui dispositivi altrui, vogliono un dispositivo con chiave o la rete di casa/Tailscale; da internet senza chiave l'amministratore legge ma riceve 403 `impserver` (registrato). Interfaccia: schede nell'indirizzo (`#/impostazioni/<scheda>`), divise fra Questo dispositivo e Server (solo amministratori), colonna a sinistra sul computer, elenco e pagina con ← sul telefono; tutte nella pagina, nascoste, perché la ricerca le attraversi.
+**Alternative scartate:** un secondo fattore o una password di conferma (un segreto in più, quando la chiave del dispositivo c'è già); bloccare anche la lettura (all'admin serve vedere lo stato da fuori); la pagina unica di gruppi richiudibili.
+**Da rivedere se:** i client senza chiave spariscono del tutto (modalità "mai" ovunque), e allora basta il controllo della chiave.
+
 ## 2026-10-10 — QR con la fotocamera nell'app, jsQR nel repo; ogni dispositivo con un nome suo
 
 **Contesto:** per abbinare un telefono si doveva scrivere a mano il codice; i dispositivi avevano nomi uguali ("Telefono", "Chrome su Linux") e sembravano la stessa entità; importando le impostazioni si copiava anche il nome dell'altro dispositivo.

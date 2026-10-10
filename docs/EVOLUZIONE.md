@@ -263,6 +263,10 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.18.1–0.18.2 (2026-10-10)**: ripristino del dispositivo; QR con la fotocamera; nomi dei
+dispositivi distinti; impostazioni in schede (Questo dispositivo / Server); impostazioni del server
+solo con chiave o da casa.
+
 **0.18.0 (2026-10-10)**: dispositivi con chiave (attesa, abbinamento, revoca immediata, registro);
 playlist completate dal server, barra di avanzamento e libreria in tempo reale; YouTube con PO Token e
 ritmo; Radio sezione a sé, barra in basso personalizzabile, tasti del lettore nuovi; widget Android;
