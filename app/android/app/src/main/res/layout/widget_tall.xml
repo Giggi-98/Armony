@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- widget alto (2x3, 4x4…): copertina grande in alto, poi testi, comandi e barra, come i lettori di One UI -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:clipToOutline="true"
+    android:orientation="vertical"
+    android:padding="14dp">
+
+    <ImageView
+        android:id="@+id/w_cover"
+        android:layout_width="wrap_content"
+        android:layout_height="0dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_weight="1"
+        android:adjustViewBounds="true"
+        android:contentDescription="@string/widget_cover"
+        android:scaleType="fitCenter"
+        android:src="@drawable/widget_logo" />
+
+    <TextView
+        android:id="@+id/w_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif"
+        android:maxLines="1"
+        android:text="@string/widget_idle"
+        android:textColor="@color/widget_ink"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/w_artist"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="1dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="@string/widget_idle_sub"
+        android:textColor="@color/widget_muted"
+        android:textSize="14sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <ImageButton
+            android:id="@+id/w_prev"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/widget_press"
+            android:contentDescription="@string/widget_prev"
+            android:src="@drawable/widget_ic_prev" />
+
+        <ImageButton
+            android:id="@+id/w_toggle"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:layout_marginStart="18dp"
+            android:layout_marginEnd="18dp"
+            android:background="@drawable/widget_play_bg"
+            android:contentDescription="@string/widget_play"
+            android:src="@drawable/widget_ic_play" />
+
+        <ImageButton
+            android:id="@+id/w_next"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/widget_press"
+            android:contentDescription="@string/widget_next"
+            android:src="@drawable/widget_ic_next" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/w_progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_marginTop="10dp"
+        android:indeterminate="false"
+        android:max="1000"
+        android:maxHeight="4dp"
+        android:minHeight="4dp"
+        android:progress="350"
+        android:progressDrawable="@drawable/widget_progress" />
+</LinearLayout>

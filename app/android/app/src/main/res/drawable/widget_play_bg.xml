@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- il cerchio ambra del play, con l'onda al tocco -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#40191C38">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/widget_accent" />
+        </shape>
+    </item>
+</ripple>

@@ -11,7 +11,9 @@ import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.net.wifi.WifiManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
@@ -39,7 +41,7 @@ public class ArmonyMediaService extends Service {
     static String title = "", artist = "", album = "";
     static Bitmap art;
     static boolean playing;
-    static long positionMs, durationMs;
+    static long positionMs, durationMs, positionAt;  // positionAt: elapsedRealtime() di positionMs
     static float rate = 1f;
 
     static ArmonyMediaService instance;
@@ -48,6 +50,15 @@ public class ArmonyMediaService extends Service {
     private MediaSessionCompat session;
     private PowerManager.WakeLock cpu;
     private WifiManager.WifiLock wifi;
+    // barra del widget mentre suona: ogni 15 s e solo a schermo acceso, niente sveglie (ArmonyWidget)
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable tick = new Runnable() {
+        @Override public void run() {
+            if (!playing) return;
+            if (getSystemService(PowerManager.class).isInteractive()) ArmonyWidget.progress(ArmonyMediaService.this);
+            handler.postDelayed(this, 15000);
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -80,6 +91,12 @@ public class ArmonyMediaService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String a = intent == null ? null : intent.getAction();
+        if (plugin == null) {
+            // tasto di un widget rimasto indietro con l'app chiusa: senza WebView non c'è niente da comandare.
+            // Fermandosi, onDestroy riporta il widget a "Niente in riproduzione", che apre l'app
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         if (ACT_PREV.equals(a)) emit("previous", -1);
         else if (ACT_NEXT.equals(a)) emit("next", -1);
         else if (ACT_TOGGLE.equals(a)) emit(playing ? "pause" : "play", -1);
@@ -124,10 +141,17 @@ public class ArmonyMediaService extends Service {
 
         if (playing) { cpu.acquire(); wifi.acquire(); }
         else { if (cpu.isHeld()) cpu.release(); if (wifi.isHeld()) wifi.release(); }
+
+        ArmonyWidget.refresh(this);
+        handler.removeCallbacks(tick);
+        if (playing && ArmonyWidget.any(this)) handler.postDelayed(tick, 15000);
     }
 
-    private PendingIntent action(String a) {
-        return PendingIntent.getService(this, a.hashCode(), new Intent(this, ArmonyMediaService.class).setAction(a), PendingIntent.FLAG_IMMUTABLE);
+    private PendingIntent action(String a) { return action(this, a); }
+
+    /** Le azioni dei tasti, uguali per notifica e widget. */
+    static PendingIntent action(Context c, String a) {
+        return PendingIntent.getService(c, a.hashCode(), new Intent(c, ArmonyMediaService.class).setAction(a), PendingIntent.FLAG_IMMUTABLE);
     }
 
     private PendingIntent openApp() {
@@ -152,6 +176,8 @@ public class ArmonyMediaService extends Service {
         session.setActive(false);
         session.release();
         instance = null;
+        handler.removeCallbacks(tick);
+        ArmonyWidget.refresh(this);  // "Niente in riproduzione"
         super.onDestroy();
     }
 
