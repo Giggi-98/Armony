@@ -137,6 +137,11 @@ Il registro e la configurazione reale di produzione hanno mostrato rischi concre
 
 ---
 
+## Stato
+
+- **0.23.0 (2026-10-10)**: fatte 1.1, 1.2, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.3, 2.6, 2.7 (solo cuffie staccate; audio focus da collaudare), 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.8, 3.9 (in parte: token d'esempio e TURN), 3.13, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 5.5, 8.1 (primo passo). Decisa e **non** fatta: 7.2 (va contro la richiesta dell'utente; vedi DECISIONS).
+- In più, fuori piano: telecomando con testi, dettagli e bande; utenti eliminati che ricomparivano.
+
 ## Ordine proposto
 
 1. **Subito (0.23)**: 1.1, 1.2, 1.4, 1.5, 1.6, 1.7, 1.9, 2.3, 2.6, 2.7, 3.2, 3.4, 3.6, 3.8, 4.1, 4.2, 5.1, 5.2, 5.3, 5.4, 5.5, 8.1 (primo passo). Tutti di sforzo S, nessuna scelta da fare.

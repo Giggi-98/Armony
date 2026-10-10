@@ -4,18 +4,30 @@
 #   Con TURN:     docker compose --profile turn up -d   (per Jam via 5G dietro NAT difficili)
 #
 #   App:          http://IP-DEL-SERVER:8080
-#   Navidrome:    http://IP-DEL-SERVER:4533  (amministrazione utenti)
+#   Navidrome:    solo da questa macchina (127.0.0.1:4533): da fuori si passa da Armony, che controlla chiavi, revoche e
+#                 permessi. Per la sua pagina d'amministrazione: ssh -L 4533:127.0.0.1:4533 utente@server, poi
+#                 http://localhost:4533 sul tuo computer
 #
 # "network_mode: host" serve al multicast LAN e funziona su Linux (Raspberry, NAS, VPS).
 # Su Docker Desktop per Mac/Windows: togli network_mode, aggiungi  ports: ["8080:8080"],
 # metti NAVIDROME_URL: "http://navidrome:4533", ARMONY_POT_URL: "http://pot:4416" e ARMONY_MULTICAST: "0".
 
+# log dei container: al più 3 file da 10 MB ciascuno (senza limite crescono per mesi e riempiono il disco di sistema)
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   navidrome:
-    image: deluan/navidrome:latest
+    # versione fissa: Armony legge il suo database (media_file, playlist_tracks, scrobbles), e un "latest" nuovo può
+    # cambiarne lo schema. Si alza insieme a un rilascio di Armony
+    image: deluan/navidrome:0.64.2
     container_name: armony-navidrome
+    logging: *logging
     ports:
-      - "4533:4533"
+      - "127.0.0.1:4533:4533"
     environment:
       ND_SCANSCHEDULE: "10m"
       ND_ENABLESHARING: "true"
@@ -37,6 +49,7 @@ services:
       context: .
       dockerfile: server/Dockerfile
     container_name: armony-app
+    logging: *logging
     network_mode: host
     environment:
       ARMONY_TOKEN: "${ARMONY_TOKEN:?manca ARMONY_TOKEN in .env}"
@@ -71,6 +84,8 @@ services:
   pot:
     image: brainicism/bgutil-ytdlp-pot-provider:latest
     container_name: armony-pot
+    logging: *logging
+    # resta "latest": il PO Token deve seguire i cambi di YouTube insieme a yt-dlp, che si aggiorna a ogni avvio
     pull_policy: daily
     init: true
     ports:
@@ -80,10 +95,13 @@ services:
   turn:
     image: coturn/coturn:latest
     container_name: armony-turn
+    logging: *logging
     profiles: ["turn"]
     network_mode: host
     command: >
       -n --listening-port=3478 --fingerprint --lt-cred-mech
       --user=armony:${TURN_PASS:-cambiami-anche-questa} --realm=armony
       --min-port=49160 --max-port=49200 --no-cli --no-tlsv1 --no-tlsv1_1
+      --no-multicast-peers --denied-peer-ip=10.0.0.0-10.255.255.255 --denied-peer-ip=172.16.0.0-172.31.255.255
+      --denied-peer-ip=192.168.0.0-192.168.255.255 --denied-peer-ip=100.64.0.0-100.127.255.255 --denied-peer-ip=127.0.0.0-127.255.255.255
     restart: unless-stopped

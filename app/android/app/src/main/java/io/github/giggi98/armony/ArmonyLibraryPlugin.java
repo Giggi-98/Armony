@@ -251,10 +251,23 @@ public class ArmonyLibraryPlugin extends Plugin {
     static class Web extends BridgeWebViewClient {
         private static final Pattern RANGE = Pattern.compile("bytes=(\\d*)-(\\d*)");
         private final Context ctx;
+        private final Bridge bridge;
 
         Web(Bridge bridge) {
             super(bridge);
+            this.bridge = bridge;
             ctx = bridge.getContext();
+        }
+
+        /**
+         * Il motore della pagina chiuso dal sistema (memoria a schermo spento) o crollato: senza questa risposta Android
+         * chiude tutta l'app e la musica si ferma senza notifica. Si ricrea l'activity, che riparte da coda e posizione salvate.
+         */
+        @Override
+        public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+            android.app.Activity a = bridge.getActivity();
+            if (a != null && !a.isFinishing()) a.runOnUiThread(a::recreate);
+            return true;
         }
 
         @Override

@@ -5,7 +5,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.IntentFilter;
+import android.media.AudioManager;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
@@ -60,10 +63,19 @@ public class ArmonyMediaService extends Service {
         }
     };
 
+    // cuffie staccate o Bluetooth che cade: Android lo annuncia prima di spostare l'audio sull'altoparlante. Pausa subito,
+    // senza passare dal client (che arrivava un attimo dopo, con un frammento di musica dal telefono)
+    private final BroadcastReceiver noisy = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) {
+            if (playing && AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(i.getAction())) emit("pause", -1);
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
+        registerReceiver(noisy, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(CHANNEL) == null) {
             NotificationChannel ch = new NotificationChannel(CHANNEL, "Riproduzione", NotificationManager.IMPORTANCE_LOW);
@@ -171,6 +183,7 @@ public class ArmonyMediaService extends Service {
 
     @Override
     public void onDestroy() {
+        try { unregisterReceiver(noisy); } catch (IllegalArgumentException ignored) { }
         if (cpu.isHeld()) cpu.release();
         if (wifi.isHeld()) wifi.release();
         session.setActive(false);

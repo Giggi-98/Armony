@@ -78,6 +78,13 @@ const localize = (w, near) => {
   const s = (n && same(n) ? n : null) || S.servers.find(x => same(x) && !x.revoked && !x.pending) || S.servers.find(same) || (w.serverUrl ? n : null);
   return { ...w, serverId: s ? s.id : 'nessuno' };
 };
+// impronta della chiave con cui chi bussa riceverà il segreto: la vedono sia lui sia l'host. Se il server sostituisse la
+// chiave (per leggere il segreto), i due codici sarebbero diversi
+async function knockCode(pub) {
+  if (!SUBTLE || !pub) return '';
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', te.encode('armony-knock.' + pub)));
+  return [...h.slice(0, 4)].map(v => SYMBOLS[v % 64]).join(' ');
+}
 async function relayCode(a, b) {
   const [x, y] = [a, b].sort(), h = new Uint8Array(await crypto.subtle.digest('SHA-256', te.encode(x + '.' + y)));
   return [...h.slice(0, 5)].map(v => SYMBOLS[v % 64]).join(' ');
@@ -277,10 +284,10 @@ const Jam = {
     else if (m.t === 'ice') { try { await this.peers.get(from)?.pc.addIceCandidate(m.c); } catch {} }
     else if (m.t === 'bye') { const p = this.peers.get(from); if (p) this.peerGone(p); }
   },
-  confirmGuest(name) {
+  confirmGuest(name, code) {
     return new Promise(res => {
       const d = $('#dlg2');
-      d.innerHTML = `<h3>${esc(name || 'Qualcuno')} vuole entrare nella Jam</h3><p class="sub">Dopo l'ingresso confrontate il codice di sicurezza.</p>
+      d.innerHTML = `<h3>${esc(name || 'Qualcuno')} vuole entrare nella Jam</h3>${code ? `<p class="sub">Sul suo schermo deve comparire lo stesso codice:</p><p class="safety" style="font-size:1.8rem;text-align:center;margin:var(--s2) 0 var(--s4)">${esc(code)}</p>` : '<p class="sub">Dopo l\'ingresso confrontate il codice di sicurezza.</p>'}
         <div class="row"><button class="btn primary" id="gOk">Fai entrare</button><button class="btn" id="gNo">Rifiuta</button></div>`;
       const done = v => { d.onclose = null; d.close(); res(v); };
       $('#gOk').onclick = () => done(true); $('#gNo').onclick = () => done(false); d.onclose = () => res(false);
@@ -288,7 +295,9 @@ const Jam = {
     });
   },
   async onKnock(from, m) {
-    if (!(await this.confirmGuest(m.name))) return this.sig.send(from, { t: 'deny' }, true);
+    // una Jam con segreto non lo manda mai in chiaro attraverso il server: chi bussa senza chiave (pagina senza HTTPS) resta fuori
+    if (this.room.secret && (!m.pub || !SUBTLE)) return this.sig.send(from, { t: 'deny', why: 'chiave' }, true);
+    if (!(await this.confirmGuest(m.name, await knockCode(m.pub)))) return this.sig.send(from, { t: 'deny' }, true);
     if (this.room.secret && m.pub && SUBTLE) {
       const kp = await JC.ecdh(); const k = await JC.shared(kp, m.pub, 'armony-knock', this.room.id);
       await this.sig.send(from, { t: 'admit', pub: await JC.pub(kp), box: await JC.seal(k, { k: b64u.enc(this.room.secret), net: this.net }) }, true);
@@ -440,9 +449,10 @@ const Jam = {
   async knock(base, roomId) {
     const kp = SUBTLE ? await JC.ecdh() : null;
     const sig = new Signal(base, roomId, this.me, null);
-    toast('Richiesta inviata, attendi che l\'host ti faccia entrare…', 30000);
+    const myPub = kp ? await JC.pub(kp) : null, code = await knockCode(myPub);
+    toast(`Richiesta inviata, attendi che l'host ti faccia entrare…${code ? ` Il tuo codice: ${code}` : ''}`, 60000);
     sig.loop(async (from, m) => {
-      if (m.t === 'deny') { sig.stop(); toast('L\'host ha rifiutato.'); }
+      if (m.t === 'deny') { sig.stop(); toast(m.why === 'chiave' ? 'Per entrare in questa Jam apri Armony con HTTPS (o usa l\'app).' : 'L\'host ha rifiutato.'); }
       if (m.t === 'admit') {
         sig.stop();
         let k = m.k, net = m.net;
@@ -450,7 +460,7 @@ const Jam = {
         this.join({ b: base, r: roomId, k, net, n: 'Jam' });
       }
     });
-    await sig.send('host', { t: 'knock', name: this.name(), pub: kp ? await JC.pub(kp) : null }, true);
+    await sig.send('host', { t: 'knock', name: this.name(), pub: myPub }, true);
   },
   async guestData(p, m) {
     switch (m.t) {

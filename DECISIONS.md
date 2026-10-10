@@ -27,6 +27,28 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Armony 0.23: decisioni del piano 2 prese dall'agente su mandato dell'utente
+
+**Contesto:** l'utente ha chiesto di procedere con la 0.23 del piano (`docs/PIANO-2.md`) lasciando all'agente le sei decisioni aperte.
+**Scelta:**
+- *Client senza chiave* da «sempre» a «da casa e Tailscale» (setting `legacy` in produzione): tutti i dispositivi che entrano da internet avevano già la chiave; l'unico senza chiave era un browser di casa. In Sicurezza un avviso rosso se si torna a «sempre» con un indirizzo pubblico.
+- *Navidrome solo su 127.0.0.1:4533* e versione fissa (0.64.2): da fuori si passa sempre da Armony (chiavi, revoche, permessi, limiti). Si amministra con un tunnel SSH.
+- *Jam*: chi bussa senza chiave pubblica non riceve il segreto (prima gli arrivava in chiaro attraverso il server); host e ospite vedono la stessa impronta di quattro simboli della chiave con cui il segreto viaggia.
+- *Tag firmati* con una chiave SSH dedicata ai rilasci (non quella di GitHub dell'utente; privata in `~gigi/.ssh/armony-rilasci`, pubblica in `deploy/allowed_signers`). L'aggiornamento verifica la firma con `/etc/armony/allowed_signers`; la prima volta lo copia dalla versione già installata (fiducia al primo uso), così i server degli amici non si bloccano. Niente `--force` sui tag.
+- *Log dei container* a 3×10 MB; *pot* resta `latest` perché il PO Token deve seguire YouTube insieme a yt-dlp; coturn non fissato (non gira qui) ma con `--denied-peer-ip` per le reti private.
+- *Permesso playlist diviso* (voce 7.2 del piano): **non fatto**. L'utente aveva chiesto esplicitamente che un non amministratore veda solo le playlist che ha creato; il suggerimento dell'esame del codice andava contro quella richiesta.
+**Alternative scartate:** `ND_AUTHREQUESTLIMIT=0` su Navidrome (si perde la sua protezione; il limite per indirizzo e utente sta ora in Armony, solo per chi entra senza chiave); firmare con la chiave GitHub dell'utente (un furto della chiave darebbe insieme push e firma); rifiutare l'avvio senza `TURN_PASS` (Compose valuta le variabili anche dei profili spenti: si sarebbe rotto `up` per tutti).
+**Conseguenze:** le app Subsonic di terze parti funzionano solo da casa o Tailscale; chi pubblica una versione deve firmare il tag (`git tag -s`). Se la chiave dei rilasci si perde, serve una versione con il nuovo `allowed_signers` installata a mano sui server (o `install-updater.sh`).
+**Da rivedere se:** un amico ha bisogno di un'app Subsonic da internet (si torna a «sempre» per lui solo con un'app che supporta le chiavi), o i server degli amici diventano tanti da servire una firma con più chiavi.
+
+## 2026-10-10 — Sessioni salvate come impronta, copie dei database e ritorno indietro negli aggiornamenti
+
+**Contesto:** il database conteneva i token di sessione in chiaro ed era leggibile da tutti sull'host; nessuna copia automatica, e un aggiornamento fallito lasciava client nuovo con server vecchio.
+**Scelta:** migrazione 11: token come SHA-256 (funzione `sha256` registrata su ogni connessione SQLite); permessi 600 sul file; giro orario che toglie le credenziali dagli abbinamenti scaduti e le sessioni scadute; copia notturna dei due database (API di backup di SQLite, coerente col WAL) e una prima di ogni aggiornamento, con ritorno automatico alla versione e all'immagine di prima se il server non risponde con la versione nuova entro 90 s.
+**Alternative scartate:** cifrare il database (la chiave starebbe sullo stesso disco); ripristinare anche il database nel ritorno indietro (perderebbe quello che gli utenti hanno fatto nel frattempo: le migrazioni sono solo aggiunte e la versione vecchia le tollera).
+**Conseguenze:** un ritorno indietro tiene il database già migrato.
+**Da rivedere se:** una migrazione futura cambia colonne che la versione precedente usa.
+
 ## 2026-10-10 — Comandi fra dispositivi in una casella con conferma; credenziali sbagliate fermate prima di Navidrome
 
 **Contesto:** il gemellaggio app–web restava instabile. Il registro ha mostrato due cause. (1) Un comando mandato mentre il canale del destinatario si riapriva andava perso. (2) Un telefono rimasto con la voce revocata (password vuota) ha chiesto a Navidrome un brano dopo l'altro, e Navidrome ha bloccato l'utente "gg" per troppi accessi falliti: per lui tutti i dispositivi arrivano dallo stesso indirizzo (Armony), quindi si è bloccato anche il computer.

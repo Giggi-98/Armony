@@ -56,6 +56,7 @@ Armony - server di supporto.
   /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download";
                         /api/rete/playlist e /api/rete/abbonati: abbonamenti a playlist pubbliche (capacità "abbonamenti").
                         Fra i server, /fed/v1/canale: canale inverso per chi è dietro NAT (federazione.py)
+  /api/playlist/togli   toglie un brano da una playlist per id, non per posizione (importa.py, capacità "pltogli")
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
                         Navidrome, playlist completata e riordinata a ogni brano nuovo; capacità "importsrv"
   /api/scelta          candidati per un brano e sostituzione con un'altra versione (permesso "download", scelta.py);
@@ -108,6 +109,11 @@ MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
 VIDEO_DIR = os.environ.get("VIDEO_DIR", "/videos")
 CLIENT_DIR = os.environ.get("CLIENT_DIR", "/app/client")
 TOKEN = os.environ.get("ARMONY_TOKEN", "")
+# il valore d'esempio di .env.example è pubblico (il repo è pubblico), e uno corto si indovina: accesso d'emergenza spento
+WEAK_TOKEN = TOKEN in ("cambiami-con-una-password-lunga", "cambiami") or len(TOKEN) < 20
+if WEAK_TOKEN:
+    print("[armony] ARMONY_TOKEN è quello d'esempio o più corto di 20 caratteri: accesso d'emergenza disattivato", flush=True)
+    TOKEN = ""
 NAVIDROME_URL = os.environ.get("NAVIDROME_URL", "http://127.0.0.1:4533").rstrip("/")
 PORT = int(os.environ.get("ARMONY_PORT", "8080"))
 NAME = os.environ.get("ARMONY_NAME", socket.gethostname())
@@ -130,10 +136,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -266,7 +272,7 @@ def me():
 
 @app.post("/api/logout")
 def logout():
-    db.run("DELETE FROM sessions WHERE token = ?", request.headers.get("X-Token") or "")
+    db.run("DELETE FROM sessions WHERE token = ?", dispositivi.th(request.headers.get("X-Token") or ""))
     return jsonify(ok=True)
 
 
@@ -469,6 +475,7 @@ PASS_RESP = ("content-type", "content-length", "content-range", "accept-ranges",
 # Navidrome; quelle già rifiutate più volte (stesso indirizzo, utente e credenziali) si rifiutano qui per 5 minuti
 BAD_AUTH = {}  # (ip, utente, impronta delle credenziali) -> [rifiuti confermati, ultimo]
 BAD_AUTH_MAX, BAD_AUTH_TTL = 3, 300
+BAD_USER_MAX = 5  # rifiuti per (indirizzo, utente) con credenziali qualsiasi: chi prova password diverse si ferma qui
 bad_lock = threading.Lock()
 
 
@@ -527,7 +534,10 @@ def proxy(p):
             return Response(body, mimetype=mt)
         hide_pl = bool(pm and not pm.get("vedipl", True) and m in ("getPlaylists", "getPlaylist"))
         ak = auth_key(val)
-        if not ak or auth_bad(ak) >= BAD_AUTH_MAX:
+        uk = ak and (ak[0], ak[1], "*")
+        # il limite per utente vale per chi entra con le sole credenziali: un dispositivo con chiave (who) non viene
+        # fermato dagli errori di un'app vecchia dello stesso utente dietro lo stesso indirizzo di casa
+        if not ak or auth_bad(ak) >= BAD_AUTH_MAX or (not who and auth_bad(uk) >= BAD_USER_MAX):
             if ak is None or auth_bad(ak) == BAD_AUTH_MAX:
                 diagnosi.log("avviso", "accesso", f"credenziali {'vuote' if ak is None else 'rifiutate più volte'} fermate prima di Navidrome",
                              f"utente {val('u') or '?'}, client {val('c') or '?'}, {m}", user=val("u") or None, dev=dev)
@@ -570,7 +580,9 @@ def proxy(p):
         b40 = r.content
         r._content_consumed, r._content = True, b40
         if ak and (b'"code":40' in b40 or b'code="40"' in b40):
-            auth_bad(ak, add=True)  # rifiuto confermato (anche dopo il secondo tentativo)
+            auth_bad(ak, add=True)
+            if not who and auth_bad((ak[0], ak[1], "*"), add=True) == BAD_USER_MAX:
+                diagnosi.log("avviso", "accesso", f"troppi accessi falliti per {ak[1]} da {ak[0]}: fermati per 5 minuti", user=ak[1])  # rifiuto confermato (anche dopo il secondo tentativo)
     out = {k: v for k, v in r.headers.items() if k.lower() in PASS_RESP}
     if prefix == "rest" and hide_pl and r.status_code == 200:  # solo le sue playlist, in JSON o in XML
         body = utenti.filter_playlists(m, r.content, "json" in (r.headers.get("content-type") or ""), user)
@@ -641,10 +653,16 @@ def room_or_404(rid):
     return r
 
 
+JAM_ROOMS_MAX, JAM_RECV_IP, JAM_ROOM_BYTES = 500, 8, 8_000_000
+jam_recv_open = collections.Counter()  # indirizzo -> attese /recv in corso (ognuna tiene un thread di waitress)
+
+
 @app.post("/api/jam/<rid>/open")
 def jam_open(rid):
     if not ID_RE.match(rid):
         abort(400)
+    if dispositivi.ip_limit("jam-open", 20, 60):
+        return dispositivi.too_many(60)
     d = request.get_json(silent=True) or {}
     host = d.get("host", "")
     if not ID_RE.match(host):
@@ -652,6 +670,8 @@ def jam_open(rid):
     with cond:
         if rid in rooms and rooms[rid]["host"] != host:
             abort(409)
+        if rid not in rooms and len(rooms) >= JAM_ROOMS_MAX:
+            return jsonify(error="Troppe Jam aperte sul server: riprova fra poco."), 503
         new = rid not in rooms
         rooms[rid] = dict(id=rid, host=host, name=str(d.get("name", "Jam"))[:60],
                           hostName=str(d.get("hostName", ""))[:40], visible=bool(d.get("visible")),
@@ -683,11 +703,18 @@ def jam_send(rid):
     frm, to, data = d.get("from", ""), d.get("to", ""), d.get("data")
     if not ID_RE.match(frm) or not isinstance(data, str) or len(data) > 200_000:
         abort(400)
+    if dispositivi.ip_limit("jam-send", 1200, 60):
+        return dispositivi.too_many(60)
     with cond:
         r = room_or_404(rid)
         to = r["host"] if to == "host" else to
         if not ID_RE.match(to):
             abort(400)
+        # code per destinatari e byte totali della stanza limitati: la memoria del server non si riempie di messaggi
+        if to not in r["queues"] and len(r["queues"]) >= 100:
+            abort(429)
+        if sum(len(m["data"]) for qq in r["queues"].values() for m in qq) + len(data) > JAM_ROOM_BYTES:
+            abort(429)
         q = r["queues"].setdefault(to, [])
         if len(q) < 400:
             q.append({"from": frm, "data": data})
@@ -701,7 +728,21 @@ def jam_recv(rid):
     if not ID_RE.match(peer):
         abort(400)
     timeout = min(float(request.args.get("timeout", 25)), 25)
-    end = time.time() + timeout
+    end, ip = time.time() + timeout, client_ip()
+    with cond:
+        if jam_recv_open[ip] >= JAM_RECV_IP:
+            abort(429)
+        jam_recv_open[ip] += 1
+    try:
+        return jam_wait(rid, peer, end)
+    finally:
+        with cond:
+            jam_recv_open[ip] -= 1
+            if jam_recv_open[ip] <= 0:
+                del jam_recv_open[ip]
+
+
+def jam_wait(rid, peer, end):
     with cond:
         while True:
             r = room_or_404(rid)
@@ -1279,6 +1320,7 @@ def resume_jobs():
     # più quelli che aspettano ancora di entrare in una playlist, anche se più vecchi
     # (prima solo gli ultimi 200: in un'importazione da migliaia di brani il resto della coda si perdeva al riavvio)
     for r in db.all_("SELECT data FROM jobs ORDER BY created DESC LIMIT 200") + db.all_("SELECT data FROM jobs WHERE json_extract(data, '$.plwait') = 1") \
+            + db.all_("SELECT data FROM jobs WHERE json_extract(data, '$.sospetto') IS NOT NULL") \
             + db.all_("SELECT data FROM jobs WHERE json_extract(data, '$.status') NOT IN ('completato', 'completato con errori', 'errore') ORDER BY created"):
         j = json.loads(r["data"])
         if j["id"] in jobs:
@@ -2202,7 +2244,8 @@ def list_jobs():
 @app.delete("/api/jobs")
 def clear_jobs():
     with jlock:
-        for k in [k for k, x in jobs.items() if x["status"] in DONE and not x.get("plwait")]:  # resta chi aspetta una playlist
+        # resta chi aspetta una playlist, e chi è ancora "da controllare" (spariva dalla lista senza essere controllato)
+        for k in [k for k, x in jobs.items() if x["status"] in DONE and not x.get("plwait") and not x.get("sospetto")]:
             del jobs[k]
             db.run("DELETE FROM jobs WHERE id = ?", k)
     return jsonify(ok=True)

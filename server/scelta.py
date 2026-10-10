@@ -59,22 +59,29 @@ def punteggio(e, m):
     nt, na = metadati.norm(title), metadati.norm(" ".join(artists[:1]))
     t, ch = metadati.norm(e.get("title")), e.get("channel") or e.get("uploader") or ""
     who = metadati.norm(" ".join([ch] + list(e.get("artists") or [])))
-    sc = (3 if nt and (nt in t or (len(t) > 3 and t in nt)) else 0) + (1.5 if na and (na in t or na in who) else 0)
-    if e.get("source") == "ytmusic":
-        sc += 3  # sezione "brani": audio ufficiale del disco
-    if ch.endswith(" - Topic"):
-        sc += 3
-    low = (e.get("title") or "").lower()
-    if "official audio" in low or "audio ufficiale" in low:
-        sc += 1.5
+    title_ok = bool(nt and (nt in t or (len(t) > 3 and t in nt)))
+    artist_ok = bool(na and (na in t or na in who))
+    d = e.get("duration")
+    dur_ok = bool(dur and d and abs(d - dur) <= 8)
+    sc = (3 if title_ok else 0) + (1.5 if artist_ok else 0)
+    # ─── PERCHÉ i bonus solo se il brano somiglia ───
+    # Fonte e canale ufficiali dicono che l'audio è buono, non che è il brano giusto: un risultato qualunque di YouTube
+    # Music valeva 3 solo per la fonte, sopra la soglia minima, e si scaricava un brano a caso
+    if title_ok or (artist_ok and dur_ok):
+        if e.get("source") == "ytmusic":
+            sc += 3  # sezione "brani": audio ufficiale del disco
+        if ch.endswith(" - Topic"):
+            sc += 3
+        low = (e.get("title") or "").lower()
+        if "official audio" in low or "audio ufficiale" in low:
+            sc += 1.5
     bad = {w.lower() for w in NO.findall(e.get("title") or "")} - want_no
     if bad:
         sc -= 4 + (2 if bad & {"live", "dal vivo", "en vivo", "concert", "concerto", "in concerto"} else 0)
-    d = e.get("duration")
     if dur and d:
         dd = abs(d - dur)
         sc += 2 if dd <= 3 else 0.5 if dd <= 8 else -min(dd, 180) / 15
-    return round(sc, 1), sorted(bad)
+    return round(sc, 1), sorted(bad) + ([] if title_ok else ["titolo diverso"])
 
 
 def flat(url, n):

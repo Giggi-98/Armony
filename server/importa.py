@@ -194,12 +194,18 @@ def stato_di(imp, L=None, write=True):
 
 def scrivi(pid, ids, cur):
     # updatePlaylist e non createPlaylist con playlistId: come amministratore di Navidrome vale anche sulle playlist degli
-    # altri utenti. Si tolgono le voci a pezzi partendo dal fondo (gli indici prima non si spostano), poi si aggiungono
-    before = len(cur)
-    for end in range(before, 0, -200):
-        A.federazione.nd_get("updatePlaylist", playlistId=pid, songIndexToRemove=list(range(max(0, end - 200), end)))
+    # altri utenti.
+    # ─── PERCHÉ prima si aggiunge e poi si toglie ───
+    # Prima si toglieva tutto e poi si riaggiungeva: un errore a metà (Navidrome occupato, riavvio) lasciava la playlist
+    # mezza vuota, e al giro dopo i brani mancanti sembravano "tolti a mano" e non tornavano più. Ora l'ordine nuovo va
+    # in fondo e poi si tolgono le voci di prima (tutte, anche quelle di file spariti): un errore lascia doppioni, che il
+    # giro dopo vede e sistema, mai buchi
+    before = all_entries(pid)
     for i in range(0, len(ids), 200):
         A.federazione.nd_get("updatePlaylist", playlistId=pid, songIdToAdd=ids[i:i + 200])
+    for end in range(before, 0, -200):  # dal fondo della parte vecchia: gli indici prima non si spostano
+        A.federazione.nd_get("updatePlaylist", playlistId=pid, songIndexToRemove=list(range(max(0, end - 200), end)))
+    before = len(cur)
     if len(ids) != before:
         u = owner_of(pid)
         if u:
@@ -224,6 +230,38 @@ def giro(force=False):
             stato_di(imp, L)
         except Exception as e:  # noqa: BLE001
             diagnosi.errore("import", f"riconciliazione di «{imp['name']}» non riuscita: {e}", e, user=imp["owner"])
+
+
+@bp.post("/api/playlist/togli")
+def togli():
+    """Toglie un brano da una playlist cercandolo per id, sotto lo stesso blocco della riconciliazione. Il client mandava
+    la posizione vista all'ultimo aggiornamento: se nel frattempo la riconciliazione, un download o un altro dispositivo
+    avevano spostato le voci, spariva un altro brano. index = dove il client lo vedeva (fra più copie, la più vicina)."""
+    d = request.get_json(silent=True) or {}
+    pid, sid, near = str(d.get("pid") or ""), str(d.get("id") or ""), d.get("index")
+    if not A.ID_RE.match(pid) or not A.ID_RE.match(sid):
+        return jsonify(error="Richiesta non valida"), 400
+    own, u = owner_of(pid), g.who.get("user") or ""
+    if own is None:
+        return jsonify(error="Playlist non trovata"), 404
+    if not g.who["admin"] and (own.lower() != u.lower() or not g.who["perm"].get("playlist", True)):
+        return jsonify(error="Non puoi modificare questa playlist."), 403
+    if not A.nd_admin():
+        return jsonify(error="Serve l'amministratore di Navidrome", code="nd"), 409
+    with plock(pid):
+        c = nd()
+        try:
+            ids = [r[0] for r in c.execute("SELECT media_file_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY id", (pid,))]
+        finally:
+            c.close()
+        pos = [i for i, x in enumerate(ids) if x == sid]
+        if not pos:
+            return jsonify(ok=True, gone=True)  # già tolto (da un altro dispositivo)
+        i = min(pos, key=lambda i: abs(i - (near if isinstance(near, int) else 0)))
+        A.federazione.nd_get("updatePlaylist", playlistId=pid, songIndexToRemove=[i])
+    if own:
+        A.live_put(own, {"type": "libreria", "playlists": [{"id": pid, "added": 0}]})
+    return jsonify(ok=True, index=i)
 
 
 @bp.post("/api/import/playlist")

@@ -14,6 +14,7 @@ Lo stesso ISRC compare su singolo, album, edizione deluxe e raccolte: per ISRC D
 spesso il singolo, mentre la playlist cita l'album. Se l'album non coincide si cerca l'album giusto
 per nome e artista; se non lo si trova, niente numero di traccia piuttosto che uno sbagliato.
 """
+import collections
 import json
 import os
 import re
@@ -28,7 +29,29 @@ import requests
 
 http = requests.Session()
 http.headers["User-Agent"] = "Armony (https://github.com/Giggi-98/Armony)"
-_cache, _lock, _last = {}, threading.Lock(), [0.0]
+_cache, _lock, _last = collections.OrderedDict(), threading.Lock(), [0.0]
+# risposte di Deezer: al più CACHE_MAX, per CACHE_TTL (discografie e scalette cambiano); le copertine, che pesano centinaia
+# di kB l'una, solo le ultime COVER_MAX (i brani di un album arrivano di seguito). Prima tutto restava in memoria per sempre
+CACHE_MAX, CACHE_TTL, COVER_MAX = 3000, 86400, 8
+_covers = collections.OrderedDict()
+
+
+def _get(store, k):
+    with _lock:
+        e = store.get(k)
+        if e is None or time.time() - e[0] > CACHE_TTL:
+            store.pop(k, None)
+            return False, None
+        store.move_to_end(k)
+        return True, e[1]
+
+
+def _put(store, k, v, cap):
+    with _lock:
+        store[k] = (time.time(), v)
+        store.move_to_end(k)
+        while len(store) > cap:
+            store.popitem(last=False)
 COVER_NAMES = ("cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.png")
 
 
@@ -42,8 +65,9 @@ def norm(s):
 
 def deezer(path):
     """GET sull'API di Deezer con cache e al massimo ~9 richieste al secondo (il limite è 50 ogni 5 s)."""
-    if path in _cache:
-        return _cache[path]
+    hit, v = _get(_cache, path)
+    if hit:
+        return v
     with _lock:
         wait = _last[0] + 0.11 - time.time()
         if wait > 0:
@@ -51,10 +75,16 @@ def deezer(path):
         _last[0] = time.time()
     try:
         d = http.get("https://api.deezer.com/2.0/" + path, timeout=8).json()
-        d = None if not isinstance(d, dict) or "error" in d else d
     except (requests.RequestException, ValueError):
         return None  # rete o Deezer giù: si va avanti con i soli dati del CSV, senza mettere in cache
-    _cache[path] = d
+    if not isinstance(d, dict):
+        return None
+    if "error" in d:
+        # solo "non esiste" (800) si ricorda; quota superata (4) e simili sono passeggeri e restavano "non trovato" fino al riavvio
+        if (d.get("error") or {}).get("code") != 800:
+            return None
+        d = None
+    _put(_cache, path, d, CACHE_MAX)
     return d
 
 
@@ -445,14 +475,15 @@ def sistema(src, base, m):
 
 
 def _cover(url):
-    if url in _cache:
-        return _cache[url]
+    hit, img = _get(_covers, url)
+    if hit:
+        return img
     try:
         r = http.get(url, timeout=15)
         img = r.content if r.ok and r.headers.get("content-type", "").startswith("image/") else None
     except requests.RequestException:
         return None
-    _cache[url] = img  # un album intero usa la stessa copertina: si scarica una volta
+    _put(_covers, url, img, COVER_MAX)  # un album intero usa la stessa copertina: si scarica una volta
     return img
 
 

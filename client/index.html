@@ -321,6 +321,8 @@ dialog.qrscan{width:min(420px,94vw)}
 .tracklist{--acts:120px;border-top:0}
 .tracklist.q{--acts:160px}
 .tracklist .song{border-bottom:0;border-radius:6px;min-height:56px}
+/* playlist da migliaia di brani: le righe fuori dallo schermo non si disegnano (la loro altezza resta, lo scorrimento no) */
+.tracklist .song{content-visibility:auto;contain-intrinsic-size:auto 56px}
 .tracklist .th,.tracklist .al{display:none}
 .tracklist .song .thumb{border-radius:4px}
 .tracklist .al>[data-act]{cursor:pointer}

@@ -52,11 +52,13 @@ CODE_H = 24
 def perms(user, admin=None):
     """Tutti i permessi di un utente; l'amministratore li ha tutti."""
     if admin is None:
-        r = db.one("SELECT max(admin) a FROM devices WHERE user = ?", user)
+        # nomi senza maiuscole: Navidrome accetta "GG" per "gg", e un'app Subsonic con le maiuscole cambiate tornava
+        # ai permessi predefiniti
+        r = db.one("SELECT max(admin) a FROM devices WHERE lower(user) = lower(?) AND state != 'revocato'", user)
         admin = bool(r and r["a"])
     if admin or not user:
         return {k: True for k in PERMS}
-    p = db.one("SELECT * FROM perms WHERE user = ?", user)
+    p = db.one("SELECT * FROM perms WHERE lower(user) = lower(?)", user)
     more = {}
     if p and p["more"]:
         try:

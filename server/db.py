@@ -5,6 +5,7 @@ Le migrazioni sono un elenco numerato: ognuna gira una volta sola, in ordine,
 e il numero raggiunto sta in PRAGMA user_version. Non modificare una migrazione
 già rilasciata: aggiungine una nuova in fondo.
 """
+import hashlib
 import os
 import sqlite3
 import threading
@@ -114,6 +115,11 @@ MIGRATIONS = [
     ALTER TABLE perms ADD COLUMN more TEXT;
     ALTER TABLE pairings ADD COLUMN welcome INTEGER NOT NULL DEFAULT 0;
     """,
+    # 11: i token di sessione si salvano come SHA-256 (dispositivi.th): chi legge il DB o una sua copia non ha sessioni
+    # valide. Le sessioni esistenti restano buone, cambia solo come sono scritte
+    """
+    UPDATE sessions SET token = sha256(token) WHERE length(token) != 64;
+    """,
 ]
 
 _local = threading.local()
@@ -125,6 +131,7 @@ def conn():
     if c is None:
         c = _local.c = sqlite3.connect(PATH, timeout=10, isolation_level=None)
         c.row_factory = sqlite3.Row
+        c.create_function("sha256", 1, lambda v: hashlib.sha256(v.encode()).hexdigest() if v is not None else None, deterministic=True)
         c.execute("PRAGMA journal_mode=WAL")
     return c
 
@@ -132,6 +139,12 @@ def conn():
 def migrate():
     os.makedirs(os.path.dirname(PATH) or ".", exist_ok=True)
     c = conn()
+    # dentro ci sono sessioni, chiavi dei gettoni e credenziali degli abbinamenti: leggibile solo da chi gira il server
+    for f in (PATH, PATH + "-wal", PATH + "-shm"):
+        try:
+            os.chmod(f, 0o600)
+        except OSError:
+            pass
     v = c.execute("PRAGMA user_version").fetchone()[0]
     for n, sql in enumerate(MIGRATIONS[v:], start=v + 1):
         c.executescript(f"BEGIN; {sql}; PRAGMA user_version = {n}; COMMIT;")

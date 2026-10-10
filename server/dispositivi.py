@@ -171,6 +171,26 @@ def clear_fails(*keys):
             fails.pop(k, None)
 
 
+# quote per indirizzo sulle rotte pubbliche (sfide, segnalazione della Jam): senza, chiunque da internet poteva riempire
+# la tabella delle sfide (e bloccare i rinnovi di tutti) o tenere occupati i thread di waitress
+_hits, _hlock = {}, threading.Lock()
+
+
+def ip_limit(scope, n, per):
+    """True se questo indirizzo ha superato n richieste in per secondi per questa rotta."""
+    now, k = time.time(), (scope, client_ip())
+    with _hlock:
+        if len(_hits) > 20000:
+            for x in [x for x, v in _hits.items() if not v or now - v[-1] > 3600]:
+                _hits.pop(x, None)
+        v = [t for t in _hits.get(k, []) if now - t < per]
+        over = len(v) >= n
+        if not over:
+            v.append(now)
+        _hits[k] = v
+        return over
+
+
 def too_many(wait):
     r = jsonify(error=f"Troppi tentativi falliti: riprova fra {wait // 60 + 1} minuti." if wait > 90
                 else f"Troppi tentativi falliti: riprova fra {wait} secondi.", wait=wait)
@@ -270,11 +290,11 @@ def identity(tok=None, k=None):
         return dict(user=None, admin=True, upload=True, download=True, delete=True, dev=None, keyed=True, gen=0, perm=A.utenti.perms(None, True))
     now = time.time()
     if tok:
-        s = db.one("SELECT user, seen, exp, dev FROM sessions WHERE token = ?", tok)
+        s = db.one("SELECT user, seen, exp, dev FROM sessions WHERE token = ?", th(tok))
         if not s or (s["exp"] or s["seen"] + A.SESSION_DAYS * 86400) < now:
             return None
         if now - s["seen"] > 3600:
-            db.run("UPDATE sessions SET seen = ? WHERE token = ?", now, tok)
+            db.run("UPDATE sessions SET seen = ? WHERE token = ?", now, th(tok))
         dev_id = s["dev"]
     else:
         dev_id = ticket_dev(k)
@@ -342,11 +362,16 @@ def clean_name(v, fallback="Dispositivo"):
     return v or fallback
 
 
+def th(tok):
+    """Come si salva un token di sessione: il suo SHA-256 (migrazione 11)."""
+    return hashlib.sha256(str(tok).encode()).hexdigest()
+
+
 def new_session(d):
     tok, now = secrets.token_urlsafe(32), time.time()
     db.run("DELETE FROM sessions WHERE dev = ? AND exp < ?", d["id"], now)  # i rinnovi non accumulano sessioni scadute
     db.run("INSERT INTO sessions (token, user, admin, device, created, seen, dev, exp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-           tok, d["user"], d["admin"], d["cid"], now, now, d["id"], now + SESSION_H * 3600 if d["pub"] else None)
+           th(tok), d["user"], d["admin"], d["cid"], now, now, d["id"], now + SESSION_H * 3600 if d["pub"] else None)
     return tok
 
 
@@ -397,6 +422,8 @@ def owned(did):
 # ------------------------------------------------------------------ rotte pubbliche
 @bp.post("/api/chiave/sfida")
 def sfida():
+    if ip_limit("sfida", 30, 60):
+        return too_many(60)
     n, now = secrets.token_urlsafe(24), time.time()
     with nlock:
         if len(nonces) > 5000:
@@ -675,7 +702,54 @@ def registered(user):
     return tok
 
 
+def backup_notte():
+    """Una copia coerente dei due database ogni notte (fra le 3 e le 6), in data/armony/backup/notte-AAAAMMGG; restano le
+    ultime 7. Prima nessuna copia automatica: un disco rovinato o una migrazione sbagliata perdevano tutto."""
+    import os
+    import shutil
+    import sqlite3
+    now = time.localtime()
+    if not 3 <= now.tm_hour < 6 or time.time() - float(setting("backup_at") or 0) < 20 * 3600:
+        return
+    base = os.path.join(os.path.dirname(db.PATH), "backup")
+    dest = os.path.join(base, time.strftime("notte-%Y%m%d", now))
+    os.makedirs(dest, exist_ok=True)
+    os.chmod(base, 0o700)
+    for src, name in ((db.conn(), "armony.db"), (A.importa.nd(), "navidrome.db")):
+        out = sqlite3.connect(os.path.join(dest, name))
+        try:
+            src.backup(out)
+        finally:
+            out.close()
+        os.chmod(os.path.join(dest, name), 0o600)
+    for old in sorted(d for d in os.listdir(base) if d.startswith("notte-"))[:-7]:
+        shutil.rmtree(os.path.join(base, old), ignore_errors=True)
+    db.run("INSERT INTO settings (key, value) VALUES ('backup_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", str(time.time()))
+    A.diagnosi.log("info", "backup", f"copia notturna dei database in {os.path.basename(dest)}")
+
+
+def pulizia():
+    """Ogni ora: sessioni scadute, credenziali rimaste negli abbinamenti scaduti (token e sale valgono la password per
+    Subsonic), quote per indirizzo vecchie."""
+    while True:
+        time.sleep(3600)
+        try:
+            now = time.time()
+            db.run("UPDATE pairings SET t = '', s = '' WHERE expires < ? AND (t != '' OR s != '')", now)
+            db.run("DELETE FROM sessions WHERE exp IS NOT NULL AND exp < ?", now)
+            with _hlock:
+                for k in [k for k, v in _hits.items() if not v or now - v[-1] > 3600]:
+                    _hits.pop(k, None)
+        except Exception as e:  # noqa: BLE001
+            A.diagnosi.log("avviso", "dispositivi", f"pulizia oraria non riuscita: {e}")
+        try:
+            backup_notte()
+        except Exception as e:  # noqa: BLE001
+            A.diagnosi.log("errore", "backup", f"copia notturna dei database non riuscita: {e}")
+
+
 def init(flask_app, host):
     global A
     A = host
     flask_app.register_blueprint(bp)
+    threading.Thread(target=pulizia, daemon=True, name="pulizia").start()

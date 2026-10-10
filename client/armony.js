@@ -1932,6 +1932,8 @@ const Engine = {
     }
     if (Radio.st) return;  // la radio la manda avanti radio.js, secondo l'orario del server
     if (Math.floor(a.currentTime) % 5 === 0) store.set('pos', a.currentTime);
+    // mentre suona la posizione arriva al server ogni 30 s: "continua su un altro dispositivo" non riparte da minuti prima
+    if (P.syncQueue && !a.paused && Jam.role !== 'guest' && Date.now() - (QSync.at || 0) > 30000) QSync.push();
     if (Jam.role === 'guest') return;
     const rem = a.duration - a.currentTime; if (!isFinite(rem)) return;
     const n = this.nextIndex(); if (n == null || S.repeat === 'one' || Sleep.eot) return;
@@ -2150,11 +2152,19 @@ Bus.addEventListener('time', paintTime);
 /* ================= coda sincronizzata tra dispositivi ================= */
 const QSync = {
   t: null,
-  schedule() { if (!P.syncQueue || Jam.role === 'guest' || Radio.st) return; clearTimeout(this.t); this.t = setTimeout(() => this.push(), 4000); },
-  async push() {
-    const cur = S.queue[S.index]; if (!cur || !srv(cur.serverId)) return;
+  // un dispositivo fermato perché suona un altro (o che fa da telecomando) non salva: vincerebbe sulla coda di chi suona
+  schedule() { if (!P.syncQueue || Jam.role === 'guest' || Radio.st || Live.target) return; clearTimeout(this.t); this.t = setTimeout(() => this.push(), 4000); },
+  // last: l'app si sta chiudendo (pagehide): keepalive, così la richiesta parte anche a pagina chiusa
+  async push(last) {
+    const cur = S.queue[S.index]; if (!cur || !srv(cur.serverId) || srv(cur.serverId).local || Live.target) return;
     const ids = S.queue.filter(x => x.serverId === cur.serverId).slice(0, 1000).map(x => x.id);
-    try { await api('savePlayQueue', { id: ids, current: cur.id, position: Math.floor(Engine.time() * 1000) }, srv(cur.serverId), true); store.set('qsyncSaved', Date.now()); } catch {}
+    const params = { id: ids, current: cur.id, position: Math.floor(Engine.time() * 1000) };
+    this.at = Date.now();
+    try {
+      if (last) fetch(apiBase(srv(cur.serverId), 'savePlayQueue'), { method: 'POST', body: apiParams(srv(cur.serverId), params), keepalive: true }).catch(() => {});
+      else await api('savePlayQueue', params, srv(cur.serverId), true);
+      store.set('qsyncSaved', Date.now());
+    } catch {}
   },
   async check() {
     if (!P.syncQueue || !srv()) return null;
@@ -3343,7 +3353,15 @@ function songMenu(t, ctx = {}) {
       : ['offline', 'Salva per l\'offline', () => Offline.save([t])],
     phoneT ? null : ['down', 'Scarica il file originale', () => { const a = document.createElement('a'); a.href = apiUrl(srv(t.serverId), 'download', { id: t.id }); a.download = ''; a.click(); }],
     ['lyrics', 'Testo', () => { if (key(currentTrack() || {}) !== key(t)) return toast('Il testo si apre per il brano in riproduzione.'); sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; }],
-    ctx.pl != null && can('playlist') ? ['trash', 'Togli dalla playlist', async () => { await api('updatePlaylist', { playlistId: view.dataset.pl, songIndexToRemove: ctx.pl }); route(); }] : null,
+    ctx.pl != null && can('playlist') ? ['trash', 'Togli dalla playlist', async () => {
+      // per id sul server (capacità "pltogli"): la posizione vista qui può essere cambiata nel frattempo
+      const s = srv(t.serverId), pid = view.dataset.pl;
+      try {
+        if (s?.me?.caps?.includes('pltogli')) await srvApi(s, '/api/playlist/togli', { method: 'POST', body: JSON.stringify({ pid, id: t.id, index: ctx.pl }) });
+        else await api('updatePlaylist', { playlistId: pid, songIndexToRemove: ctx.pl });
+      } catch (e) { if (/409/.test(e.message)) await api('updatePlaylist', { playlistId: pid, songIndexToRemove: ctx.pl }); else return toast(e.message); }
+      emitSoon('playlists'); route();
+    }] : null,
     canEdit(t.serverId) ? ['pen', 'Modifica informazioni', () => editTrack(t)] : null,
     canPick(t.serverId) && !t.fed && !phoneT ? ['repeat', 'Scegli un\'altra versione', () => versionSheet(t)] : null,
     canDelete(t.serverId) ? ['trash', 'Elimina dal server', () => deleteTracks([t], t.title), 'danger'] : null
@@ -5200,6 +5218,9 @@ async function boot() {
   addEventListener('online', () => { HistSync.run(); Live.wake(true); Scrob.flush(); });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
   addEventListener('focus', () => Live.wake());
+  // chiusura della scheda o app mandata in sottofondo: l'ultima posizione va al server
+  addEventListener('pagehide', () => P.syncQueue && S.queue[S.index] && QSync.push(true));
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && P.syncQueue && isPlaying() && !Live.remote() && QSync.push(true));
   $('#themeBtn').onclick = () => { P.theme = THEMES[P.theme]?.[2] || 'auto'; savePrefs(); applyTheme(); toast(`Tema ${THEMES[P.theme][0].toLowerCase()}.`); };
   paintTheme();  // sul computer: due finestre visibili, il canale va a quella che si usa
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
