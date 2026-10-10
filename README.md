@@ -39,6 +39,8 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 **Per chi gestisce il server**
 - **Stato del server**: processore, memoria, rete, chi sta ascoltando cosa, dispositivi collegati, coda dei download, con l'andamento dell'ultima ora e del giorno.
 - **Registro eventi**: errori e situazioni incerte del server e dei telefoni in un posto solo, da copiare e mandare a chi ripara.
+- **Aggiornamenti sicuri**: un tasto, una copia dei database prima di ogni versione (più una ogni notte), ritorno automatico alla versione di prima se la nuova non parte, e solo versioni firmate.
+- Pensato per stare su internet: Navidrome raggiungibile solo da Armony, chiavi per dispositivo, limiti ai tentativi di password.
 
 **Server collegati**
 - Colleghi il tuo server a quello di un amico (con un codice di sicurezza da confrontare): in Cerca compare "Nella rete" con i loro brani, anche degli amici dei vostri amici. Li ascolti subito o li copi nella tua libreria. La pagina **Rete** mostra la mappa. Per ogni collegamento scegli il verso: vi vedete a vicenda, solo tu offri o solo tu ricevi. Funziona anche per i server dietro NAT, senza porte aperte: si appoggiano a uno raggiungibile e la rete si forma da sola, a maglia o a stella. Ti puoi **abbonare** alle playlist pubbliche degli amici: ne hai una copia che resta uguale all'originale.
