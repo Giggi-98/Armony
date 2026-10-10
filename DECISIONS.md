@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Comandi fra dispositivi in una casella con conferma; credenziali sbagliate fermate prima di Navidrome
+
+**Contesto:** il gemellaggio app–web restava instabile. Il registro ha mostrato due cause. (1) Un comando mandato mentre il canale del destinatario si riapriva andava perso. (2) Un telefono rimasto con la voce revocata (password vuota) ha chiesto a Navidrome un brano dopo l'altro, e Navidrome ha bloccato l'utente "gg" per troppi accessi falliti: per lui tutti i dispositivi arrivano dallo stesso indirizzo (Armony), quindi si è bloccato anche il computer.
+**Scelta:** (1) `lcmds` in `app.py`: ogni comando ha un id e resta 30 s finché il destinatario non lo conferma (`/api/live/ack`); arriva col canale, nel "hello" di un canale riaperto o con `/api/live/stato?device=` che il client chiede ogni 5 s quando il canale non regge. Chi lo manda ne chiede lo stato (`?cmd=`), aspetta altri 5 s se il destinatario è collegato ma non l'ha preso, e prima di suonare lui lo annulla (`DELETE /api/live/cmd/<id>`); il client ignora i doppioni. Capacità "livecmd". (2) Nel proxy, credenziali vuote non arrivano a Navidrome e quelle rifiutate 3 volte (stesso indirizzo, utente e credenziali) si rifiutano qui per 5 minuti; il secondo tentativo sul codice 40 non si fa più per credenziali già rifiutate. All'avvio la coda che punta a una voce revocata passa a quella viva dello stesso server.
+**Alternative scartate:** togliere il limite di Navidrome (`ND_AUTHREQUESTLIMIT=0`: serve ricreare il container di produzione e si perde la protezione contro chi prova le password); un WebSocket al posto dell'SSE (stessi problemi di rete, più codice, e waitress non lo gestisce); notifiche push native per l'app (servizi esterni).
+**Conseguenze:** un dispositivo con il canale caduto riceve i comandi entro 5 s; chi sbaglia la password tre volte resta fermo 5 minuti con quelle credenziali, ma la password giusta è un’altra impronta e passa subito.
+**Da rivedere se:** Navidrome legge l'indirizzo vero del client (X-Forwarded-For) per il suo limite, o l'app Android ottiene un canale nativo.
+
 ## 2026-10-10 — «Dove suona»: il client si riallinea da solo invece di chiedere «Risincronizza»
 
 **Contesto:** passando la musica fra web e telefono serviva spesso «Risincronizza». Il canale SSE può cadere in silenzio (Funnel instabile, schermo spento): chi manda la musica non riceve la risposta, dopo 5 s conclude «non risponde» e suona anche lui, e da lì i dispositivi restano disallineati.

@@ -158,6 +158,17 @@ const S = {
   lastList: [], me: {}
 };
 if (S.active !== 'telefono' && !S.servers.find(s => s.id === S.active)) S.active = S.servers[0]?.id || null;
+// una coda salvata quando il dispositivo era stato revocato e poi riabbinato punta ancora alla voce morta: ogni brano
+// verrebbe rifiutato (ed è così che un telefono ha fatto bloccare l'utente da Navidrome). Passa alla voce viva
+// dello stesso server e utente
+{
+  const dead = x => !x || x.revoked || x.pending;
+  const alive = x => S.servers.find(y => !dead(y) && y.url && x && y.url.replace(/\/+$/, '') === String(x.url || '').replace(/\/+$/, '') && y.user === x.user);
+  let moved = 0;
+  S.queue.forEach(t => { const x = S.servers.find(y => y.id === t.serverId); if (dead(x) && x) { const y = alive(x); if (y) { t.serverId = y.id; moved++; } } });
+  if (moved) store.set('queue', S.queue);
+  const act = S.servers.find(y => y.id === S.active); if (dead(act) && act && alive(act)) { S.active = alive(act).id; store.set('active', S.active); }
+}
 // credenziali Subsonic: si conserva token + sale, mai la password (che negli URL sarebbe leggibile)
 const subsonicCreds = pass => { const salt = uid(12); return { tok: md5(pass + salt), salt }; };
 function migrateCreds(list) {
@@ -4594,7 +4605,7 @@ const Live = {
   dur() { return this.st()?.duration || 0; },
   // il server manda ping e riceve battiti (livehb): solo allora il cane da guardia ha senso
   hb() { return !!srv()?.me?.caps?.includes('livehb'); },
-  stop() { clearTimeout(this.retry); clearInterval(this.dog); this.es?.close(); this.es = null; this.devices.clear(); this.states.clear(); this.target = null; this.sent = null; this.paint(); },
+  stop() { clearTimeout(this.retry); clearInterval(this.dog); clearInterval(this.pollT); this.es?.close(); this.es = null; this.devices.clear(); this.states.clear(); this.target = null; this.sent = null; this.paint(); },
   connect() {
     const was = this.target; this.stop(); this.want = was;
     if (!this.on()) return Presence.clear();
@@ -4609,26 +4620,38 @@ const Live = {
     // cane da guardia: un canale mezzo morto (app uccisa, rete cambiata, schermo spento) resta "aperto" per sempre.
     // Il battito va a tempo, non a giri: in sottofondo i timer possono scattare anche solo una volta al minuto
     if (hb) this.dog = setInterval(() => { if (Date.now() - this.last > 40000) this.connect(); else if (Date.now() - this.beatAt > 25000) this.beat(); }, 10000);
+    // finché il canale non regge (si sta riaprendo, o un proxy lo trattiene), stati e comandi si chiedono ogni 5 s
+    if (s.me?.caps?.includes('livecmd')) this.pollT = setInterval(() => this.poll(), 5000);
+  },
+  alive() { return this.es?.readyState === EventSource.OPEN && (!this.hb() || Date.now() - this.last < 20000); },
+  async poll() { if (!this.alive() && !document.hidden) await this.resync(true); },
+  // un comando arriva una volta sola anche se lo portano sia il canale sia il "hello" sia il controllo periodico;
+  // eseguito, si conferma al server, che smette di consegnarlo
+  take(m) {
+    if (m.id) { if ((this.seen ||= new Set()).has(m.id)) return; this.seen.add(m.id); if (this.seen.size > 200) this.seen.delete(this.seen.values().next().value); }
+    this.exec(m);
+    if (m.id) srvApi(srv(), '/api/live/ack', { method: 'POST', body: JSON.stringify({ id: m.id }) }).catch(() => {});
   },
   async relogin() { await syncSessions(); this.connect(); },
   // prima di spostare la musica: il canale dev'essere vivo, altrimenti si riapre e si aspetta il "hello" (al più 4 s).
   // È quello che faceva a mano "Risincronizza"
   async ready() {
-    const alive = this.es?.readyState === EventSource.OPEN && (!this.hb() || Date.now() - this.last < 20000);
-    if (alive || !this.on()) return;
+    if (this.alive() || !this.on()) return;
     const t0 = Date.now(); this.connect();
     while (!(this.helloAt > t0) && Date.now() - t0 < 4000) await new Promise(r => setTimeout(r, 100));
   },
   // dispositivi e stati come li vede il server adesso (capacità "livestato"): dopo un canale caduto in silenzio i
   // messaggi persi non tornano, questo sì. Restituisce lo scarto fra l'orologio del server e il nostro (ms)
-  async resync() {
+  async resync(mine, cmd) {
     const s = srv(); if (!s?.session || !s.me?.caps?.includes('livestato')) return null;
-    let r; try { r = await srvApi(s, '/api/live/stato'); } catch { return null; }
+    let r; try { r = await srvApi(s, '/api/live/stato?' + new URLSearchParams({ ...(mine ? { device: S.device } : {}), ...(cmd ? { cmd } : {}) })); } catch { return null; }
     const now = Date.now(), off = r.now * 1000 - now;
     this.devices = new Map(arr(r.devices).filter(d => d.device !== S.device).map(d => [d.device, d.name]));
     this.states = new Map(arr(r.states).filter(x => x.device !== S.device).map(x => [x.device, { ...x, recvAt: now }]));
     if (this.target && !this.devices.has(this.target)) this.target = null;
-    this.paint(); return { off, states: this.states };
+    this.paint();
+    arr(r.cmds).forEach(c => this.take(c));
+    return { off, states: this.states, cmd: r.cmd };
   },
   // battito per il server; 404 = non ha più il nostro canale, 401 = sessione scaduta
   beat() {
@@ -4661,6 +4684,7 @@ const Live = {
       const p = arr(m.states).find(s => s.playing && !s.solo);
       // dopo un riaggancio si torna telecomando di chi suona, o di chi si comandava prima
       if (Engine.el.paused && !Jam.role && !P.solo) this.target = p ? p.device : this.devices.has(this.want) ? this.want : null;
+      setTimeout(() => arr(m.cmds).forEach(c => this.take(c)), 0);  // comandi arrivati mentre il canale era chiuso
     } else if (m.type === 'join') {
       // anche dopo un fantasma: è una sessione nuova, lo stato vecchio non vale più
       this.devices.set(m.device, m.name); this.states.delete(m.device);
@@ -4676,7 +4700,7 @@ const Live = {
         else if (!Engine.el.paused) { Engine.el.pause(); toast(`La musica è passata su ${s.name}.`); }
         this.target = s.device;
       }
-    } else if (m.type === 'cmd') return this.exec(m);
+    } else if (m.type === 'cmd') return this.take(m);
     this.paint();
     if (this.remote() && this.track()?.id !== before && location.hash.startsWith('#/ora')) vNow();
     if (this.remote() && m.type === 'state' && m.state.device === this.target && location.hash.startsWith('#/coda')) vQueue();
@@ -4721,8 +4745,8 @@ const Live = {
       else if (cmd === 'repeat') st.repeat = { off: 'all', all: 'one', one: 'off' }[st.repeat || 'off'];
       this.paint();
     }
-    const sentAt = Date.now();
-    try { await srvApi(s, '/api/live/cmd', { method: 'POST', body: JSON.stringify({ to, cmd, value, from: S.device }) }); }
+    const sentAt = Date.now(); let id = null;
+    try { id = (await srvApi(s, '/api/live/cmd', { method: 'POST', body: JSON.stringify({ to, cmd, value, from: S.device }) })).id || null; }
     catch {
       // il server non lo vede (o non lo vediamo noi): elenco aggiornato, e la musica che stava per partire là riparte qui
       toast(`${this.devices.get(to) || 'Il dispositivo'} non è collegato${cmd === 'transfer' ? ': suono qui' : ''}.`);
@@ -4731,21 +4755,25 @@ const Live = {
       return;
     }
     // un dispositivo chiuso male può sembrare ancora collegato per qualche secondo: se non risponde, la musica resta qui
-    if (['transfer', 'play', 'toggle'].includes(cmd)) setTimeout(() => this.check(to, sentAt, cmd === 'transfer' ? value : null), 5000);
+    if (['transfer', 'play', 'toggle'].includes(cmd)) setTimeout(() => this.check(to, sentAt, cmd === 'transfer' ? value : null, id), 5000);
   },
-  async check(to, sentAt, v) {
+  async check(to, sentAt, v, id, again) {
     // ha risposto, l'uscita è passata a un altro dispositivo, o qui suona già qualcosa
     if ((this.states.get(to)?.recvAt || 0) > sentAt || (this.target && this.target !== to) || !Engine.el.paused) return;
     if (!this.target && !v) return;  // sparito mentre lo comandavamo: lo dice già "si è scollegato"
     // forse ha risposto e siamo noi a non averlo saputo (il nostro canale è caduto in silenzio): si chiede al server
     // prima di suonare anche qui, che vorrebbe dire due dispositivi che suonano insieme
-    const r = await this.resync();
+    const r = await this.resync(false, id);
     const st = r?.states.get(to);
-    if (st && st.at * 1000 - r.off > sentAt - 1000) {
-      if (v || st.playing) this.target = to;
+    if ((st && st.at * 1000 - r.off > sentAt - 1000) || r?.cmd?.done === 'eseguito') {
+      if (v || st?.playing) this.target = to;
       this.paint(); this.connect();  // il canale che ha perso la risposta si rifà
       return;
     }
+    // ancora collegato ma non l'ha preso (canale che si riapre, app che torna dallo sfondo): altri 5 s, poi si rinuncia
+    // e il comando si annulla sul server, così non parte più tardi mentre qui suona già
+    if (id && !again && this.devices.has(to) && r?.cmd && !r.cmd.done) return setTimeout(() => this.check(to, sentAt, v, id, true), 5000);
+    if (id) { const c = await srvApi(srv(), '/api/live/cmd/' + id, { method: 'DELETE' }).catch(() => null); if (c?.done === 'eseguito') { if (v) this.target = to; this.paint(); this.connect(); return; } }
     if (!Engine.el.paused || (this.target && this.target !== to)) return;
     const name = this.devices.get(to) || this.gone?.[to] || 'Il dispositivo';
     this.devices.delete(to); this.states.delete(to); this.target = null;

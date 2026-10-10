@@ -30,6 +30,8 @@ Armony - server di supporto.
   /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi;
                         /api/live/beat è il battito dei client con hb=1 (capacità "livehb").
                         /api/live/stato: dispositivi e stati in quel momento, per riallinearsi (capacità "livestato")
+                        e i comandi in attesa (?device=), lo stato di un comando (?cmd=); /api/live/ack conferma,
+                        DELETE /api/live/cmd/<id> annulla: i comandi restano 30 s finché non arrivano (capacità "livecmd")
                         Sullo stesso canale arrivano a tutti gli utenti "presence" (chi ascolta cosa sul server) e
                         "activity" (download, caricamenti, playlist pubbliche, Jam); /api/live/privacy li spegne
                         per il proprio utente (capacità "presenza"). E "libreria": brani nuovi visti da Navidrome
@@ -128,7 +130,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
 RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
@@ -460,11 +462,45 @@ PASS_RESP = ("content-type", "content-length", "content-range", "accept-ranges",
              "etag", "last-modified", "content-disposition", "x-content-duration")
 
 
+# ─── PERCHÉ credenziali sbagliate si fermano qui ───
+# Navidrome blocca un utente dopo pochi accessi falliti dallo stesso indirizzo, e per Navidrome tutti i dispositivi
+# arrivano da Armony: un telefono rimasto con la password vuota (voce revocata) che salta un brano dopo l'altro ha
+# bloccato "gg" anche sul computer ("Too many failed login attempts", 10/10). Credenziali vuote non arrivano mai a
+# Navidrome; quelle già rifiutate più volte (stesso indirizzo, utente e credenziali) si rifiutano qui per 5 minuti
+BAD_AUTH = {}  # (ip, utente, impronta delle credenziali) -> [rifiuti confermati, ultimo]
+BAD_AUTH_MAX, BAD_AUTH_TTL = 3, 300
+bad_lock = threading.Lock()
+
+
+def auth_key(val):
+    t, salt, pw = val("t"), val("s"), val("p")
+    if not val("u") or not ((t and salt) or (pw and pw != "enc:")):
+        return None  # niente da provare: si rifiuta senza chiedere a Navidrome
+    return (client_ip(), val("u").lower(), hashlib.sha1(f"{t}|{salt}|{pw}".encode()).hexdigest()[:16])
+
+
+def auth_bad(k, add=False):
+    now = time.time()
+    with bad_lock:
+        if add:
+            e = BAD_AUTH.setdefault(k, [0, now])
+            e[0], e[1] = e[0] + 1, now
+            if len(BAD_AUTH) > 5000:
+                for x in [x for x, v in BAD_AUTH.items() if now - v[1] > BAD_AUTH_TTL]:
+                    BAD_AUTH.pop(x, None)
+            return e[0]
+        e = BAD_AUTH.get(k)
+        if e and now - e[1] > BAD_AUTH_TTL:
+            BAD_AUTH.pop(k, None)
+            return 0
+        return e[0] if e else 0
+
+
 @app.route("/rest/<path:p>", methods=["GET", "POST"])
 @app.route("/share/<path:p>", methods=["GET"])
 def proxy(p):
     prefix = request.path.split("/")[1]
-    dev, args, pm, who = None, request.args, None, None
+    dev, args, pm, who, ak = None, request.args, None, None, None
     m = p.rsplit("/", 1)[-1].removesuffix(".view")
     if prefix == "rest":
         # /share resta pubblica (link condivisi di Navidrome); /rest vuole un dispositivo fidato: gettone k (audio e
@@ -490,6 +526,13 @@ def proxy(p):
             body, mt = utenti.subsonic_error(is_json, 50, f"«{utenti.PERMS[utenti.WRITE[m]][0]}» non è abilitato per il tuo utente")
             return Response(body, mimetype=mt)
         hide_pl = bool(pm and not pm.get("vedipl", True) and m in ("getPlaylists", "getPlaylist"))
+        ak = auth_key(val)
+        if not ak or auth_bad(ak) >= BAD_AUTH_MAX:
+            if ak is None or auth_bad(ak) == BAD_AUTH_MAX:
+                diagnosi.log("avviso", "accesso", f"credenziali {'vuote' if ak is None else 'rifiutate più volte'} fermate prima di Navidrome",
+                             f"utente {val('u') or '?'}, client {val('c') or '?'}, {m}", user=val("u") or None, dev=dev)
+            body, mt = utenti.subsonic_error(is_json, 40, "Wrong username or password")
+            return Response(body, mimetype=mt, status=401 if m in ("stream", "download", "getCoverArt", "hls") else 200)
         args = [(a, b) for a, b in request.args.items(multi=True) if a != "k"]  # il gettone non arriva a Navidrome
     headers = {k: v for k, v in request.headers.items() if k.lower() in PASS_REQ}
     headers["Accept-Encoding"] = "identity"
@@ -517,8 +560,17 @@ def proxy(p):
         if b'"code":40' not in body and b'code="40"' not in body:
             r._content_consumed, r._content = True, body
             break
+        if ak and auth_bad(ak):  # già rifiutate prima: non è Navidrome occupato, niente secondo tentativo
+            r._content_consumed, r._content = True, body
+            break
         r.close()
         time.sleep(0.8)
+    if prefix == "rest" and r.status_code == 200 and int(r.headers.get("content-length") or 0) <= 2000 and \
+            ("json" in (r.headers.get("content-type") or "") or "xml" in (r.headers.get("content-type") or "")):
+        b40 = r.content
+        r._content_consumed, r._content = True, b40
+        if ak and (b'"code":40' in b40 or b'code="40"' in b40):
+            auth_bad(ak, add=True)  # rifiuto confermato (anche dopo il secondo tentativo)
     out = {k: v for k, v in r.headers.items() if k.lower() in PASS_RESP}
     if prefix == "rest" and hide_pl and r.status_code == 200:  # solo le sue playlist, in JSON o in XML
         body = utenti.filter_playlists(m, r.content, "json" in (r.headers.get("content-type") or ""), user)
@@ -806,8 +858,24 @@ def prefs_put():
 lconns = {}    # utente -> {id connessione: {"device", "name", "q"}}
 lstates = {}   # utente -> {dispositivo: ultimo stato}
 llock = threading.Lock()
+# ─── PERCHÉ una casella dei comandi ───
+# Un comando ("suona qui la mia coda") mandato mentre il canale del destinatario si sta riaprendo (Funnel che cade,
+# telefono che torna dallo sfondo) andava perso, e chi lo mandava suonava anche lui. Ora resta qui finché il
+# destinatario non lo conferma (/api/live/ack) per LIVE_CMD_TTL secondi: arriva nel "hello" del canale riaperto o
+# con /api/live/stato?device=…; chi lo ha mandato ne chiede lo stato e, se lo annulla (DELETE), non parte più
+lcmds = {}     # utente -> {id: {"to", "cmd", "value", "from", "ts", "done"}}
+LIVE_CMD_TTL = 30
 LIVE_BEAT_MAX = 120  # secondi senza battito prima di dare per sparito un dispositivo (Android in sottofondo batte anche 1/min)
 LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat", "next", "left", "radio")
+
+
+def cmd_pending(u, dev, now):
+    """I comandi per quel dispositivo non ancora confermati né annullati (da chiamare con llock)."""
+    box = lcmds.get(u, {})
+    for i in [i for i, c in box.items() if now - c["ts"] > 120]:
+        box.pop(i, None)
+    return [{"type": "cmd", "id": i, "cmd": c["cmd"], "value": c["value"], "from": c["from"]}
+            for i, c in box.items() if c["to"] == dev and not c["done"] and now - c["ts"] < LIVE_CMD_TTL]
 
 
 def live_put(user, msg, only=None, skip=None):
@@ -877,7 +945,7 @@ def live_stream():
         lconns.setdefault(u, {})[cid] = me
         others = {c["device"]: c["name"] for c in lconns[u].values() if c["device"] != dev}
         hello = {"type": "hello", "devices": [{"device": d, "name": n} for d, n in others.items()],
-                 "states": [s for d, s in lstates.get(u, {}).items() if d != dev]}
+                 "states": [s for d, s in lstates.get(u, {}).items() if d != dev], "cmds": cmd_pending(u, dev, time.time())}
     if old and hb:
         pres_gone(u, dev)
     # presenza e attività di tutto il server: chi si collega vede subito chi sta ascoltando
@@ -949,11 +1017,38 @@ def live_state():
 def live_stato():
     """Dispositivi collegati e stati di questo utente, come nel "hello": per chi teme di aver perso dei messaggi
     (canale caduto in silenzio) e deve decidere se un comando è arrivato prima di suonare in due (capacità "livestato")."""
-    u = user_or_400()
+    u, now = user_or_400(), time.time()
+    dev, cid = request.args.get("device") or "", request.args.get("cmd") or ""
     with llock:
         devs = {c["device"]: c["name"] for c in lconns.get(u, {}).values() if not c.get("stop")}
         states = list(lstates.get(u, {}).values())
-    return jsonify(devices=[{"device": d, "name": n} for d, n in devs.items()], states=states, now=time.time())
+        cmds = cmd_pending(u, dev, now) if dev else []  # canale che non regge: i comandi arrivano anche così
+        c = lcmds.get(u, {}).get(cid)
+        cmd = {"id": cid, "done": c["done"], "age": now - c["ts"]} if c else None
+    return jsonify(devices=[{"device": d, "name": n} for d, n in devs.items()], states=states, cmds=cmds, cmd=cmd, now=now)
+
+
+@app.post("/api/live/ack")
+def live_ack():
+    """Il destinatario ha eseguito il comando: non si consegna più."""
+    u, i = user_or_400(), str((request.get_json(silent=True) or {}).get("id") or "")
+    with llock:
+        c = lcmds.get(u, {}).get(i)
+        if c and not c["done"]:
+            c["done"] = "eseguito"
+    return jsonify(ok=bool(c), done=c["done"] if c else None)
+
+
+@app.delete("/api/live/cmd/<i>")
+def live_cmd_cancel(i):
+    """Chi lo ha mandato ci rinuncia (suona lui): se non era ancora arrivato, non arriverà più."""
+    u = user_or_400()
+    with llock:
+        c = lcmds.get(u, {}).get(i)
+        was = c["done"] if c else None
+        if c and not c["done"]:
+            c["done"] = "annullato"
+    return jsonify(ok=bool(c), done=was or ("annullato" if c else None))
 
 
 @app.post("/api/live/cmd")
@@ -970,8 +1065,11 @@ def live_cmd():
     value = d.get("value")
     if not isinstance(value, (int, float, dict)) or len(json.dumps(value)) > 600_000:  # una coda di 1000 brani
         value = None
-    live_put(u, {"type": "cmd", "cmd": cmd, "value": value, "from": str(d.get("from") or "")[:40]}, only=to)
-    return jsonify(ok=True)
+    i, frm = uuid.uuid4().hex[:12], str(d.get("from") or "")[:40]
+    with llock:
+        lcmds.setdefault(u, {})[i] = {"to": to, "cmd": cmd, "value": value, "from": frm, "ts": time.time(), "done": None}
+    live_put(u, {"type": "cmd", "id": i, "cmd": cmd, "value": value, "from": frm}, only=to)
+    return jsonify(ok=True, id=i)
 
 
 # ------------------------------------------------------------------ presenza e attività: chi ascolta cosa, su tutto il server
