@@ -224,7 +224,7 @@ async function api(method, params, s = srv(), post = false, again = false) {
 }
 const norm = (x, sid = S.active) => ({
   id: x.id, title: x.title || 'Senza titolo', artist: x.displayArtist || x.artist || 'Artista sconosciuto',
-  artistId: x.artistId, album: x.album || '', albumId: x.albumId, duration: x.duration || 0, track: x.track,
+  artistId: x.artistId, album: x.album === '[Unknown Album]' ? '' : x.album || '', albumId: x.albumId,  // il segnaposto di Navidrome per i file senza album duration: x.duration || 0, track: x.track,
   coverArt: x.coverArt, starred: !!x.starred, suffix: x.suffix, bitRate: x.bitRate, genre: x.genre, year: x.year,
   rg: x.replayGain ? { trackGain: x.replayGain.trackGain, albumGain: x.replayGain.albumGain, trackPeak: x.replayGain.trackPeak, albumPeak: x.replayGain.albumPeak } : null,
   serverId: sid
