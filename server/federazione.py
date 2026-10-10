@@ -289,7 +289,7 @@ def clean_url(u):
 
 @bp.post("/fed/v1/pair")
 def pair():
-    ip, now = request.remote_addr or "", time.time()
+    ip, now = A.client_ip(), time.time()  # dal Funnel conta l'indirizzo vero, non 127.0.0.1
     recent = [t for t in pair_failed.get(ip, []) if now - t < 600]
     if len(recent) >= 10:
         return jsonify(error="Troppi tentativi: riprova più tardi"), 429
