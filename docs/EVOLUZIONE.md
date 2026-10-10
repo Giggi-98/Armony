@@ -263,6 +263,10 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.21.0 (2026-10-10)**: utenti creati dall'amministratore con link e QR di benvenuto (la password la sceglie l'amico),
+permessi per utente applicati dal proxy, playlist visibili solo al proprietario, schermata di accesso; correzioni dal
+registro eventi (codice 40 di Navidrome occupato, saturazione dei thread).
+
 **0.20.0 (2026-10-10)**: canale inverso per i server dietro NAT (rete a maglia o a stella), abbonamenti alle
 playlist pubbliche dei server collegati, mix del giorno, cache di Navidrome più grande.
 

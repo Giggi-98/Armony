@@ -312,7 +312,7 @@ document.addEventListener('click', e => {
 async function vRadio() {
   if (!srv()) return noServer();
   view.innerHTML = `<div class="rhead"><div><h1>Radio</h1><p class="sub">Stazioni che suonano senza fermarsi sul server. Ti sintonizzi e senti lo stesso punto degli altri, come in diretta.</p></div>
-      <button class="btn primary" data-act="rnew">${ic('plus')} Crea una radio</button></div>
+      ${can('radio') ? `<button class="btn primary" data-act="rnew">${ic('plus')} Crea una radio</button>` : ''}</div>
     <div class="hsec"><h2>Su questo server</h2></div><div class="rlist" id="rHere"></div>
     ${netOk() ? `<div class="hsec"><h2>Dalla rete</h2><small class="netms">dai server collegati</small></div><div class="rlist" id="rNet"></div>` : ''}`;
   [$('#rHere'), $('#rNet')].forEach(b => b && window.autoAnimate?.(b));

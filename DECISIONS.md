@@ -27,6 +27,22 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Utenti creati dall'amministratore con link di benvenuto; permessi applicati dal proxy
+
+**Contesto:** l'utente vuole creare in fretta gli account degli amici, con playlist proprie, e che un utente non amministratore veda solo le playlist che ha creato; una sezione con cosa ogni utente può fare. Al primo ingresso l'amico deve scegliere la sua password, che sostituisce quella dell'account. Il codice d'invito per registrarsi da soli resta.
+**Scelta:** `server/utenti.py`. L'amministratore crea l'utente su Navidrome con una password provvisoria casuale che nessuno vede e riceve un codice di benvenuto monouso (24 ore, `pairings.welcome`, migrazione 10): link `#/benvenuto/<codice>` per il browser, lo stesso come QR per l'app. Chi lo apre sceglie la password (`POST /api/benvenuto`, che la scrive su Navidrome come amministratore) e riceve il "grant" del primo accesso fidato già usato dagli inviti. Permessi per utente in `perms` (colonne di prima più `more` in JSON) con un elenco unico (`PERMS`), presenti in `g.who["perm"]` e in `/api/me`; il proxy rifiuta createPlaylist/updatePlaylist/deletePlaylist e le condivisioni a chi non può e toglie da getPlaylists/getPlaylist (JSON e XML) le playlist degli altri a chi non ha «vede le playlist degli altri» (spento di base). Corretto un difetto latente: un dispositivo abbinato ereditava il ruolo di amministratore di chi aveva creato il codice, anche per un altro utente.
+**Alternative scartate:** mandare all'amico una password scelta dall'amministratore (la conoscerebbero in due e viaggerebbe in chat); filtrare le playlist solo nell'interfaccia (le app Subsonic le vedrebbero comunque); playlist private per tutti forzate su Navidrome (cambierebbe i dati degli utenti invece della vista); un codice d'abbinamento con dentro le credenziali Subsonic (resterebbe valida la password provvisoria).
+**Conseguenze:** un utente senza «vede le playlist degli altri» non vede neanche quelle pubbliche dell'amministratore; i permessi di un client senza chiave si riconoscono dal nome utente. Il link vale una volta: se l'amico sbaglia dispositivo serve un link nuovo.
+**Da rivedere se:** Navidrome aggiunge permessi per utente sulle playlist, o servono gruppi di utenti con gli stessi permessi.
+
+## 2026-10-10 — Navidrome occupato: secondo tentativo sul codice 40; più thread e connessioni
+
+**Contesto:** il registro eventi ha mostrato brani saltati ("non riproducibile") e «utente o password errati» con credenziali giuste, negli stessi minuti in cui Navidrome scansionava i download e riscriveva playlist; e il server saturo (96 thread su 96, limite di 100 connessioni) mentre Navidrome si riavviava, con le chiamate JSON del proxy appese fino a 10 minuti.
+**Scelta:** il proxy riprova una volta, dopo 0,8 s, le risposte d'errore brevi con codice 40 (JSON o XML); lo stesso fa `nd_get` e il lettore riprova una volta un brano che non parte prima di saltarlo. Timeout di lettura di 30 s per tutto tranne flussi, scaricamenti e copertine; 160 thread, 1000 connessioni (dal Funnel ogni copertina è una connessione), pool di 64 connessioni verso Navidrome.
+**Alternative scartate:** ridurre scansioni e riscritture (servono per vedere subito i download); un secondo tentativo su ogni errore (rallenterebbe le password davvero sbagliate più del necessario).
+**Conseguenze:** una password davvero sbagliata risponde 0,8 s più tardi.
+**Da rivedere se:** Navidrome smette di rispondere 40 quando il suo database è occupato.
+
 ## 2026-10-10 — Canale inverso per i server dietro NAT; abbonamenti alle playlist; mix del giorno dallo storico
 
 **Contesto:** l'utente vuole una rete fra server a maglia o a stella secondo come ognuno esce su internet. Un server dietro NAT o CGNAT poteva chiamare gli altri, ma nessuno poteva chiamare lui: la sua libreria restava invisibile. Chiede anche di completare il piano: abbonamenti (sincronizzazione selettiva), mix in stile Daily Mix, cache di Navidrome.

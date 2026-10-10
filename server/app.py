@@ -18,7 +18,8 @@ Armony - server di supporto.
                         Tutte le rotte "admin" di RULES (e le azioni sui dispositivi degli altri) cambiano qualcosa solo
                         da un dispositivo con chiave o da casa/Tailscale: da internet senza chiave GET sì, il resto 403
                         con code "impserver" (capacità "impserver"; /api/me dice srvedit)
-  /api/users            permessi per utente (solo amministratori)
+  /api/users            utenti, permessi, creazione con link di benvenuto, eliminazione (solo amministratori, utenti.py);
+                        /api/benvenuto è pubblica: chi apre il link sceglie la sua password (capacità "permessi")
   /api/register         un amico si crea l'account (pubblica: info e registrazione con invito);
                         /api/register/settings e /invites solo amministratori
   /api/tracks/delete    elimina file dalla libreria (permesso "delete"); il percorso vero viene dal DB di
@@ -92,6 +93,7 @@ import ascolti
 import diagnosi
 import dispositivi
 import importa
+import utenti
 import federazione
 import metadati
 import radio
@@ -113,7 +115,7 @@ except OSError:
 MCAST_GRP, MCAST_PORT = "239.255.77.77", 47777
 INSTANCE = uuid.uuid4().hex[:12]
 STARTED = time.time()
-THREADS = 96  # thread di waitress: ogni dispositivo collegato ne tiene uno (/api/live), più flussi audio e Jam
+THREADS = 160  # thread di waitress: ogni dispositivo collegato ne tiene uno (/api/live), più flussi audio, Jam, canali
 
 AUDIO_FORMATS = {"mp3", "m4a", "opus", "flac"}
 AUDIO_QUALITIES = {"best": "0", "320": "320", "256": "256", "192": "192", "128": "128"}
@@ -122,10 +124,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/chiave", None), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/chiave", None), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -134,6 +136,8 @@ ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,48}$")
 
 app = Flask(__name__, static_folder=None)
 http = requests.Session()
+# verso Navidrome partono molte richieste insieme (copertine di una pagina, flussi, la rete): il pool di 10 scartava connessioni
+http.mount("http://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=64))
 
 
 # ------------------------------------------------------------------ base
@@ -204,10 +208,12 @@ def guard():
     g.who = identity()
     if not g.who:
         return dispositivi.deny()
-    if need != "user" and not g.who["admin" if need == "admin" else need]:
+    # "admin", oppure un permesso dell'utente (utenti.PERMS): l'amministratore li ha tutti
+    if need != "user" and not (g.who["admin"] if need == "admin" else g.who["admin"] or g.who["perm"].get(need, True)):
         return jsonify(error={"admin": "Serve un amministratore.", "upload": "Il caricamento non è abilitato per il tuo utente.",
                               "download": "I download non sono abilitati per il tuo utente.",
-                              "delete": "Modifica ed eliminazione non sono abilitate per il tuo utente."}[need]), 403
+                              "delete": "Modifica ed eliminazione non sono abilitate per il tuo utente."}.get(need)
+                       or f"«{utenti.PERMS[need][0]}» non è abilitato per il tuo utente: chiedilo a chi gestisce il server."), 403
     # impostazioni del server: da internet senza chiave un amministratore le legge ma non le cambia (dispositivi.py)
     if need == "admin" and request.method not in ("GET", "HEAD") and not dispositivi.can_change(g.who):
         return dispositivi.refuse_change()
@@ -229,7 +235,7 @@ def public_url():
 
 
 def me_payload():
-    return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"], delete=g.who["delete"],
+    return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"], delete=g.who["delete"], perm=g.who["perm"],
                 name=NAME, version=VERSION, api=API_LEVEL, caps=caps(), public=public_url(), **dispositivi.me_extra(g.who))
 
 
@@ -255,38 +261,6 @@ def me():
 @app.post("/api/logout")
 def logout():
     db.run("DELETE FROM sessions WHERE token = ?", request.headers.get("X-Token") or "")
-    return jsonify(ok=True)
-
-
-@app.get("/api/users")
-def users():
-    rows = db.all_("SELECT u.user, max(s.admin) admin, max(s.seen) seen, count(s.token) sessions, "
-                   "coalesce(p.upload, 1) upload, coalesce(p.download, 1) download, coalesce(p.del, 0) del "
-                   "FROM (SELECT user FROM sessions UNION SELECT user FROM perms) u "
-                   "LEFT JOIN sessions s ON s.user = u.user LEFT JOIN perms p ON p.user = u.user "
-                   "GROUP BY u.user ORDER BY u.user")
-    return jsonify([{**{k: r[k] for k in ("user", "seen", "sessions")}, "admin": bool(r["admin"]), "upload": bool(r["upload"]),
-                     "download": bool(r["download"]), "delete": bool(r["del"])} for r in rows])
-
-
-@app.put("/api/users/<name>")
-def set_user(name):
-    d = request.get_json(silent=True) or {}
-    db.run("INSERT INTO perms (user, upload, download, del) VALUES (?, ?, ?, ?) "
-           "ON CONFLICT(user) DO UPDATE SET upload = excluded.upload, download = excluded.download, del = excluded.del",
-           name[:100], int(bool(d.get("upload", True))), int(bool(d.get("download", True))), int(bool(d.get("delete", False))))
-    return jsonify(ok=True)
-
-
-@app.delete("/api/users/<name>/sessions")
-def revoke_user(name):
-    # un dispositivo con chiave rifarebbe la sessione da solo: "disconnetti" revoca tutti i dispositivi dell'utente
-    for d in db.all_("SELECT * FROM devices WHERE user = ? AND state != 'revocato'", name):
-        db.run("UPDATE devices SET state = 'revocato', revoked = ? WHERE id = ?", time.time(), d["id"])
-        dispositivi.cut(d)
-        dispositivi.event("revocato", name, d["id"], f"{d['name']}, tutti i dispositivi, da {g.who['user'] or 'emergenza'}")
-    db.run("DELETE FROM sessions WHERE user = ?", name)
-    dispositivi.notify(name)
     return jsonify(ok=True)
 
 
@@ -486,7 +460,8 @@ PASS_RESP = ("content-type", "content-length", "content-range", "accept-ranges",
 @app.route("/share/<path:p>", methods=["GET"])
 def proxy(p):
     prefix = request.path.split("/")[1]
-    dev, args = None, request.args
+    dev, args, pm, who = None, request.args, None, None
+    m = p.rsplit("/", 1)[-1].removesuffix(".view")
     if prefix == "rest":
         # /share resta pubblica (link condivisi di Navidrome); /rest vuole un dispositivo fidato: gettone k (audio e
         # copertine non mandano intestazioni) o X-Token. Le credenziali Subsonic da sole valgono solo per i client
@@ -503,20 +478,49 @@ def proxy(p):
         elif not dispositivi.legacy_ok():
             g.why = dispositivi.legacy_why()
             return dispositivi.deny()
+        # permessi dell'utente (utenti.py): anche per le app Subsonic senza chiave, riconosciute dal nome utente
+        user = (who or {}).get("user") or val("u")
+        pm = who["perm"] if who and who.get("user") else utenti.perms(user) if user else None
+        is_json = val("f") == "json"
+        if pm and m in utenti.WRITE and not pm.get(utenti.WRITE[m], True):
+            body, mt = utenti.subsonic_error(is_json, 50, f"«{utenti.PERMS[utenti.WRITE[m]][0]}» non è abilitato per il tuo utente")
+            return Response(body, mimetype=mt)
+        hide_pl = bool(pm and not pm.get("vedipl", True) and m in ("getPlaylists", "getPlaylist"))
         args = [(a, b) for a, b in request.args.items(multi=True) if a != "k"]  # il gettone non arriva a Navidrome
     headers = {k: v for k, v in request.headers.items() if k.lower() in PASS_REQ}
     headers["Accept-Encoding"] = "identity"
     headers["X-Forwarded-For"] = client_ip()
     headers["X-Forwarded-Host"] = request.host
     headers["X-Forwarded-Proto"] = request.scheme
-    try:
-        r = http.request(request.method, f"{NAVIDROME_URL}/{prefix}/{p}", params=args,
-                         data=request.get_data() if request.method == "POST" else None,
-                         headers=headers, stream=True, timeout=(5, 600))
-    except requests.RequestException:
-        return jsonify(error="Il server musicale non risponde"), 502
+    # audio e scaricamenti possono durare (transcodifica lenta, file grandi); il resto no: una chiamata JSON appesa a un
+    # Navidrome bloccato tiene un thread, e con il limite di 10 minuti un riavvio di Navidrome esauriva tutti i thread
+    long = m in ("stream", "download", "getCoverArt", "hls") or prefix == "share"
+    for attempt in (0, 1):
+        try:
+            r = http.request(request.method, f"{NAVIDROME_URL}/{prefix}/{p}", params=args,
+                             data=request.get_data() if request.method == "POST" else None,
+                             headers=headers, stream=True, timeout=(5, 600 if long else 30))
+        except requests.RequestException:
+            return jsonify(error="Il server musicale non risponde"), 502
+        # ─── PERCHÉ un secondo tentativo ───
+        # Con il suo database occupato (scansioni, playlist riscritte) Navidrome risponde per un attimo "credenziali
+        # errate" (codice 40) anche a credenziali giuste: il brano saltava e l'app diceva "utente o password errati".
+        # Solo per le risposte d'errore brevi in JSON o XML, una volta, dopo un attimo
+        ct = r.headers.get("content-type") or ""
+        if attempt or prefix != "rest" or not ("json" in ct or "xml" in ct) or int(r.headers.get("content-length") or 0) > 2000:
+            break
+        body = r.content
+        if b'"code":40' not in body and b'code="40"' not in body:
+            r._content_consumed, r._content = True, body
+            break
+        r.close()
+        time.sleep(0.8)
     out = {k: v for k, v in r.headers.items() if k.lower() in PASS_RESP}
-    m = p.rsplit("/", 1)[-1].removesuffix(".view")
+    if prefix == "rest" and hide_pl and r.status_code == 200:  # solo le sue playlist, in JSON o in XML
+        body = utenti.filter_playlists(m, r.content, "json" in (r.headers.get("content-type") or ""), user)
+        r.close()
+        out.pop("content-length", None)
+        return Response(body, status=200, headers=out)
     if prefix == "rest" and m in ("createPlaylist", "updatePlaylist") and r.status_code == 200:
         # risposta piccola: letta intera per sapere se è andata, poi l'attività in un thread a parte
         body = r.content
@@ -2244,6 +2248,7 @@ dispositivi.init(app, sys.modules[__name__])
 radio.init(app, sys.modules[__name__])
 diagnosi.init(app, sys.modules[__name__])
 importa.init(app, sys.modules[__name__])
+utenti.init(app, sys.modules[__name__])
 ascolti.init(app, sys.modules[__name__])
 
 
@@ -2283,5 +2288,7 @@ if __name__ == "__main__":
     # ogni dispositivo collegato tiene un thread per il canale dal vivo (/api/live), oltre a flussi audio e Jam
     # dal Funnel e da `tailscale serve` le richieste arrivano da tailscaled su 127.0.0.1: l'indirizzo vero è in X-Forwarded-For
     # (dispositivi.client_ip: limiti dei tentativi, registro, Jam vicine). Da altri indirizzi l'intestazione si scarta
-    serve(app, host="0.0.0.0", port=PORT, threads=THREADS, channel_timeout=600,
+    # connection_limit: dal Funnel ogni copertina di una pagina è una connessione a sé (HTTP/2 fuori, HTTP/1.1 dentro):
+    # con il limite di 100 una pagina piena di copertine bloccava tutti gli altri. asyncore_use_poll: oltre 1024 descrittori
+    serve(app, host="0.0.0.0", port=PORT, threads=THREADS, channel_timeout=600, connection_limit=1000, asyncore_use_poll=True,
           trusted_proxy="127.0.0.1", trusted_proxy_headers={"x-forwarded-for"}, trusted_proxy_count=1)

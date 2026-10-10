@@ -194,6 +194,8 @@ def radio_list():
 @bp.post("/api/radio")
 def radio_create():
     u, d = A.user_or_400(), request.get_json(silent=True) or {}
+    if not g.who["admin"] and not g.who["perm"].get("radio", True):
+        return jsonify(error="Creare stazioni non è abilitato per il tuo utente: chiedilo a chi gestisce il server."), 403
     tracks = clean_tracks(d.get("tracks"))
     if not tracks:
         return jsonify(error="Nessun brano da mettere in onda"), 400

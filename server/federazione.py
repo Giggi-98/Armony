@@ -370,10 +370,15 @@ def nd_params():
 
 
 def nd_get(method, **params):
-    try:
-        r = A.http.get(f"{A.NAVIDROME_URL}/rest/{method}", params={**nd_params(), **params}, timeout=30).json()["subsonic-response"]
-    except (requests.RequestException, ValueError, KeyError):
-        raise FedError("Il server musicale non risponde", 502)
+    for attempt in (0, 1):
+        try:
+            r = A.http.get(f"{A.NAVIDROME_URL}/rest/{method}", params={**nd_params(), **params}, timeout=30).json()["subsonic-response"]
+        except (requests.RequestException, ValueError, KeyError):
+            raise FedError("Il server musicale non risponde", 502)
+        # Navidrome occupato risponde per un attimo "credenziali errate" (codice 40) anche a quelle giuste: si riprova una volta
+        if attempt or (r.get("error") or {}).get("code") != 40:
+            break
+        time.sleep(0.8)
     if r.get("status") != "ok":
         raise FedError((r.get("error") or {}).get("message") or "Navidrome ha rifiutato la richiesta", 502)
     return r
@@ -1406,6 +1411,8 @@ def rete_subscribe():
     d, u = request.get_json(silent=True) or {}, g.who.get("user")
     if not u or not g.who["download"]:
         return jsonify(error="Gli abbonamenti copiano i brani qui: serve il permesso di download."), 403
+    if not g.who["admin"] and not g.who["perm"].get("playlist", True):
+        return jsonify(error="Creare e modificare playlist non è abilitato per il tuo utente."), 403
     n, rid, pid = node(str(d.get("node") or "")), str(d.get("id") or ""), str(d.get("pid") or "")
     if not n or n["state"] != "attivo" or not A.ID_RE.match(rid) or not A.ID_RE.match(pid):
         return jsonify(error="Richiesta non valida"), 400

@@ -2,8 +2,8 @@
    Prima la cache: l'app si apre subito anche in 5G. In sottofondo (al più ogni minuto) si chiede al server se i file
    sono cambiati (ETag: una risposta 304 costa pochi byte); se sì si scaricano tutti e si sostituiscono insieme,
    mai metà vecchi e metà nuovi. La versione nuova vale dalla prossima apertura, e la pagina riceve "aggiornata". */
-const V = 'armony-v7';
-const SHELL = ['./', 'index.html', 'armony.js', 'jam.js', 'radio.js', 'telefono.js', 'dispositivi.js', 'diagnosi.js', 'manifest.json', 'icon.svg', 'vendor/auto-animate.min.js'];
+const V = 'armony-v8';
+const SHELL = ['./', 'index.html', 'armony.js', 'jam.js', 'radio.js', 'telefono.js', 'dispositivi.js', 'diagnosi.js', 'utenti.js', 'manifest.json', 'icon.svg', 'vendor/auto-animate.min.js'];
 self.addEventListener('install', e => e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 const put = (req, res) => { if (res.ok) { const c = res.clone(); caches.open(V).then(x => x.put(req, c)); } return res; };

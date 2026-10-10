@@ -107,6 +107,13 @@ MIGRATIONS = [
     CREATE TABLE fed_subs (pid TEXT PRIMARY KEY, node TEXT NOT NULL, rid TEXT NOT NULL, owner TEXT NOT NULL, name TEXT NOT NULL,
                            created REAL NOT NULL, last REAL, error TEXT);
     """,
+    # 10: permessi in più per utente (utenti.py): JSON con playlist, vedipl, condividi, radio, rete, stats. Le colonne
+    # upload, download e del restano dove sono. welcome = codice di benvenuto creato dall'amministratore per un account
+    # nuovo: chi lo usa sceglie la sua password (niente credenziali nel codice)
+    """
+    ALTER TABLE perms ADD COLUMN more TEXT;
+    ALTER TABLE pairings ADD COLUMN welcome INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 _local = threading.local()

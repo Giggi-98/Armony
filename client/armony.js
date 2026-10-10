@@ -392,7 +392,7 @@ async function route() {
   const fn = Disp.gate(r) || {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina
+    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav; Scene.hash = location.hash; Scene.r = r;
   const run = async () => {
@@ -464,7 +464,10 @@ function noServer() {
   const local = /^https?:/.test(location.protocol) && !NATIVE;
   // nell'app si parte anche senza server, con la musica del telefono (telefono.js)
   const ph = !!Local.p;
-  view.innerHTML = `<h1>Benvenuto in Armony</h1><p class="sub">La musica della vostra compagnia, dai vostri server.</p>
+  if (local && !ph) {  // nel browser servito dal server: il modulo di accesso subito (utenti.js)
+    view.innerHTML = loginCard() + `<div class="row" style="justify-content:center;margin-top:var(--s5)"><a class="btn sm" href="${esc(apkUrl())}">${ic('down')} App Android</a><button class="btn sm" id="welQr">QR code</button></div>`;
+    wireLogin();
+  } else view.innerHTML = `<h1>Benvenuto in Armony</h1><p class="sub">La musica della vostra compagnia, dai vostri server.</p>
   <div class="empty"><h3>${ph ? 'Da dove arriva la musica?' : 'Collega il primo server'}</h3><p>${ph ? 'Ascolta subito i brani che hai sul telefono, anche senza rete. Un server lo colleghi quando vuoi: ci salvi una copia della tua musica e da lì prendi quella degli amici.' : 'Accedi con il tuo utente del server musicale, oppure creane uno se chi lo gestisce ti ha dato un invito.'}</p>
   <div class="row" style="justify-content:center">
     ${ph ? `<button class="btn primary" data-act="phone" data-do="on">${ic('phone')} Usa la musica del telefono</button>` : ''}
@@ -508,7 +511,7 @@ function lActionBar({ play = { act: 'playall' }, shuffle = { act: 'shuffleall' }
     ${shuffle ? `<button class="icon-btn ab" data-act="${shuffle.act}"${d(shuffle)} aria-label="${shuffle.label || 'Riproduci in ordine casuale'}" title="${shuffle.label || 'Casuale'}">${ic(shuffle.icon || 'shuffle')}</button>` : ''}
     ${star ? `<button class="icon-btn ab${star.on ? ' on' : ''}" data-act="${star.act}"${d(star)} aria-label="${star.on ? 'Togli dai preferiti' : 'Aggiungi ai preferiti'}" title="Preferito">${ic('heart', star.on)}</button>` : ''}
     ${offline && !srv()?.local ? `<button class="icon-btn ab" data-act="offlineall" aria-label="Salva per l'offline" title="Offline">${ic('offline')}</button>` : ''}
-    ${addpl ? `<button class="icon-btn ab" data-act="addalltopl" aria-label="Aggiungi a una playlist" title="Aggiungi a playlist">${ic('addlist')}</button>` : ''}
+    ${addpl && can('playlist') ? `<button class="icon-btn ab" data-act="addalltopl" aria-label="Aggiungi a una playlist" title="Aggiungi a playlist">${ic('addlist')}</button>` : ''}
     ${extra}${lMoreItems.length ? `<button class="icon-btn ab" data-act="lmore" aria-label="Altre azioni" title="Altro">${ic('more')}</button>` : ''}
   </div>`;
 }
@@ -817,7 +820,7 @@ async function vAlbum(id) {
       meta: `<a href="#/artista/${encodeURIComponent(a.artistId || '')}"><b>${esc(a.artist)}</b></a>${a.year ? ' · ' + a.year : ''}${a.genre ? ' · ' + esc(a.genre) : ''} · <span id="lCount">${info(songs)}</span>` }) +
     lActionBar({ star: { act: 'staralbum', on: a.starred, data: { id, on: a.starred ? 1 : 0 } }, more: [
       { act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' },
-      !srv().local && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: a.name } },
+      !srv().local && can('condividi') && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: a.name } },
       canEdit() && { act: 'editalbum', label: 'Modifica album', icon: 'pen' },
       canDelete() && { act: 'delalbum', label: 'Elimina album dal server', icon: 'trash', danger: true, data: { name: a.name } }] }) +
     `<div id="gapsNote"></div><div id="lList">${songList(songs, opts)}</div>`;
@@ -1031,7 +1034,7 @@ async function vSearch() {
 }
 /* ---- rete: le librerie dei server collegati, e degli amici degli amici (server/federazione.py) ---- */
 // con "Questo telefono" in uso la rete passa dal server di backup (dlSrv), come i download
-const netOk = () => !!(dlSrv()?.session && dlSrv().me?.caps?.includes('federazione'));
+const netOk = () => !!(dlSrv()?.session && dlSrv().me?.caps?.includes('federazione')) && can('rete');
 // un brano di un altro server come brano della coda: suona e si copia tramite il mio server (streamUrl, coverUrl)
 function netTrack(x, nodes) {
   const own = x.path[x.path.length - 1], o = nodes[own] || {};
@@ -1131,8 +1134,8 @@ async function vPlaylists() {
   if (stale(n)) return;
   view.innerHTML = `<h1>Playlist</h1><p class="sub">${srv().local ? 'Restano su questo telefono; con la copia sul server attiva finiscono anche lì.' : 'Le playlist condivise si vedono da tutti gli utenti del server.'}</p>
     <div class="lcards">
-      <button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
-      <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>
+      ${can('playlist') ? `<button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
+      <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>` : ''}
       ${pls.map(lPlCard).join('')}
     </div>`;
   // tempo reale: conteggi e copertine cambiano quando una playlist si riempie (anche dal server, dopo i download)
@@ -1145,6 +1148,8 @@ async function vPlaylist(id) {
   const p = (await api('getPlaylist', { id })).playlist;
   if (stale(n)) return;
   const songs = arr(p.entry).map(x => norm(x));
+  // modificarla: è mia (o sono l'amministratore) e posso gestire playlist
+  const mine = can('playlist') && (access().admin || srv().local || !p.owner || p.owner === srv().user);
   const count = q => { const k = arr(q.entry).length; return `${k} ${k === 1 ? 'brano' : 'brani'}, ${fmtLong(q.duration || 0)}`; };
   const empty = { empty: 'Playlist vuota. Aggiungi brani dal menu ⋯ accanto a ogni canzone.' };
   Glow.show(coverUrl(p.coverArt, 300), 'album');
@@ -1152,11 +1157,11 @@ async function vPlaylist(id) {
       meta: `${p.comment ? `<span class="phero-desc">${esc(p.comment)}</span>` : ''}${p.owner ? `<b>${esc(p.owner)}</b> · ` : ''}<span id="lCount">${count(p)}</span>` }) +
     lActionBar({ offline: false, extra: srv().local ? '' : pinBtn(id), more: [
       { act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' },
-      !srv().local && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: p.name } },
+      !srv().local && can('condividi') && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: p.name } },
       { act: 'exportpl', label: 'Esporta (M3U, JSON, CSV)', icon: 'down', data: { id } },
-      { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
-      !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
-      { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
+      mine && { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
+      mine && !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
+      mine && { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
     `<div id="impSt"></div><div id="lList">${songList(songs, empty)}</div>`;
   view.dataset.pl = id;
   impStatus(id, n);
@@ -1227,7 +1232,7 @@ function vQueue() {
   const tot = S.queue.slice(Math.max(0, S.index)).reduce((n, t) => n + t.duration, 0);
   view.innerHTML = `<h1>Coda</h1><p class="sub">${S.queue.length} brani, ${fmtLong(tot)} rimanenti. Può contenere brani di server diversi.</p>
     <div class="row" style="margin-bottom:16px">
-      <button class="btn" data-act="savequeue">Salva come playlist</button>
+      ${can('playlist') ? '<button class="btn" data-act="savequeue">Salva come playlist</button>' : ''}
       <button class="btn" data-act="exportqueue">Esporta</button>
       <button class="btn" data-act="dedupe">Togli doppioni</button>
       <button class="btn danger" data-act="clearqueue">Svuota</button>
@@ -1711,6 +1716,12 @@ const Engine = {
         return;
       }
       const off = !navigator.onLine, me = this.el.error;
+      // un errore del server di passaggio (Navidrome occupato, riavvio): stesso brano, una volta, dallo stesso punto
+      if (!off && this.el._again !== src) {
+        const el = this.el, at = el.currentTime; el._again = src;
+        setTimeout(() => { if (el.getAttribute('src') !== src) return; el.src = src; try { el.currentTime = at; } catch {} el.play().catch(() => {}); }, 1500);
+        return;
+      }
       if (!off) window.Diag?.report('errore', 'audio', `brano non riproducibile: ${currentTrack()?.title || '?'}`, `codice ${me?.code ?? '?'} ${me?.message || ''}\n${safeUrl(src)}`);
       toast(off ? 'Sei offline e questo brano non è salvato sul dispositivo.' : 'Impossibile riprodurre questo brano, passo al successivo.');
       if (Jam.role !== 'guest' && !Radio.st) setTimeout(() => ctlNext(true), 1500);
@@ -2211,7 +2222,7 @@ async function vStats() {
   const period = sessionStorage.getItem('armony:sp') || '30';
   const n = Scene.nav;
   // "I tuoi ascolti" (storico di questo utente) o "Sul server" (tutti gli utenti, server/ascolti.py)
-  const svOk = !!srv()?.me?.caps?.includes('ascolti'), sv = svOk && sessionStorage.getItem('armony:sv') === 'server';
+  const svOk = !!srv()?.me?.caps?.includes('ascolti') && can('stats'), sv = svOk && sessionStorage.getItem('armony:sv') === 'server';
   const svTabs = svOk ? `<div class="lpills" role="navigation" aria-label="Quali ascolti">${[['me', 'I tuoi ascolti'], ['server', 'Sul server']].map(([k, l]) => `<a href="#/statistiche" data-act="sv" data-k="${k}" class="${(k === 'server') === sv ? 'on' : ''}"${(k === 'server') === sv ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>` : '';
   if (sv) return vStatsServer(period, svTabs, n);
   const all = await Stats.all();
@@ -2929,16 +2940,16 @@ function songMenu(t, ctx = {}) {
     ['nextup', 'Riproduci dopo', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.splice(S.index + 1, 0, t); persistQueue(); toast('Verrà riprodotto dopo il brano attuale.'); }],
     ['plus', 'Aggiungi alla coda', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.push(t); persistQueue(); toast('Aggiunto alla coda.'); }],
     Jam.role ? ['jam', Jam.role === 'host' ? 'Aggiungi alla coda della Jam' : 'Proponi alla Jam', () => Jam.suggest(t)] : null,
-    ['addlist', 'Aggiungi a playlist', () => addToPlaylistDialog([t])],
+    can('playlist') ? ['addlist', 'Aggiungi a playlist', () => addToPlaylistDialog([t])] : null,
     ['radio', 'Avvia una radio da qui', () => radioFrom(t)],
     t.albumId ? ['album', 'Vai all\'album', () => location.hash = '#/album/' + encodeURIComponent(t.albumId)] : null,
     t.artistId ? ['artist', 'Vai all\'artista', () => location.hash = '#/artista/' + encodeURIComponent(t.artistId)] : null,
-    !phoneT ? ['share', 'Condividi un link', () => shareItem(t.id, `${t.title} - ${t.artist}`, t.serverId)] : null,
+    !phoneT && can('condividi') ? ['share', 'Condividi un link', () => shareItem(t.id, `${t.title} - ${t.artist}`, t.serverId)] : null,
     phoneT && !Offline.has(t) ? null : Offline.has(t) ? ['trash', 'Togli dall\'offline', async () => { await Offline.remove(offKey(t)); toast('Rimosso dall\'offline.'); if (location.hash.startsWith('#/offline')) route(); }]
       : ['offline', 'Salva per l\'offline', () => Offline.save([t])],
     phoneT ? null : ['down', 'Scarica il file originale', () => { const a = document.createElement('a'); a.href = apiUrl(srv(t.serverId), 'download', { id: t.id }); a.download = ''; a.click(); }],
     ['lyrics', 'Testo', () => { if (key(currentTrack() || {}) !== key(t)) return toast('Il testo si apre per il brano in riproduzione.'); sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; }],
-    ctx.pl != null ? ['trash', 'Togli dalla playlist', async () => { await api('updatePlaylist', { playlistId: view.dataset.pl, songIndexToRemove: ctx.pl }); route(); }] : null,
+    ctx.pl != null && can('playlist') ? ['trash', 'Togli dalla playlist', async () => { await api('updatePlaylist', { playlistId: view.dataset.pl, songIndexToRemove: ctx.pl }); route(); }] : null,
     canEdit(t.serverId) ? ['pen', 'Modifica informazioni', () => editTrack(t)] : null,
     canDelete(t.serverId) ? ['trash', 'Elimina dal server', () => deleteTracks([t], t.title), 'danger'] : null
   ].filter(Boolean);
@@ -2966,7 +2977,7 @@ function groupItems(get, before = [], after = []) {
     ['shuffle', 'Riproduci in ordine casuale', run(l => setQueue(l, 0, true))],
     ['nextup', 'Riproduci dopo', run(l => { if (guest(l)) return; S.queue.splice(S.index + 1, 0, ...l); persistQueue(); toast(l.length === 1 ? 'Verrà riprodotto dopo il brano attuale.' : `${l.length} brani dopo quello attuale.`); })],
     ['plus', 'Aggiungi alla coda', run(l => { if (guest(l)) return; S.queue.push(...l); persistQueue(); toast(`${l.length} brani aggiunti alla coda.`); })],
-    ['addlist', 'Aggiungi a una playlist', run(l => addToPlaylistDialog(l))],
+    can('playlist') ? ['addlist', 'Aggiungi a una playlist', run(l => addToPlaylistDialog(l))] : null,
     srv()?.local ? null : ['offline', 'Salva per l\'offline', run(l => Offline.save(l))], ...after].filter(Boolean);
 }
 function ctxMenu([x, y], items, head = '') {
@@ -3002,7 +3013,7 @@ document.addEventListener('contextmenu', e => {
   if (aid) {
     const sid = alb.querySelector('[data-sid]')?.dataset.sid || S.active, name = alb.querySelector('b')?.textContent || 'Album';
     return menu(groupItems(() => albumTracks(aid, sid), [['album', 'Apri l\'album', go('#/album/' + encodeURIComponent(aid))]],
-      [srv(sid)?.local ? null : ['share', 'Condividi un link', () => shareItem(aid, name, sid)]].filter(Boolean)), `<b>${esc(name)}</b><small>Album</small>`);
+      [srv(sid)?.local || !can('condividi') ? null : ['share', 'Condividi un link', () => shareItem(aid, name, sid)]].filter(Boolean)), `<b>${esc(name)}</b><small>Album</small>`);
   }
   const art = e.target.closest('[data-act="artist"][data-id]');
   if (art) {
@@ -3015,7 +3026,7 @@ document.addEventListener('contextmenu', e => {
     const id = pl.dataset.id || pl.dataset.pl, name = pl.querySelector('b')?.textContent || 'Playlist';
     return menu(groupItems(() => plTracks(id), [['list', 'Apri la playlist', go('#/playlist/' + encodeURIComponent(id))]],
       [['down', 'Esporta (M3U, JSON, CSV)', async () => { try { exportTracks(name, await plTracks(id)); } catch (er) { toast(er.message); } }],
-       srv()?.local ? null : ['share', 'Condividi un link', () => shareItem(id, name)]].filter(Boolean)), `<b>${esc(name)}</b><small>Playlist</small>`);
+       srv()?.local || !can('condividi') ? null : ['share', 'Condividi un link', () => shareItem(id, name)]].filter(Boolean)), `<b>${esc(name)}</b><small>Playlist</small>`);
   }
   const ghost = e.target.closest('.card.ghost [data-act="dzalbum"], .card.ghost')?.closest('.card');
   if (ghost) { const id = ghost.querySelector('[data-act="dzalbum"]')?.dataset.id; if (id) return menu([['album', 'Apri (non in libreria)', go('#/album-dz/' + encodeURIComponent(id))]]); }
@@ -3108,7 +3119,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   <div class="row" style="margin-top:var(--s5);padding-top:var(--s4);border-top:1px solid var(--line)"><span class="grow" style="min-width:200px"><b>Ripristina ${NATIVE ? 'l\'app' : 'questo browser'}</b><br><small style="color:var(--muted)">Toglie server, chiavi, brani offline e preferenze da questo dispositivo, come appena installata${NATIVE ? '' : ''}.</small></span><button class="btn danger" data-act="resetapp">Ripristina</button></div>`],
 
   // ---------------- area Server: solo amministratori
-  adm && ds?.session ? ['srv', 'utenti', 'Utenti e registrazione', 'friends', 'utenti permessi caricamento download disconnetti amministratore registrazione inviti', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div><h3 style="margin-top:var(--s5)">Registrazione</h3><div id="regBox"><p class="sub">Caricamento…</p></div>'] : null,
+  adm && ds?.session ? ['srv', 'utenti', 'Utenti e registrazione', 'friends', 'utenti permessi caricamento download disconnetti amministratore registrazione inviti nuovo utente account playlist benvenuto qr', '<p class="sub">Gli utenti del server. Tocca un nome per scegliere cosa può fare; l\'amministratore può sempre tutto. «Nuovo utente» crea un account e ti dà un link e un QR: al primo ingresso l\'amico sceglie la sua password.</p><div id="usrBox"><p class="sub">Caricamento…</p></div><h3 style="margin-top:var(--s5)">Registrazione</h3><div id="regBox"><p class="sub">Caricamento…</p></div>'] : null,
   adm && srv()?.session && Disp.ok(srv()) ? ['srv', 'sicurezza', 'Sicurezza', 'lock', 'dispositivi sicurezza chiave approva attesa revoca client senza chiave registro accessi eventi', '<div id="secBox"><p class="sub">Caricamento…</p></div>'] : null,
   adm && caps.includes('indirizzo') ? ['srv', 'indirizzo', 'Indirizzo pubblico', 'globe', 'indirizzo pubblico tailscale dominio link qr', `<div class="panel stack">
     <label class="f">Indirizzo pubblico di questo server<input type="url" id="pubUrl" value="${esc(ds.me.public || '')}" placeholder="https://armony.nome-rete.ts.net"></label>
@@ -3386,7 +3397,8 @@ async function scanQR() {
 // cosa fare con un QR letto: abbinamento, invito, Jam o indirizzo di un server
 async function useScan(text) {
   if (!text) return;
-  const t = text.trim(), m = t.match(/^(https?:\/\/[^#\s]*?)\/?#\/(abbina|invito)\/([\w-]+)/i), jam = t.match(/#(\/jam\/entra\/\S+)$/);
+  const t = text.trim(), m = t.match(/^(https?:\/\/[^#\s]*?)\/?#\/(abbina|invito|benvenuto)\/([\w-]+)/i), jam = t.match(/#(\/jam\/entra\/\S+)$/);
+  if (m && m[2].toLowerCase() === 'benvenuto') return vBenvenuto(m[3], m[1].replace(/\/+$/, ''));  // account creato dall'amministratore (utenti.js)
   if (m) return serverDialog(null, { url: m[1].replace(/\/+$/, ''), mode: m[2].toLowerCase() === 'abbina' ? 'codice' : 'crea', code: m[3] });
   if (jam) { location.hash = '#' + jam[1]; return; }
   if (/^https?:\/\/\S+$/i.test(t)) return serverDialog(null, { url: t.replace(/[#?].*$/, '').replace(/\/+$/, '') });
@@ -3501,22 +3513,6 @@ function fedJoinSheet() {
     } catch (e) { toast(e.message); $('#fedGo').disabled = false; }
   };
   d.showModal();
-}
-async function refreshUsers() {
-  const box = $('#usrBox'); if (!box) return;
-  let list; try { list = await dlApi('/api/users'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
-  box.innerHTML = list.length ? list.map(u => `<div class="list-item" style="cursor:default;flex-wrap:wrap">
-    <span class="grow"><b>${esc(u.user)}</b><small>${u.admin ? 'amministratore' : 'utente'}${u.seen ? ', ultimo accesso ' + new Date(u.seen * 1000).toLocaleDateString() : ''}</small></span>
-    <label class="check box" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="upload" ${u.upload || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Caricamento</span></label>
-    <label class="check box" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="download" ${u.download || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Download</span></label>
-    <label class="check box" style="margin:0"><input type="checkbox" data-usr="${esc(u.user)}" data-perm="delete" ${u.delete || u.admin ? 'checked' : ''} ${u.admin ? 'disabled' : ''}><span>Modifica ed eliminazione</span></label>
-    ${u.sessions ? `<button class="btn sm" data-act="usrrevoke" data-user="${esc(u.user)}">${Disp.ok(srv()) ? 'Revoca i dispositivi' : 'Disconnetti'}</button>` : ''}</div>`).join('')
-    : '<div class="empty">Nessun utente ha ancora fatto accesso da Armony.</div>';
-  box.querySelectorAll('[data-usr]').forEach(el => el.onchange = async () => {
-    const name = el.dataset.usr, v = p => box.querySelector(`[data-usr="${CSS.escape(name)}"][data-perm="${p}"]`).checked;
-    try { await dlApi('/api/users/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ upload: v('upload'), download: v('download'), delete: v('delete') }) }); toast('Permessi aggiornati.'); }
-    catch (e) { toast(e.message); refreshUsers(); }
-  });
 }
 async function notifyUpdate() {
   if (!access().admin) return;
@@ -3669,7 +3665,7 @@ function ctxDialog() {
 function moreSheet() {
   const d = $('#dlg'); d.className = 'sheet';
   const cur = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
-  const items = NAV.filter(([h]) => inMore(h));
+  const items = NAV.filter(([h]) => inMore(h) && (h !== 'rete' || can('rete')));
   if (matchMedia('(any-hover:hover)').matches) items.push(['tasti', 'Scorciatoie da tastiera', 'more']);
   const dot = h => h === 'amici' && Presence.on() && Presence.playingCount() ? '<i class="dot pdot" aria-label="qualcuno sta ascoltando"></i>'
     : h === 'impostazioni' && srv()?.me?.pending ? '<i class="dot pdot" aria-label="dispositivi in attesa"></i>' : '';
@@ -4676,7 +4672,7 @@ async function sidePlaylists() {
     <span class="pic">${p.songCount ? imgTag(p.coverArt, 80) : ic('list')}</span><span class="grow"><b>${esc(p.name)}</b><small>Playlist · ${esc(p.owner || srv()?.user || '')}</small></span></a>`).join('')}` : '';
 }
 async function boot() {
-  $('#nav').innerHTML = NAV.map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
+  $('#nav').innerHTML = NAV.filter(([h]) => h !== 'rete' || can('rete')).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
   Bus.addEventListener('playlists', sidePlaylists); sidePlaylists();
   paintTabs();
   $('#tabs').oncontextmenu = e => { if (matchMedia('(pointer:fine)').matches) return; e.preventDefault(); tabsEditor(); };  // tenere premuta la barra la personalizza (col mouse c'è il menu)

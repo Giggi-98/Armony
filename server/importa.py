@@ -220,6 +220,8 @@ def importa():
     u, pid = g.who.get("user"), str(d.get("pid") or "")
     if not u:
         return jsonify(error="Serve l'accesso di un utente."), 400
+    if not g.who["admin"] and not g.who["perm"].get("playlist", True):
+        return jsonify(error="Creare e modificare playlist non è abilitato per il tuo utente."), 403
     if not A.nd_admin():
         return jsonify(error="Serve l'amministratore di Navidrome in Impostazioni → Utenti → Registrazione."), 503
     if not A.ID_RE.match(pid) or owner_of(pid) != u:

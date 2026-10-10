@@ -1281,6 +1281,22 @@ dialog.sheet .head .icon-btn{margin:-6px 0 -6px -6px}
 @media (hover:hover) and (pointer:fine){.cmenu .mi:hover{background:var(--surface2)}}
 .cmenu .mi.danger,.cmenu .mi.danger svg{color:var(--danger)}
 @media (prefers-reduced-motion:reduce){.cmenu{animation:none}}
+/* utenti e accesso (utenti.js) */
+.login{display:flex;flex-direction:column;gap:var(--s3);max-width:420px;margin:var(--s6) auto 0;padding:var(--s6) var(--s5);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--shadow-float)}
+.login h1{margin:0;font-size:var(--fs-h1)}
+.login .sub{margin:0 0 var(--s2)}
+.login .btn.primary{justify-content:center;min-height:48px;margin-top:var(--s2)}
+.login-logo{width:56px;height:56px;border-radius:50%;background:radial-gradient(circle,var(--accent) 0 30%,var(--ink) 31% 34%,#1b1e36 35% 100%);box-shadow:var(--shadow-art)}
+.login-alt{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:center;padding-top:var(--s3);border-top:1px solid var(--line);margin-top:var(--s2)}
+@media (max-width:520px){.login{margin-top:var(--s3);padding:var(--s5) var(--s4)}}
+.usrlist{display:flex;flex-direction:column;gap:2px}
+.list-item.usr{width:100%;border:0;border-bottom:1px solid var(--line);background:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.list-item.usr>svg{width:18px;height:18px;flex:none;color:var(--muted)}
+.list-item.usr .grow{min-width:0}
+.list-item.usr small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.usrperms{padding:0 14px}
+.usrperms .check{padding:var(--s2) 0;border-bottom:1px solid var(--line)}
+dialog.sheet.usrsheet .head .pav{flex:none}
 /* === fine D === */
 </style>
 </head>
@@ -1338,6 +1354,7 @@ dialog.sheet .head .icon-btn{margin:-6px 0 -6px -6px}
 <script src="telefono.js"></script>
 <script src="dispositivi.js"></script>
 <script src="diagnosi.js"></script>
+<script src="utenti.js"></script>
 <script>boot();</script>
 </body>
 </html>

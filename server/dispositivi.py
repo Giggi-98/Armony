@@ -267,7 +267,7 @@ def identity(tok=None, k=None):
             note_fail("ip:" + client_ip())
             event("emergenza", detail="rifiutato: richiesta da internet", once="em:" + client_ip())
             return None
-        return dict(user=None, admin=True, upload=True, download=True, delete=True, dev=None, keyed=True, gen=0)
+        return dict(user=None, admin=True, upload=True, download=True, delete=True, dev=None, keyed=True, gen=0, perm=A.utenti.perms(None, True))
     now = time.time()
     if tok:
         s = db.one("SELECT user, seen, exp, dev FROM sessions WHERE token = ?", tok)
@@ -291,10 +291,10 @@ def identity(tok=None, k=None):
     ip = client_ip()
     if not d["seen"] or now - d["seen"] > 300 or d["ip"] != ip:
         db.run("UPDATE devices SET seen = ?, ip = ?, net = ? WHERE id = ?", now, ip, net(), d["id"])
-    p = db.one("SELECT upload, download, del FROM perms WHERE user = ?", d["user"])
     admin = bool(d["admin"])
-    return dict(user=d["user"], admin=admin, upload=admin or not p or bool(p["upload"]), download=admin or not p or bool(p["download"]),
-                delete=admin or bool(p and p["del"]), dev=d["id"], keyed=bool(d["pub"]), gen=d["gen"])
+    p = A.utenti.perms(d["user"], admin)  # utenti.py: i permessi di questo utente, tutti per l'amministratore
+    return dict(user=d["user"], admin=admin, upload=p["upload"], download=p["download"], delete=p["delete"], perm=p,
+                dev=d["id"], keyed=bool(d["pub"]), gen=d["gen"])
 
 
 def can_change(who):
@@ -515,7 +515,7 @@ def abbina_usa():
     if db.one("SELECT 1 FROM devices WHERE pub = ?", pub):
         return jsonify(error="Chiave già in uso."), 409
     h, now = hashlib.sha256(code.encode()).hexdigest(), time.time()
-    took = db.conn().execute("UPDATE pairings SET used_by = ? WHERE hash = ? AND used_by IS NULL AND expires > ?",
+    took = db.conn().execute("UPDATE pairings SET used_by = ? WHERE hash = ? AND used_by IS NULL AND expires > ? AND welcome = 0",
                              (pub[:16], h, now)).rowcount
     if not took:
         note_fail("ip:" + ip)
@@ -523,9 +523,10 @@ def abbina_usa():
         return jsonify(error="Codice non valido, già usato o scaduto: creane uno nuovo dal dispositivo fidato."), 403
     p = db.one("SELECT * FROM pairings WHERE hash = ?", h)
     db.run("UPDATE pairings SET t = '', s = '' WHERE hash = ?", h)  # le credenziali restano qui solo fino all'uso
-    by = db.one("SELECT name, admin FROM devices WHERE id = ?", p["by_dev"])
+    by = db.one("SELECT name, admin, user FROM devices WHERE id = ?", p["by_dev"])
     kind = str(d.get("kind") or "")
-    dev = new_device(p["user"], by["admin"] if by else 0, clean_name(d.get("name")), kind if kind in KINDS else "", pub,
+    # il ruolo è quello dell'utente del codice: un codice creato dall'amministratore per un amico non lo fa amministratore
+    dev = new_device(p["user"], by["admin"] if by and by["user"] == p["user"] else 0, clean_name(d.get("name")), kind if kind in KINDS else "", pub,
                      str(d.get("device") or "")[:40], p["s"], "fidato", by="abbinato da " + (by["name"] if by else "?"))
     clear_fails("ip:" + ip)
     event("abbinato", p["user"], dev["id"], dev["name"])

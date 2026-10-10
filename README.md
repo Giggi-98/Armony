@@ -27,7 +27,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - **Jam**: ascoltate la stessa musica nello stesso momento, ognuno dal suo telefono; proposte, voti, reazioni. Cifrata da un capo all'altro.
 - **Amici dal vivo**: chi sta ascoltando cosa sul server, in tempo reale, e cosa fa (download, playlist, Jam).
 - **Jam Radio**: stazioni che girano all'infinito sul server; ti sintonizzi e senti lo stesso punto degli altri, tipo Discord. Anche quelle dei server collegati.
-- Gli amici si creano un account da soli, con un invito.
+- Gli amici si creano un account da soli con un invito, oppure li crei tu in un attimo: mandi un link o un QR e al primo ingresso scelgono la loro password. Per ognuno decidi cosa può fare (playlist proprie, vedere quelle degli altri, scaricare, caricare, radio…).
 
 **La libreria**
 - Download da YouTube, SoundCloud e centinaia di siti (yt-dlp), con copertina e metadati; caricamento di file dal dispositivo.
