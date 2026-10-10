@@ -15,6 +15,9 @@ Armony - server di supporto.
   /api/chiave/*         pubbliche: sfida, sessione con la firma del dispositivo, abbinamento con codice (dispositivi.py)
   /api/dispositivi      i miei dispositivi: approva, rinomina, revoca, rigenera, codice di abbinamento
   /api/sicurezza        solo amministratori: registro degli eventi, client senza chiave (sempre/locale/mai)
+                        Tutte le rotte "admin" di RULES (e le azioni sui dispositivi degli altri) cambiano qualcosa solo
+                        da un dispositivo con chiave o da casa/Tailscale: da internet senza chiave GET sì, il resto 403
+                        con code "impserver" (capacità "impserver"; /api/me dice srvedit)
   /api/users            permessi per utente (solo amministratori)
   /api/register         un amico si crea l'account (pubblica: info e registrazione con invito);
                         /api/register/settings e /invites solo amministratori
@@ -105,7 +108,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
 RULES = (("/api/chiave", None), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
@@ -152,6 +155,9 @@ def guard():
         return jsonify(error={"admin": "Serve un amministratore.", "upload": "Il caricamento non è abilitato per il tuo utente.",
                               "download": "I download non sono abilitati per il tuo utente.",
                               "delete": "Modifica ed eliminazione non sono abilitate per il tuo utente."}[need]), 403
+    # impostazioni del server: da internet senza chiave un amministratore le legge ma non le cambia (dispositivi.py)
+    if need == "admin" and request.method not in ("GET", "HEAD") and not dispositivi.can_change(g.who):
+        return dispositivi.refuse_change()
     return None
 
 

@@ -384,6 +384,8 @@ async function route() {
   const [r = 'home', ...rest] = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
   const id = rest.join('/');
   markNav(r);
+  // da una scheda all'altra delle impostazioni senza ridisegnare la pagina (route() con lo stesso indirizzo la ridisegna)
+  if (r === 'impostazioni' && Scene.r === 'impostazioni' && location.hash !== Scene.hash && $('#view .setp')) { Scene.hash = location.hash; return setTab(id); }
   $$('#sidePl a').forEach(a => a.classList.toggle('on', r === 'playlist' && a.dataset.pl === id));
   const fn = Disp.gate(r) || {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
@@ -2721,40 +2723,29 @@ function songMenu(t, ctx = {}) {
   d.showModal();
 }
 
-/* ================= impostazioni ================= */
-function vSettings() {
+/* ================= impostazioni =================
+   Due aree: "Questo dispositivo" (preferenze, i miei dispositivi, server collegati, telefono, backup) e "Server" (solo
+   amministratori: utenti, sicurezza, indirizzo pubblico, YouTube, librerie collegate, aggiornamenti, disco). Una scheda per
+   gruppo, nell'indirizzo (#/impostazioni/ascolto). Su schermo largo elenco a sinistra e scheda a destra; sul telefono
+   l'elenco è la pagina e la scheda si apre a tutta pagina con ←. Tutte le schede stanno nella pagina, nascoste: la ricerca
+   le attraversa tutte. Da internet senza chiave l'area Server è in sola lettura (il server rifiuta: capacità "impserver") */
+I.disk = '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>';
+I.archive = '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/>';
+I.user = '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>';
+const SET_AREAS = [['dev', 'Questo dispositivo'], ['srv', 'Server']];
+function vSettings(id = location.hash.split('/')[2]) {
   const opt = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${String(k) === String(cur) ? 'selected' : ''}>${v}</option>`).join('');
   const qOpts = Object.fromEntries(Object.entries(QUALITIES).map(([k, q]) => [k, q.label]));
-  // gruppi richiudibili: lo stato aperto/chiuso resta su questo dispositivo
-  const closed = new Set(store.get('setClosed', SET_CLOSED));
-  const grp = (id, title, keys, body) => `<details class="sgroup" data-g="${id}" data-k="${esc(keys)}" ${closed.has(id) ? '' : 'open'}><summary><h2>${title}</h2>${ic('chevr')}</summary><div class="sbody">${body}</div></details>`;
-  view.innerHTML = `<h1>Impostazioni</h1><p class="sub">Tutto resta su questo dispositivo, salvo ciò che sta sui server.</p>
-  <label class="setsearch">${ic('search')}<input type="search" id="setQ" placeholder="Cerca nelle impostazioni" aria-label="Cerca nelle impostazioni" autocomplete="off"></label>
-  <div id="setNone" class="empty" hidden></div>
-  ${grp('profilo', 'Profilo', 'nome nick sincronizzazione dispositivi', `<div class="panel stack"><label class="f">Il tuo nome nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
+  const ds = dlSrv(), adm = !!access().admin, caps = ds?.me?.caps || [];
+  // [area, id, titolo, icona, parole per la ricerca, contenuto]
+  const T = [
+  ['dev', 'profilo', 'Profilo', 'user', 'nome nick sincronizzazione dispositivi', `<div class="panel stack"><label class="f">Il tuo nome nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
     <label class="check"><input type="checkbox" data-pb="sync" ${P.sync ? 'checked' : ''}><span>Stesse statistiche e impostazioni su tutti i dispositivi<small>Storico d'ascolto e preferenze vengono salvati sul server, legati al tuo utente. Chi gestisce il server può vederli. Volume e modalità compatibile restano di ogni dispositivo.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="live" ${P.live !== false ? 'checked' : ''}><span>Un solo dispositivo suona, gli altri lo comandano<small>Se avvii la musica qui, sugli altri tuoi dispositivi si ferma e il lettore mostra cosa suona qui. Da "Dove suona" nel lettore la sposti dove vuoi.</small></span></label>
     ${Presence.on() ? `<label class="check"><input type="checkbox" id="pShare" ${Presence.share ? 'checked' : ''}><span>Mostra agli altri cosa ascolto e cosa faccio<small>Gli utenti di questo server vedono il brano che ascolti e le tue attività (download, caricamenti, playlist pubbliche, Jam). Spento, non compari; tu vedi comunque gli altri.</small></span></label>` : ''}
-    <label class="f">Nome di questo dispositivo<input type="text" id="pDev" value="${esc(P.deviceName)}" placeholder="${esc(Live.name())}" maxlength="30"></label></div>`)}
+    <label class="f">Nome di questo dispositivo<input type="text" id="pDev" value="${esc(P.deviceName)}" placeholder="${esc(Live.name())}" maxlength="30"></label></div>`],
 
-  ${grp('server', 'Server musicali', 'navidrome subsonic account accesso password indirizzo rete lan', `<p class="sub">Qualsiasi server compatibile Subsonic: Navidrome, Gonic, Airsonic, Ampache.</p>
-  <div>${S.servers.map(s => `<div class="list-item" style="cursor:default">
-    <span class="grow"><b>${esc(s.name)} ${s.id === S.active ? '<span class="tag ok">in uso</span>' : ''}</b><small>${esc(s.url)}, utente ${esc(s.user)}${s.me ? (s.me.admin ? ', amministratore' : '') + ` · Armony ${esc(s.me.version || '')}` : s.armony === false ? ' · solo ascolto (server senza Armony)' : ''}</small></span>
-    ${s.id !== S.active ? `<button class="btn sm" data-act="usesrv" data-id="${s.id}">Usa</button>` : ''}
-    <button class="btn sm" data-act="editsrv" data-id="${s.id}">Modifica</button>
-    <button class="icon-btn" data-act="delsrv" data-id="${s.id}" aria-label="Rimuovi">${ic('trash')}</button></div>`).join('') || '<p class="sub">Nessun server.</p>'}</div>
-  <div class="row" style="margin-top:12px"><button class="btn primary" data-act="addsrv">${ic('plus')} Aggiungi server</button><button class="btn" data-act="lanscan">${ic('wifi')} Cerca sulla rete</button></div>
-  <div id="lanRes"></div>
-  ${access().admin && srv()?.me?.caps?.includes('indirizzo') ? `<div class="panel stack" style="margin-top:var(--s4)">
-    <label class="f">Indirizzo pubblico di questo server<input type="url" id="pubUrl" value="${esc(srv().me.public || '')}" placeholder="https://armony.nome-rete.ts.net"></label>
-    <p class="small" style="color:var(--muted);margin:0">Quello con cui gli altri raggiungono Armony (Tailscale, dominio). Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati lo usano al posto dell'indirizzo di casa.</p>
-    <div class="row"><button class="btn" id="pubSave">Salva</button></div></div>` : ''}`)}
-  ${srv()?.session && Disp.ok(srv()) ? grp('dispositivi', 'Dispositivi e sicurezza', 'dispositivi sicurezza chiave abbina codice revoca approva attesa sessioni registro accessi', '<div id="devBox"><p class="sub">Caricamento…</p></div>') : ''}
-  ${Local.p ? grp('telefono', 'Questo telefono', 'musica telefono memoria backup copia caricamento wifi', '<div class="panel stack" id="phoneBox"></div>') : ''}
-
-  ${grp('spazio', 'Spazio', 'memoria disco spazio occupato libero gb archiviazione', '<div class="panel stack" id="spazioBox"><p class="sub">Calcolo…</p></div>')}
-
-  ${grp('ascolto', 'Ascolto', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
+  ['dev', 'ascolto', 'Ascolto', 'headphones', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
     <div class="grid2">
       <label class="f">Qualità<select data-p="quality">${opt(qOpts, P.quality)}</select></label>
       <label class="f">Qualità con rete mobile<select data-p="qualityMobile">${opt({ same: 'Uguale', ...qOpts }, P.qualityMobile)}</select></label>
@@ -2766,14 +2757,17 @@ function vSettings() {
     <label class="check"><input type="checkbox" data-pb="visualizer" ${P.visualizer ? 'checked' : ''}><span>Visualizzatore nella schermata In riproduzione</span></label>
     <label class="check"><input type="checkbox" data-pb="compat" ${P.compat ? 'checked' : ''}><span>Modalità compatibile<small>Disattiva equalizzatore, dissolvenza e trasmissione nelle Jam. Attivala se su iPhone la musica si ferma a schermo bloccato. Richiede di ricaricare la pagina.</small></span></label>
     <div class="row"><button class="btn" data-act="eq">${ic('sliders')} Equalizzatore</button><button class="btn" data-act="speed">${ic('speed')} Velocità: ${P.speed}×</button></div>
-  </div>`)}
+  </div>`],
 
-  ${grp('testi', 'Testi e sincronizzazione', 'lyrics lrclib coda continua dispositivi', `<div class="panel stack">
+  ['dev', 'testi', 'Testi e sincronizzazione', 'lyrics', 'lyrics lrclib coda continua dispositivi', `<div class="panel stack">
     <label class="check"><input type="checkbox" data-pb="lyricsOnline" ${P.lyricsOnline ? 'checked' : ''}><span>Cerca i testi online se il server non li ha<small>Usa LRCLIB, un archivio libero di testi sincronizzati. Invia solo titolo, artista e durata del brano.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="syncQueue" ${P.syncQueue ? 'checked' : ''}><span>Continua su altri dispositivi<small>Salva la coda sul server: apri Armony sul PC e riprendi da dove eri al telefono.</small></span></label>
-  </div>`)}
+  </div>`],
 
-  ${grp('jam', 'Jam', 'stun turn 5g internet nat ascoltare insieme', `<div class="panel stack">
+  ['dev', 'aspetto', 'Aspetto', 'moon', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+    <div class="tbset"><span class="grow"><b>Barra in basso</b><small>${[...tabsOf().map(h => NAV.find(n => n[0] === h)[1]), 'Altro'].join(' · ')}</small></span><button class="btn sm" data-act="tabsedit">Personalizza</button></div>`],
+
+  ['dev', 'jam', 'Jam', 'jam', 'stun turn 5g internet nat ascoltare insieme', `<div class="panel stack">
     <label class="check"><input type="checkbox" data-pb="stun" ${P.stun ? 'checked' : ''}><span>Permetti Jam via internet (5G)<small>Usa server STUN pubblici per scoprire l'indirizzo esterno. Non passa musica né chiavi da quei server.</small></span></label>
     <p class="small" style="color:var(--muted);margin:0">Server TURN (facoltativo). Serve quando operatori mobili o reti aziendali impediscono il collegamento diretto. Il traffico che vi passa resta cifrato.</p>
     <div class="grid2">
@@ -2781,27 +2775,55 @@ function vSettings() {
       <label class="f">Utente<input type="text" id="tUser" value="${esc(P.turn.user)}"></label>
       <label class="f">Password<input type="password" id="tPass" value="${esc(P.turn.pass)}"></label>
     </div>
-  </div>`)}
+  </div>`],
 
-  ${access().admin && srv()?.session ? grp('utenti', 'Utenti', 'permessi caricamento download disconnetti amministratore', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div><h3 style="margin-top:var(--s5)">Registrazione</h3><div id="regBox"><p class="sub">Caricamento…</p></div>') : ''}
-  ${access().admin && netOk() ? grp('rete', 'Librerie collegate', 'federazione rete server amici collegare invito codice sicurezza', '<p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare subito o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>') : ''}
-  ${window.ARMONY_APP ? grp('app', 'App Android', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div><div id="dnsBox"></div><div id="apkBox"></div>')
-    : grp('app', 'App Android', 'apk app android telefono scarica installa qr', '<div class="panel" id="apkBox"><p class="sub">Controllo…</p></div>')}
-  ${access().admin ? grp('aggiornamenti', 'Aggiornamenti', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>') : ''}
-  ${access().admin && srv()?.me?.caps?.includes('youtube') ? grp('youtube', 'YouTube', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>') : ''}
+  // i miei dispositivi qui; quelli degli altri utenti, la regola dei client senza chiave e il registro in Server → Sicurezza
+  srv()?.session && Disp.ok(srv()) ? ['dev', 'dispositivi', 'Dispositivi e sicurezza', 'shield', 'dispositivi sicurezza chiave abbina codice revoca approva attesa sessioni', '<div id="devBox"><p class="sub">Caricamento…</p></div>'] : null,
 
-  ${grp('aspetto', 'Aspetto', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
-    <div class="tbset"><span class="grow"><b>Barra in basso</b><small>${[...tabsOf().map(h => NAV.find(n => n[0] === h)[1]), 'Altro'].join(' · ')}</small></span><button class="btn sm" data-act="tabsedit">Personalizza</button></div>`)}
+  ['dev', 'server', 'Server musicali', 'lib', 'navidrome subsonic account accesso password indirizzo rete lan', `<p class="sub">Qualsiasi server compatibile Subsonic: Navidrome, Gonic, Airsonic, Ampache.</p>
+  <div>${S.servers.map(s => `<div class="list-item" style="cursor:default">
+    <span class="grow"><b>${esc(s.name)} ${s.id === S.active ? '<span class="tag ok">in uso</span>' : ''}</b><small>${esc(s.url)}, utente ${esc(s.user)}${s.me ? (s.me.admin ? ', amministratore' : '') + ` · Armony ${esc(s.me.version || '')}` : s.armony === false ? ' · solo ascolto (server senza Armony)' : ''}</small></span>
+    ${s.id !== S.active ? `<button class="btn sm" data-act="usesrv" data-id="${s.id}">Usa</button>` : ''}
+    <button class="btn sm" data-act="editsrv" data-id="${s.id}">Modifica</button>
+    <button class="icon-btn" data-act="delsrv" data-id="${s.id}" aria-label="Rimuovi">${ic('trash')}</button></div>`).join('') || '<p class="sub">Nessun server.</p>'}</div>
+  <div class="row" style="margin-top:12px"><button class="btn primary" data-act="addsrv">${ic('plus')} Aggiungi server</button><button class="btn" data-act="lanscan">${ic('wifi')} Cerca sulla rete</button></div>
+  <div id="lanRes"></div>`],
 
-  ${grp('backup', 'Backup e trasferimento', 'esporta importa file amico scorciatoie tastiera ripristina reset cancella vergine', `<p class="sub">Sposta tutto su un altro telefono, o passa la configurazione a un amico in dieci secondi.</p>
+  Local.p ? ['dev', 'telefono', 'Questo telefono', 'phone', 'musica telefono memoria backup copia caricamento wifi', '<div class="panel stack" id="phoneBox"></div>'] : null,
+
+  ['dev', 'spazio', 'Spazio', 'disk', 'memoria disco spazio occupato libero gb archiviazione', '<div class="panel stack" id="spazioBox"><p class="sub">Calcolo…</p></div>'],
+
+  window.ARMONY_APP ? ['dev', 'app', 'App Android', 'phone', 'apk aggiornamento versione telefono android', '<div class="panel" id="appBox"><p class="sub">Controllo…</p></div><div id="dnsBox"></div><div id="apkBox"></div>']
+    : ['dev', 'app', 'App Android', 'phone', 'apk app android telefono scarica installa qr', '<div class="panel" id="apkBox"><p class="sub">Controllo…</p></div>'],
+
+  ['dev', 'backup', 'Backup e trasferimento', 'archive', 'esporta importa file amico scorciatoie tastiera ripristina reset cancella vergine', `<p class="sub">Sposta tutto su un altro telefono, o passa la configurazione a un amico in dieci secondi.</p>
   <div class="row"><button class="btn" data-act="exportset">Esporta impostazioni</button><button class="btn" data-act="importset">Importa impostazioni</button><a class="btn" href="#/tasti">Scorciatoie da tastiera</a></div>
-  <div class="row" style="margin-top:var(--s5);padding-top:var(--s4);border-top:1px solid var(--line)"><span class="grow" style="min-width:200px"><b>Ripristina ${NATIVE ? 'l\'app' : 'questo browser'}</b><br><small style="color:var(--muted)">Toglie server, chiavi, brani offline e preferenze da questo dispositivo, come appena installata${NATIVE ? '' : ''}.</small></span><button class="btn danger" data-act="resetapp">Ripristina</button></div>`)}
-  <p class="small" style="color:var(--muted);margin-top:24px">Armony, dispositivo ${esc(S.device)}.</p>`;
-  view.querySelectorAll('.sgroup').forEach(d => d.ontoggle = () => {
-    if ($('#setQ').value) return;  // durante la ricerca i gruppi si aprono da soli: non è una scelta da ricordare
-    d.open ? closed.delete(d.dataset.g) : closed.add(d.dataset.g); store.set('setClosed', [...closed]);
-  });
+  <div class="row" style="margin-top:var(--s5);padding-top:var(--s4);border-top:1px solid var(--line)"><span class="grow" style="min-width:200px"><b>Ripristina ${NATIVE ? 'l\'app' : 'questo browser'}</b><br><small style="color:var(--muted)">Toglie server, chiavi, brani offline e preferenze da questo dispositivo, come appena installata${NATIVE ? '' : ''}.</small></span><button class="btn danger" data-act="resetapp">Ripristina</button></div>`],
+
+  // ---------------- area Server: solo amministratori
+  adm && ds?.session ? ['srv', 'utenti', 'Utenti e registrazione', 'friends', 'utenti permessi caricamento download disconnetti amministratore registrazione inviti', '<p class="sub">Chi ha fatto accesso a questo server da Armony. Gli amministratori di Navidrome possono sempre tutto.</p><div id="usrBox"><p class="sub">Caricamento…</p></div><h3 style="margin-top:var(--s5)">Registrazione</h3><div id="regBox"><p class="sub">Caricamento…</p></div>'] : null,
+  adm && srv()?.session && Disp.ok(srv()) ? ['srv', 'sicurezza', 'Sicurezza', 'lock', 'dispositivi sicurezza chiave approva attesa revoca client senza chiave registro accessi eventi', '<div id="secBox"><p class="sub">Caricamento…</p></div>'] : null,
+  adm && caps.includes('indirizzo') ? ['srv', 'indirizzo', 'Indirizzo pubblico', 'globe', 'indirizzo pubblico tailscale dominio link qr', `<div class="panel stack">
+    <label class="f">Indirizzo pubblico di questo server<input type="url" id="pubUrl" value="${esc(ds.me.public || '')}" placeholder="https://armony.nome-rete.ts.net"></label>
+    <p class="small" style="color:var(--muted);margin:0">Quello con cui gli altri raggiungono Armony (Tailscale, dominio). Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati lo usano al posto dell'indirizzo di casa.</p>
+    <div class="row"><button class="btn" id="pubSave">Salva</button></div></div>`] : null,
+  adm && caps.includes('youtube') ? ['srv', 'youtube', 'YouTube', 'film', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>'] : null,
+  adm && netOk() ? ['srv', 'librerie', 'Librerie collegate', 'wifi', 'federazione rete server amici collegare invito codice sicurezza', '<p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare subito o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>'] : null,
+  adm ? ['srv', 'aggiornamenti', 'Aggiornamenti', 'repeat', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>'] : null,
+  adm && srv()?.session && caps.includes('spazio') ? ['srv', 'disco', 'Spazio del server', 'disk', 'memoria disco spazio occupato libero gb musica video', '<div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>'] : null
+  ].filter(Boolean);
+  const ro = `<p class="ro-note" hidden>${ic('lock')}<span>Sola lettura. Da internet le impostazioni del server si cambiano solo da un dispositivo con chiave (l'app, o Armony aperta con HTTPS) oppure da casa o da Tailscale.</span></p>`;
+  view.innerHTML = `<div class="setp"><h1>Impostazioni</h1><p class="sub">Tutto resta su questo dispositivo, salvo ciò che sta sui server.</p>
+  <label class="setsearch">${ic('search')}<input type="search" id="setQ" placeholder="Cerca nelle impostazioni" aria-label="Cerca nelle impostazioni" autocomplete="off"></label>
+  <div id="setNone" class="empty" hidden></div>
+  <div class="set"><div class="setnav" role="navigation" aria-label="Gruppi di impostazioni">${SET_AREAS.map(([a, l]) => T.some(t => t[0] === a) ? `<p class="setnav-h">${a === 'srv' ? `${l} <span>${esc(ds?.name || '')}</span>` : l}</p>
+    ${T.filter(t => t[0] === a).map(([, k, title, icon]) => `<a href="#/impostazioni/${k}" data-t="${k}"><i class="setic">${ic(icon)}</i><span>${title}</span><i class="dot" data-dot="${k}" aria-label="da vedere" hidden></i>${ic('chevr')}</a>`).join('')}` : '').join('')}</div>
+  <div class="setbody">${T.map(([a, k, title, , keys, body]) => `<section class="stab" data-t="${k}" data-k="${esc(keys)}" aria-label="${esc(title)}">
+    <header class="stab-h"><button class="icon-btn stab-back" aria-label="Torna alle impostazioni">${ic('chevl')}</button><h2><small class="stab-area">${a === 'srv' ? 'Server' : 'Questo dispositivo'}</small>${title}</h2></header>
+    ${a === 'srv' ? `${ro}<fieldset class="sbody srvfs">${body}</fieldset>` : `<div class="sbody">${body}</div>`}</section>`).join('')}</div></div>
+  <p class="small" style="color:var(--muted);margin-top:24px">Armony, dispositivo ${esc(S.device)}.</p></div>`;
   $('#setQ').oninput = e => settingsFilter(e.target.value);
+  view.querySelectorAll('.stab-back').forEach(b => b.onclick = () => navStack.at(-2) === '#/impostazioni' ? history.back() : location.hash = '#/impostazioni');
   $('#pNick').onchange = e => { P.nick = e.target.value.trim(); savePrefs(); };
   $('#pDev').onchange = e => { P.deviceName = e.target.value.trim(); savePrefs(); Live.connect(); };
   if ($('#pShare')) $('#pShare').onchange = async e => {
@@ -2820,33 +2842,59 @@ function vSettings() {
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
   refreshSpazio(); refreshApk(); Disp.paint();
   $('#pubSave')?.addEventListener('click', async () => {
-    const s = srv();
     try {
-      const r = await srvApi(s, '/api/indirizzo', { method: 'PUT', body: JSON.stringify({ url: $('#pubUrl').value.trim() }) });
-      s.me = { ...s.me, public: r.public }; persistServers(); toast(r.public ? `Fatto: i link useranno ${r.public}.` : 'Indirizzo tolto: i link useranno quello di ogni dispositivo.');
-    } catch (e) { toast(e.message.includes('400') ? 'Scrivi solo l\'indirizzo, per esempio https://armony.nome.ts.net' : e.message); }
+      const r = await dlApi('/api/indirizzo', { method: 'PUT', body: JSON.stringify({ url: $('#pubUrl').value.trim() }) });
+      ds.me = { ...ds.me, public: r.public }; persistServers(); toast(r.public ? `Fatto: i link useranno ${r.public}.` : 'Indirizzo tolto: i link useranno quello di ogni dispositivo.');
+    } catch (e) { toast(e.message); }
   });
-  if (access().admin) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); refreshYt(); }
+  if (adm) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); refreshYt(); }
   if (window.ARMONY_APP) { AppUpdate.paint(); NetDns.paint(); }
   Local.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
+  setTab(id); setRO(); setDots();
+  // da casa a internet (o il contrario) cambia cosa si può fare sul server: lo si richiede subito
+  if (adm && ds?.session) Disp.fresh(ds, true).then(() => { setRO(); setDots(); });
 }
-// ricerca fra le impostazioni: mostra solo le voci che contengono il testo, e apre i gruppi che ne hanno
-const SET_CLOSED = ['testi', 'jam', 'utenti', 'aspetto', 'backup'];
-const fold = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+// scheda mostrata: quella dell'indirizzo; senza, sul computer l'ultima scelta (sul telefono si vede l'elenco)
+function setTab(id) {
+  const p = $('#view .setp'); if (!p) return;
+  const tabs = [...p.querySelectorAll('.stab')], want = tabs.find(t => t.dataset.t === id);
+  const on = want || tabs.find(t => t.dataset.t === store.get('setTab')) || tabs[0];
+  if (want) store.set('setTab', id);
+  if ($('#setQ').value) { $('#setQ').value = ''; settingsFilter(''); }
+  p.classList.toggle('open', !!want);
+  tabs.forEach(t => t.classList.toggle('on', t === on));
+  p.querySelectorAll('.setnav a').forEach(a => { const o = a.dataset.t === on.dataset.t; a.classList.toggle('on', o); o ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'); });
+  window.scrollTo(0, 0);
+}
+// area Server in sola lettura: amministratore senza chiave da internet (il server rifiuterebbe comunque)
+function setRO() {
+  const ro = dlSrv()?.me?.srvedit === false;
+  $$('#view .srvfs').forEach(f => f.disabled = ro);
+  $$('#view .ro-note').forEach(n => n.hidden = !ro);
+}
+// puntini sulle schede: dispositivi miei in attesa, quelli degli altri (amministratore), aggiornamento del server
+function setDots() {
+  const m = srv()?.me || {}, n = m.pending || 0, mine = m.admin ? m.pending_mine ?? 0 : n;
+  const on = { dispositivi: mine > 0, sicurezza: n - mine > 0, aggiornamenti: !!S.updAvail };
+  $$('#view [data-dot]').forEach(d => d.hidden = !on[d.dataset.dot]);
+}
+// ricerca fra le impostazioni: in tutte le schede, e mostra solo le voci che contengono il testo, raggruppate per scheda
+const fold = t => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 function settingsFilter(raw) {
-  const q = fold(raw.trim());
+  const q = fold(raw.trim()), p = $('#view .setp'); if (!p) return;
+  p.classList.toggle('q', !!q);
   let shown = 0;
-  view.querySelectorAll('.sgroup').forEach(g => {
-    // se qualche voce contiene il testo si mostrano solo quelle; il gruppo intero solo se lo nomina il titolo
-    const items = [...g.querySelectorAll('.check, label.f, .list-item, .sbody > .row, .panel > .row, .seg')];
+  p.querySelectorAll('.stab').forEach(g => {
+    // se qualche voce contiene il testo si mostrano solo quelle; la scheda intera solo se la nomina il titolo
+    const items = [...g.querySelectorAll('.check, label.f, .list-item, .sbody > .row, .panel > .row, .seg, .tbset')];
     const match = items.filter(el => !q || fold(el.textContent).includes(q));
-    const whole = !q || (!match.length && fold(g.querySelector('summary').textContent + ' ' + g.dataset.k).includes(q));
+    const whole = !q || (!match.length && fold(g.querySelector('h2').textContent + ' ' + g.dataset.k).includes(q));
     let hits = 0;
     items.forEach(el => { const ok = whole || match.includes(el); el.classList.toggle('nohit', !ok); hits += ok; });
     g.querySelectorAll('.sbody > .sub, .panel > .small').forEach(el => el.classList.toggle('nohit', !whole));
     g.hidden = !whole && !hits; if (!g.hidden) shown++;
-    if (q) g.open = !g.hidden; else g.open = !store.get('setClosed', SET_CLOSED).includes(g.dataset.g);
+    p.querySelector(`.setnav a[data-t="${g.dataset.t}"]`)?.classList.toggle('dim', g.hidden);
   });
   const none = $('#setNone'); none.hidden = !q || shown > 0;
   if (q && !shown) none.innerHTML = `Nessuna impostazione contiene «${esc(raw.trim())}». Prova con una parola più corta, come «qualità» o «tema».`;
@@ -2876,7 +2924,9 @@ async function refreshSpazio() {
     devHtml = `<div><h3>${here}</h3><p class="sub">Armony usa ${bytes(e.usage)} di ${bytes(e.quota)} concessi${NATIVE ? ' dal telefono' : ' dal browser'}.</p>
       ${spazioBar(e.quota, [{ v: Math.min(off, e.usage), l: 'Brani offline', c: 'var(--accent)' }, { v: Math.max(0, e.usage - off), l: 'Copertine e dati', c: 'var(--muted)' }], Math.max(0, e.quota - e.usage))}</div>`;
   } catch { devHtml = `<div><h3>${here}</h3><p class="sub">Questo browser non dice quanto spazio usa.</p></div>`; }
-  if ($('#spazioBox') === box) box.innerHTML = srvHtml + devHtml;
+  if ($('#spazioBox') !== box) return;
+  // amministratore: il disco del server sta in Server → Spazio del server
+  const sb = $('#spazioSrvBox'); if (sb) { sb.innerHTML = srvHtml; box.innerHTML = devHtml; } else box.innerHTML = srvHtml + devHtml;
 }
 /* ================= aggiornamenti dell'app (dal server Armony, verso i tag GitHub) ================= */
 async function refreshUpdate(force) {
@@ -2887,6 +2937,7 @@ async function refreshUpdate(force) {
     else box.innerHTML = `<p class="sub">${esc(e.message)}</p>`;
     return;
   }
+  S.updAvail = !!u.available; setDots();
   const st = u.updater, busy = u.requested || st?.state === 'in corso';
   box.dataset.busy = busy ? '1' : '';
   box.innerHTML = `<p style="margin:0 0 8px">Versione installata <b>${esc(u.current)}</b>${u.latest ? ` · ultima su GitHub <b>${esc(u.latest)}</b>` : ''}</p>
@@ -3153,6 +3204,7 @@ async function refreshUsers() {
 async function notifyUpdate() {
   if (!access().admin) return;
   const u = await dlApi('/api/update').catch(() => null);
+  S.updAvail = !!u?.available; setDots();
   if (u?.available && store.get('updSeen') !== u.latest) { store.set('updSeen', u.latest); toast(`Armony ${u.latest} disponibile: aggiorna da Impostazioni.`, 6000); }
 }
 function serverDialog(s, preset = {}) {
@@ -3294,7 +3346,7 @@ function ctxDialog() {
     <p class="sh">Qualità di ascolto</p>${Object.entries(QUALITIES).map(([k, q]) => `<button class="mi ${k === P.quality ? 'on' : ''}" data-q="${k}">${ic(k === P.quality ? 'check' : 'album')}${q.label}</button>`).join('')}`;
   d.querySelectorAll('[data-sid]').forEach(el => el.onclick = () => { d.close(); if (S.active === el.dataset.sid) return; S.active = el.dataset.sid; persistServers(); route(); });
   d.querySelectorAll('[data-q]').forEach(el => el.onclick = () => { setQuality(el.dataset.q); d.close(); });
-  d.querySelector('[data-ctx]').onclick = () => { d.close(); if (S.servers.length) location.hash = '#/impostazioni'; else serverDialog(); };
+  d.querySelector('[data-ctx]').onclick = () => { d.close(); if (S.servers.length) location.hash = '#/impostazioni/server'; else serverDialog(); };
   closeOutside(d); d.showModal();
 }
 function moreSheet() {

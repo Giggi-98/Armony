@@ -195,15 +195,17 @@ const Disp = {
     const s = srv(); if (!s?.session) return;
     await this.fresh(s, true);
     this.dot();
-    if ($('#devBox')) this.paint();
+    if ($('#devBox') || $('#secBox')) this.paint();
   },
   dot() {
     const n = srv()?.me?.pending || 0;
     $$(`#nav a[data-r="impostazioni"], ${inMore('impostazioni') ? '#tabMore' : '#tabs a[data-r="impostazioni"]'}`).forEach(a => {
       const d = a.querySelector(':scope>.dot.ddot'); if (n && !d) a.insertAdjacentHTML('beforeend', '<i class="dot pdot ddot" aria-hidden="true"></i>'); else if (!n && d) d.remove();
     });
-    if (n > this.seen) toast(n === 1 ? 'Un dispositivo aspetta l\'approvazione: Impostazioni → Dispositivi e sicurezza.' : `${n} dispositivi aspettano l'approvazione: Impostazioni → Dispositivi e sicurezza.`, 6000);
-    this.seen = n;
+    // i miei in Dispositivi e sicurezza, quelli degli altri utenti (amministratore) in Server → Sicurezza
+    const where = srv()?.me?.admin && !srv().me.pending_mine ? 'Impostazioni → Server → Sicurezza' : 'Impostazioni → Dispositivi e sicurezza';
+    if (n > this.seen) toast(n === 1 ? `Un dispositivo aspetta l'approvazione: ${where}.` : `${n} dispositivi aspettano l'approvazione: ${where}.`, 6000);
+    this.seen = n; setDots();
   },
   // ------------------------------------------------ Impostazioni → Dispositivi e sicurezza
   api(path, opts = {}) { return dlApi(path, opts); },
@@ -223,40 +225,45 @@ const Disp = {
     return `<div class="list-item dv${d.state === 'attesa' ? ' wait' : ''}"><span class="dv-ic">${this.icon(d.kind)}</span>
       <span class="grow"><b>${mine ? '' : esc(d.user) + ' · '}${esc(d.name)}</b><small>${sub}</small>${tags ? `<span class="dv-tags">${tags}</span>` : ''}</span>${acts}</div>`;
   },
+  // Impostazioni: i miei dispositivi in "Dispositivi e sicurezza" (#devBox); per l'amministratore quelli degli altri utenti,
+  // la regola dei client senza chiave e il registro in Server → Sicurezza (#secBox)
   async paint() {
-    const box = $('#devBox'); if (!box) return;
+    const box = $('#devBox'), sec = $('#secBox'); if (!box && !sec) return;
     const s = srv(), admin = !!s?.me?.admin;
     let x, log = null;
-    try { x = await this.api('/api/dispositivi' + (admin ? '?tutti=1' : '')); if (admin) log = await this.api('/api/sicurezza'); }
-    catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+    try { x = await this.api('/api/dispositivi' + (admin ? '?tutti=1' : '')); if (admin && sec) log = await this.api('/api/sicurezza'); }
+    catch (e) { for (const b of [box, sec]) if (b) b.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
     this.list = x.devices;
     const me = x.devices.find(d => d.me), user = s.user;
     const mine = x.devices.filter(d => d.user === user && !d.me), others = x.devices.filter(d => d.user !== user);
-    const wait = [...mine, ...others].filter(d => d.state === 'attesa');
-    const ok = mine.filter(d => d.state === 'fidato'), gone = x.devices.filter(d => d.state === 'revocato');
+    const ok = mine.filter(d => d.state === 'fidato'), gone = d => d.state === 'revocato', wait = d => d.state === 'attesa';
     const lg = x.legacy || log?.legacy, modes = [['sempre', 'Sempre'], ['locale', 'Da casa e Tailscale'], ['mai', 'Mai']];
     const hint = { sempre: 'Entrano anche da internet, come prima dell\'aggiornamento. Un client vecchio con la password giusta resta un buco aperto.', locale: 'Da internet (Funnel, indirizzi pubblici) entrano solo i dispositivi con chiave; da casa e da Tailscale anche gli altri.', mai: 'Solo dispositivi con chiave: chi apre Armony senza HTTPS (es. http://192.168…) non entra più.' };
     const usersOf = [...new Set(others.filter(d => d.state === 'fidato').map(d => d.user))];
-    box.innerHTML = `${me ? `<div class="dv-me"><span class="dv-ic">${this.icon(me.kind)}</span><span class="grow"><b>${esc(me.name)}</b>
+    const revoked = list => list.length ? `<details class="dv-more"><summary>Revocati (${list.length})</summary>${list.map(d => this.row(d, d.user === user)).join('')}</details>` : '';
+    if (box) box.innerHTML = `${me ? `<div class="dv-me"><span class="dv-ic">${this.icon(me.kind)}</span><span class="grow"><b>${esc(me.name)}</b>
         <small>Questo dispositivo · ${me.keyed ? `con chiave <b class="fp">${esc(me.fp)}</b>` : 'senza chiave'}</small></span></div>
       ${me.keyed ? '' : `<p class="small dv-note">${this.can() ? 'La chiave si crea da sola al prossimo avvio.' : 'Senza HTTPS il browser non crea chiavi: apri Armony con l\'indirizzo https o dall\'app. Da internet questo dispositivo potrebbe non entrare.'}</p>`}
       <div class="row"><button class="btn primary" data-dv="pair">${ic('plus')} Abbina un dispositivo</button><button class="btn" data-dv="rename" data-id="${esc(me.id)}">Rinomina</button>${me.keyed || this.can() ? `<button class="btn" data-dv="selfkey">${ic('key')} ${me.keyed ? 'Rigenera la chiave' : 'Crea la chiave'}</button>` : ''}</div>` : ''}
-      ${wait.length ? `<h3 class="dv-h">In attesa</h3>${wait.map(d => this.row(d, d.user === user)).join('')}` : ''}
+      ${mine.some(wait) ? `<h3 class="dv-h">In attesa</h3>${mine.filter(wait).map(d => this.row(d, true)).join('')}` : ''}
       <h3 class="dv-h">I tuoi dispositivi fidati</h3>${ok.length ? ok.map(d => this.row(d, true)).join('') : '<p class="small dv-note">Solo questo. Con "Abbina un dispositivo" ne aggiungi un altro senza password.</p>'}
-      ${usersOf.length ? `<h3 class="dv-h">Gli altri utenti</h3>${usersOf.map(u => others.filter(d => d.user === u && d.state === 'fidato').map(d => this.row(d, false)).join('')).join('')}` : ''}
-      ${gone.length ? `<details class="dv-more"><summary>Revocati (${gone.length})</summary>${gone.map(d => this.row(d, d.user === user)).join('')}</details>` : ''}
+      ${revoked(mine.filter(gone))}`;
+    if (sec) sec.innerHTML = `<p class="sub">I dispositivi degli altri utenti di questo server, chi entra senza chiave e il registro degli accessi. I tuoi sono in Questo dispositivo → Dispositivi e sicurezza.</p>
+      ${others.some(wait) ? `<h3 class="dv-h">In attesa</h3>${others.filter(wait).map(d => this.row(d, false)).join('')}` : ''}
+      <h3 class="dv-h">Gli altri utenti</h3>${usersOf.length ? usersOf.map(u => others.filter(d => d.user === u && d.state === 'fidato').map(d => this.row(d, false)).join('')).join('') : '<p class="small dv-note">Nessun altro utente ha dispositivi fidati.</p>'}
+      ${revoked(others.filter(gone))}
       ${lg ? `<h3 class="dv-h">Client senza chiave</h3><p class="small dv-note">App vecchie e pagine aperte senza HTTPS non hanno una chiave: possono entrare solo con utente e password.</p>
         <div class="seg" role="radiogroup" aria-label="Client senza chiave">${modes.map(([v, l]) => `<label><input type="radio" name="dvlegacy" value="${v}" ${lg.mode === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
         <p class="small dv-note">${hint[lg.mode]}${!lg.chosen && lg.grace && lg.grace * 1000 > Date.now() ? ` Periodo di transizione dopo l'aggiornamento: fino al ${new Date(lg.grace * 1000).toLocaleDateString()}, poi «Da casa e Tailscale».` : ''}</p>` : ''}
       ${log ? `<details class="dv-more"><summary>Registro degli accessi</summary>${log.events.length ? `<ul class="dv-log">${log.events.map(e => `<li><b>${esc(this.ev[e.kind] || e.kind)}</b> <span>${esc([e.user, e.dev].filter(Boolean).join(' · '))}${e.detail && !(e.dev && e.detail.startsWith(e.dev)) ? ' · ' + esc(e.detail) : ''}</span><small>${new Date(e.ts * 1000).toLocaleString()} · ${e.net === 'internet' ? 'internet' : 'casa'} ${esc(e.ip || '')}</small></li>`).join('')}</ul>` : '<p class="small dv-note">Ancora niente.</p>'}</details>` : ''}`;
-    box.querySelectorAll('[name=dvlegacy]').forEach(r => r.onchange = async () => {
+    sec?.querySelectorAll('[name=dvlegacy]').forEach(r => r.onchange = async () => {
       if (r.value === 'mai' && !confirm('Solo dispositivi con chiave: chi usa Armony senza HTTPS o con un\'app vecchia resterà fuori. Continuare?')) return this.paint();
       try { await this.api('/api/sicurezza', { method: 'PUT', body: JSON.stringify({ legacy: r.value }) }); toast('Salvato.'); } catch (e) { toast(e.message); }
       this.paint();
     });
-    box.querySelectorAll('[data-dv]').forEach(b => b.onclick = () => this.act(b.dataset.dv, b.dataset.id));
+    for (const b of [box, sec]) b?.querySelectorAll('[data-dv]').forEach(el => el.onclick = () => this.act(el.dataset.dv, el.dataset.id));
   },
-  ev: { accesso: 'Accesso', accesso_fallito: 'Password sbagliata', attesa: 'Dispositivo in attesa', nuovo: 'Dispositivo nuovo, fidato', approvato: 'Approvato', revocato: 'Revocato', abbinato: 'Abbinato con codice', abbinamento_fallito: 'Codice di abbinamento sbagliato', codice: 'Codice di abbinamento creato', rigenera: 'Chiave nuova richiesta', rigenerato: 'Chiave rigenerata', chiave: 'Prima chiave', bloccato: 'Troppi tentativi: attesa', emergenza: 'Codice di emergenza', senza_chiave: 'Rifiutato: senza chiave', impostazione: 'Impostazione' },
+  ev: { accesso: 'Accesso', accesso_fallito: 'Password sbagliata', attesa: 'Dispositivo in attesa', nuovo: 'Dispositivo nuovo, fidato', approvato: 'Approvato', revocato: 'Revocato', abbinato: 'Abbinato con codice', abbinamento_fallito: 'Codice di abbinamento sbagliato', codice: 'Codice di abbinamento creato', rigenera: 'Chiave nuova richiesta', rigenerato: 'Chiave rigenerata', chiave: 'Prima chiave', bloccato: 'Troppi tentativi: attesa', emergenza: 'Codice di emergenza', senza_chiave: 'Rifiutato: senza chiave', impostazione: 'Impostazione', impserver: 'Rifiutato: impostazioni del server senza chiave' },
   async act(a, id) {
     const s = srv(), d = (this.list || []).find(x => x.id === id), base = `/api/dispositivi/${encodeURIComponent(id || '')}`;
     try {

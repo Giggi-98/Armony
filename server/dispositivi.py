@@ -17,6 +17,10 @@ interrompe i flussi audio subito.
                          revoca, rigenera; /chiave registra o cambia la chiave di questo; /abbina crea un codice
   /api/sicurezza         solo amministratori: registro degli eventi e client senza chiave (sempre/locale/mai)
 
+Impostazioni del server (rotte "admin" di RULES che cambiano qualcosa, e le azioni dell'amministratore sui dispositivi
+degli altri): le cambia solo un amministratore che entra con un dispositivo con chiave, oppure da casa o da Tailscale
+(can_change). Senza chiave da internet le legge ma riceve 403 con code "impserver", e il rifiuto va nel registro.
+
 Audio e copertine non possono mandare intestazioni: il proxy /rest vuole k=<gettone>, firmato dal server con
 HMAC per dispositivo e finestra di 12 ore (vale la finestra corrente e la precedente), ricontrollato a ogni
 richiesta contro lo stato del dispositivo.
@@ -59,6 +63,8 @@ MSG = {
     "chiave": "Da internet entrano solo i dispositivi con chiave: aggiorna Armony (app o pagina con HTTPS), o collegati da casa o da Tailscale.",
     "mai": "Questo server accetta solo dispositivi con chiave: aggiorna Armony e aprila con HTTPS o dall'app.",
     "emergenza": "Il codice di emergenza vale solo da casa o da Tailscale.",
+    "impserver": "Da internet le impostazioni del server si cambiano solo da un dispositivo con chiave (l'app, o Armony "
+                 "aperta con HTTPS) oppure da casa o da Tailscale. Da qui puoi guardarle ma non cambiarle.",
 }
 
 nonces, nlock = {}, threading.Lock()
@@ -291,6 +297,18 @@ def identity(tok=None, k=None):
                 delete=admin or bool(p and p["del"]), dev=d["id"], keyed=bool(d["pub"]), gen=d["gen"])
 
 
+def can_change(who):
+    """Un amministratore può cambiare le impostazioni del server: con un dispositivo con chiave o da casa/Tailscale.
+    Il codice di emergenza vale già solo da casa (keyed=True)."""
+    return bool(who.get("keyed")) or is_local()
+
+
+def refuse_change():
+    event("impserver", g.who.get("user"), g.who.get("dev"), f"rifiutato {request.method} {request.path}: senza chiave da internet",
+          once="imp:" + (g.who.get("dev") or client_ip()))
+    return jsonify(error=MSG["impserver"], code="impserver"), 403
+
+
 def deny():
     """La risposta 401 con il motivo: il client mostra "Questo dispositivo è stato revocato" senza riprovare."""
     why = getattr(g, "why", None)
@@ -299,6 +317,9 @@ def deny():
 
 def me_extra(who):
     out = dict(dev=who.get("dev"), keyed=who.get("keyed", True), pending=pending_count(who))
+    if who.get("admin"):
+        # srvedit: le impostazioni del server si possono cambiare da qui (can_change); pending_mine: i miei in attesa
+        out.update(srvedit=can_change(who), pending_mine=db.one("SELECT count(*) n FROM devices WHERE state = 'attesa' AND user = ?", who.get("user"))["n"])
     if who.get("dev"):
         out["ticket"] = ticket(who["dev"], who["gen"])
     return out
@@ -539,6 +560,8 @@ def rinomina(did):
     d = owned(did)
     if not d:
         return jsonify(error="Dispositivo non trovato"), 404
+    if d["user"] != g.who["user"] and not can_change(g.who):
+        return refuse_change()
     name = clean_name((request.get_json(silent=True) or {}).get("name"), d["name"])
     db.run("UPDATE devices SET name = ? WHERE id = ?", name, did)
     notify(d["user"])
@@ -550,6 +573,8 @@ def azione(did, azione):
     d = owned(did)
     if not d:
         return jsonify(error="Dispositivo non trovato"), 404
+    if d["user"] != g.who["user"] and not can_change(g.who):
+        return refuse_change()
     who = g.who["user"] or "emergenza"
     if azione == "approva":
         if d["state"] != "attesa":
