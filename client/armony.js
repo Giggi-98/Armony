@@ -169,11 +169,11 @@ const DEFAULT_PREFS = {
   quality: '192', qualityMobile: 'same', offlineQ: '192', crossfade: 0, rg: 'track', rgPre: 0, night: false, speed: 1,
   eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqOn: true, eqAuto: false, compat: false, lyricsOnline: true, syncQueue: true,
   nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true, live: true, deviceName: '', solo: false, cacheMB: 1024, autoplay: true,
-  notifOn: false, nImport: true, nDownload: true, nJam: true, nDev: true
+  notifOn: false, nImport: true, nDownload: true, nJam: true, nDev: true, nAmici: true
 };
 const P = Object.assign({}, DEFAULT_PREFS, store.get('prefs', {}));
 // restano su questo dispositivo anche con la sincronizzazione attiva
-const DEVICE_PREFS = ['compat', 'volume', 'sync', 'live', 'deviceName', 'solo', 'cacheMB', 'notifOn', 'nImport', 'nDownload', 'nJam', 'nDev'];
+const DEVICE_PREFS = ['compat', 'volume', 'sync', 'live', 'deviceName', 'solo', 'cacheMB', 'notifOn', 'nImport', 'nDownload', 'nJam', 'nDev', 'nAmici'];
 const savePrefs = () => { store.set('prefs', P); store.set('prefsAt', Date.now()); PrefSync.schedule(); };
 const S = {
   servers: store.get('servers', []),
@@ -974,6 +974,7 @@ async function vAlbum(id) {
     lActionBar({ star: { act: 'staralbum', on: a.starred, data: { id, on: a.starred ? 1 : 0 } }, more: [
       { act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' },
       !srv().local && can('condividi') && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: a.name } },
+      Amici.on() && { act: 'sendalb', label: 'Manda a un amico', icon: 'send', data: { id, name: a.name, sub: a.artist || '' } },
       canEdit() && { act: 'editalbum', label: 'Modifica album', icon: 'pen' },
       canDelete() && { act: 'delalbum', label: 'Elimina album dal server', icon: 'trash', danger: true, data: { name: a.name } }] }) +
     `<div id="gapsNote"></div><div id="lList">${songList(songs, opts)}</div>`;
@@ -1417,7 +1418,8 @@ async function vPlaylist(id) {
   let songs = arr(p.entry).map(x => norm(x)); songs.forEach((t, i) => t._pi = i);
   const ok = 'pl:' + id, popts = { empty: 'Playlist vuota. Aggiungi brani dal menu ⋯ accanto a ogni canzone.', sortable: true };
   // modificarla: è mia (o sono l'amministratore) e posso gestire playlist
-  const mine = can('playlist') && (access().admin || srv().local || !p.owner || p.owner === srv().user);
+  const owner = can('playlist') && (access().admin || srv().local || !p.owner || p.owner === srv().user);
+  const mine = owner || (can('playlist') && Amici.collab.has(id));  // chi collabora modifica come il proprietario
   const count = q => { const k = arr(q.entry).length; return `${k} ${k === 1 ? 'brano' : 'brani'}, ${fmtLong(q.duration || 0)}`; };
   const empty = { empty: 'Playlist vuota. Aggiungi brani dal menu ⋯ accanto a ogni canzone.' };
   Glow.show(coverUrl(p.coverArt, 300), 'album');
@@ -1429,6 +1431,8 @@ async function vPlaylist(id) {
       { act: 'exportpl', label: 'Esporta (M3U, JSON, CSV)', icon: 'down', data: { id } },
       mine && { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
       mine && !srv().local && srv().me?.caps?.includes('plordina') && { act: 'reorderpl', label: 'Riordina i brani', icon: 'grip', data: { id } },
+      owner && !srv().local && Amici.on() && { act: 'collabpl', label: 'Collaboratori', icon: 'friends', data: { id } },
+      Amici.on() && !srv().local && { act: 'sendpl', label: 'Manda a un amico', icon: 'send', data: { id, name: p.name } },
       mine && !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
       mine && { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
     `<div id="impSt"></div>${songs.length > 1 ? Ord.bar(ok) : ''}<div id="lList">${songList(Ord.apply(songs, Ord.get(ok)), popts)}</div>`;
@@ -2381,7 +2385,9 @@ async function vFriends() {
   const n = Scene.nav, live = Presence.on();
   view.innerHTML = `<h1>Amici</h1><p class="sub">${live ? 'Chi ascolta cosa' : 'Chi sta ascoltando cosa'} su ${esc(srv().name)}, in tempo reale.</p>${live
     ? `<h2 class="pf-h">In ascolto ora</h2><div class="pnow" id="presNow" data-pres></div><h2>Attività</h2><div class="pfeed" id="presFeed" data-pres></div>` : '<div id="fl"></div>'}
-    <h2>Jam vicine</h2><div id="fj"><p class="sub">Cerco…</p></div>`;
+    <h2>Jam vicine</h2><div id="fj"><p class="sub">Cerco…</p></div>
+    ${Amici.on() ? '<h2>Il vostro mix</h2><div id="fBlend"></div><h2>Ricevuti</h2><div id="fRic"></div>' : ''}`;
+  if (Amici.on()) { Amici.blendBox($('#fBlend')); Amici.ricevuti($('#fRic'), n); }
   // con la presenza (stesso canale di Live) tutto arriva da solo; senza, getNowPlaying ogni 15 secondi
   const paint = live ? async () => Presence.paintView() : async () => {
     const list = await friendsNow(); const box = $('#fl'); if (!box) return;
@@ -3364,13 +3370,20 @@ async function addToPlaylistDialog(tracks) {
   d.innerHTML = '<h3>Aggiungi a playlist</h3><p class="sub">Caricamento…</p>'; d.showModal();
   try {
     const sid = tracks[0].serverId;
-    const pls = arr((await api('getPlaylists', {}, srv(sid))).playlists.playlist);
+    // le mie e quelle in cui collaboro (le altre pubbliche si vedono ma non si modificano)
+    const me = (srv(sid)?.user || '').toLowerCase(), pls = arr((await api('getPlaylists', {}, srv(sid))).playlists.playlist).filter(p => !p.owner || p.owner.toLowerCase() === me || Amici.collab.has(p.id) || access().admin);
     d.innerHTML = `<h3>Aggiungi ${tracks.length > 1 ? tracks.length + ' brani' : 'a playlist'}</h3>
-      <div style="max-height:45vh;overflow:auto">${pls.map(p => `<div class="list-item" data-pl="${esc(p.id)}"><span class="grow"><b>${esc(p.name)}</b></span><small>${p.songCount}</small></div>`).join('')}</div>
+      <div style="max-height:45vh;overflow:auto">${pls.map(p => `<div class="list-item" data-pl="${esc(p.id)}"><span class="grow"><b>${esc(p.name)}</b>${Amici.collab.has(p.id) ? `<small>collaborativa · di ${esc(p.owner)}</small>` : ''}</span><small>${p.songCount}</small></div>`).join('')}</div>
       <div class="row" style="margin-top:12px;flex-wrap:nowrap"><input type="text" id="npName" placeholder="Nuova playlist"><button class="btn primary" id="npGo">Crea</button></div>
       <div class="row" style="margin-top:10px"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
     const ids = tracks.map(t => t.id);
-    d.querySelectorAll('[data-pl]').forEach(el => el.onclick = async () => { try { await addSongsToPlaylist(el.dataset.pl, ids, sid); d.close(); toast('Aggiunto alla playlist.'); } catch (e) { toast(e.message); } });
+    d.querySelectorAll('[data-pl]').forEach(el => el.onclick = async () => {
+      try {
+        if (Amici.collab.has(el.dataset.pl)) await srvApi(srv(sid), '/api/collab/aggiungi', { method: 'POST', body: JSON.stringify({ pid: el.dataset.pl, ids }) });
+        else await addSongsToPlaylist(el.dataset.pl, ids, sid);
+        d.close(); toast('Aggiunto alla playlist.');
+      } catch (e) { toast(e.message); }
+    });
     $('#npGo').onclick = async () => { const name = $('#npName').value.trim(); if (!name) return; try { await createPlaylist(name, ids, sid); d.close(); toast(`Playlist "${name}" creata.`); } catch (e) { toast(e.message); } };
   } catch (e) { d.innerHTML = `<h3>Errore</h3><p>${esc(e.message)}</p><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button>`; }
 }
@@ -3390,9 +3403,100 @@ async function artistRadio(id) {
   if (!songs.length) { const a = (await api('getArtist', { id })).artist; const albums = await Promise.all(arr(a.album).map(al => api('getAlbum', { id: al.id }))); songs = albums.flatMap(r => arr(r.album.song)); }
   return songs;
 }
+/* ================= fra amici (capacità "amici", server/amici.py) ================= */
+I.send = '<path d="M4 12l16-8-6 16-3-7z"/><path d="M11 13l9-9"/>';
+const Amici = {
+  collab: new Set(), users: null,
+  on() { return !!srv()?.me?.caps?.includes('amici') && !!srv()?.session && !srv()?.local; },
+  async load() { if (!this.on()) return; try { this.collab = new Set((await srvApi(srv(), '/api/collab/mie')).items.map(x => x.id)); } catch {} },
+  async utenti() { if (!this.users) { try { this.users = (await srvApi(srv(), '/api/amici/utenti')).users; } catch { this.users = []; } } return this.users; },
+  // «Manda a un amico»: scegli chi, un messaggio facoltativo; arriva come notifica e in Amici → Ricevuti
+  async manda(x) {
+    const us = await this.utenti(); if (!us.length) return toast('Su questo server non ci sono altri utenti.');
+    const d = $('#dlg'); d.className = 'sheet';
+    d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">Manda a un amico</b><small style="color:var(--muted)">«${esc(x.title)}»${x.sub ? ' · ' + esc(x.sub) : ''}</small></span></div>
+      <label class="f" style="padding:0 14px">Messaggio (facoltativo)<input type="text" id="mMsg" maxlength="280" placeholder="Senti questa!"></label>
+      ${us.map(u => `<button class="mi" data-u="${esc(u)}">${pavatar({ user: u, name: u }, 's')}<span class="grow">${esc(u)}</span>${ic('send')}</button>`).join('')}`;
+    d.querySelectorAll('[data-u]').forEach(b => b.onclick = async () => {
+      try { await srvApi(srv(), '/api/manda', { method: 'POST', body: JSON.stringify({ ...x, to: b.dataset.u, msg: $('#mMsg').value }) }); d.close(); toast(`Mandato a ${b.dataset.u}.`); }
+      catch (e) { toast(e.message); }
+    });
+    closeOutside(d); d.showModal();
+  },
+  async ricevuti(box, n) {
+    let r; try { r = await srvApi(srv(), '/api/manda'); } catch { return; }
+    if (stale(n) || !box.isConnected) return;
+    const KIND = { brano: 'Brano', album: 'Album', playlist: 'Playlist', artista: 'Artista' };
+    box.innerHTML = r.ricevuti.length ? r.ricevuti.map((x, i) => `<div class="nrow go" data-ri="${i}" role="button" tabindex="0"><span class="nic">${ic(x.kind === 'album' ? 'album' : x.kind === 'playlist' ? 'list' : x.kind === 'artista' ? 'user' : 'play')}</span>
+        <span class="grow"><b>${esc(x.title)}</b><small>${KIND[x.kind]}${x.sub ? ' · ' + esc(x.sub) : ''} · da ${esc(x.nome || x.da)}${x.msg ? ` — «${esc(x.msg)}»` : ''}</small></span>
+        <time>${new Date(x.ts * 1000).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</time></div>`).join('')
+      : '<p class="sub">Quando un amico ti manda un brano, un album o una playlist, lo trovi qui.</p>';
+    box.querySelectorAll('[data-ri]').forEach(el => el.onclick = async () => {
+      const x = r.ricevuti[+el.dataset.ri];
+      if (x.kind === 'brano') { try { setQueue([norm((await api('getSong', { id: x.ref })).song)], 0); } catch { toast('Il brano non è più in libreria.'); } }
+      else location.hash = { album: '#/album/', playlist: '#/playlist/', artista: '#/artista/' }[x.kind] + encodeURIComponent(x.ref);
+    });
+  },
+  // Blend: il mix di due amici dai loro ascolti, con quanto vi somigliate
+  async blendBox(box) {
+    const us = await this.utenti(); if (!box.isConnected) return;
+    if (!us.length) { box.innerHTML = '<p class="sub">Servono altri utenti su questo server.</p>'; return; }
+    box.innerHTML = `<p class="sub" style="margin-top:0">Un mix fatto con i tuoi ascolti e quelli di un amico: prima i brani che piacciono a tutti e due, poi alternati quelli di ciascuno.</p>
+      <div class="row">${us.map(u => `<button class="chip" data-b="${esc(u)}">${pavatar({ user: u, name: u }, 'xs')} ${esc(u)}</button>`).join('')}</div><div id="blendRes"></div>`;
+    box.querySelectorAll('[data-b]').forEach(b => b.onclick = async () => {
+      const res = $('#blendRes'); res.innerHTML = '<p class="sub">Preparo il mix…</p>';
+      let r; try { r = await srvApi(srv(), '/api/blend?con=' + encodeURIComponent(b.dataset.b)); }
+      catch (e) { res.innerHTML = `<p class="sub">${/403/.test(e.message) ? `${esc(b.dataset.b)} non mostra i suoi ascolti agli amici.` : 'Non ci sono ancora abbastanza ascolti per un mix.'}</p>`; return; }
+      res.innerHTML = `<div class="panel blend"><span class="blend-aff"><b>${r.affinita}%</b><small>affinità</small></span><span class="grow"><b>Tu + ${esc(r.nome)}</b><small>${r.ids.length} brani · ${r.comuni} che ascoltate entrambi${r.artisti.length ? ' · insieme: ' + r.artisti.slice(0, 3).map(esc).join(', ') : ''}</small></span>
+        <button class="btn primary" id="blendGo">${ic('play', true)} Ascolta</button></div>`;
+      $('#blendGo').onclick = async () => {
+        toast('Preparo il mix…');
+        const l = (await Promise.all(r.ids.map(id => api('getSong', { id }).then(x => norm(x.song)).catch(() => null)))).filter(Boolean);
+        if (!l.length) return toast('I brani del mix non sono più in libreria.');
+        S.ctx = { kind: 'Blend', name: `Tu + ${r.nome}` }; store.set('qctx', S.ctx); S.queue = l; playIndex(0);
+      };
+    });
+  },
+  // collaboratori di una playlist (solo il proprietario li sceglie)
+  async collabSheet(pid) {
+    const [us, cur] = await Promise.all([this.utenti(), srvApi(srv(), '/api/collab?pid=' + encodeURIComponent(pid)).catch(e => ({ error: e.message }))]);
+    if (cur.error) return toast(cur.error);
+    const on = new Set(cur.users.map(u => u.toLowerCase())), d = $('#dlg'); d.className = 'sheet';
+    d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">Collaboratori</b><small style="color:var(--muted)">Possono aggiungere, togliere e riordinare i brani. La playlist diventa visibile agli altri utenti del server.</small></span></div>
+      ${us.length ? us.map(u => `<label class="check" style="padding:8px 14px"><input type="checkbox" value="${esc(u)}" ${on.has(u.toLowerCase()) ? 'checked' : ''}><span>${esc(u)}</span></label>`).join('') : '<p class="sub" style="padding:0 14px">Non ci sono altri utenti.</p>'}
+      <div class="row" style="padding:8px 14px"><button class="btn primary" id="coOk">Salva</button></div>`;
+    $('#coOk').onclick = async () => {
+      const users = [...d.querySelectorAll('input:checked')].map(i => i.value);
+      try { await srvApi(srv(), '/api/collab', { method: 'PUT', body: JSON.stringify({ pid, users }) }); d.close(); toast(users.length ? `Collaborativa con ${users.join(', ')}.` : 'Non è più collaborativa.'); route(); }
+      catch (e) { toast(/409/.test(e.message) ? 'Serve l\'amministratore di Navidrome in Impostazioni → Utenti → Registrazione.' : e.message); }
+    };
+    closeOutside(d); d.showModal();
+  },
+  // cambio password (Profilo): la vecchia si verifica su Navidrome; gli altri tuoi dispositivi ricevono le credenziali nuove
+  passwordSheet() {
+    const d = $('#dlg2'); d.className = '';
+    d.innerHTML = `<h3>Cambia password</h3><p class="sub">Vale per Armony e per le app Subsonic collegate. I tuoi dispositivi con Armony aperta restano collegati.</p>
+      <label class="f">Password attuale<input type="password" id="pwOld" autocomplete="current-password"></label>
+      <label class="f">Password nuova (almeno 8 caratteri)<input type="password" id="pwNew" autocomplete="new-password" minlength="8"></label>
+      <label class="f">Ripeti la password nuova<input type="password" id="pwNew2" autocomplete="new-password"></label>
+      <p class="sub" id="pwMsg" style="color:var(--danger);min-height:1.2em"></p>
+      <div class="row"><button class="btn primary" id="pwOk">Cambia</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div>`;
+    $('#pwOk').onclick = async () => {
+      const o = $('#pwOld').value, a = $('#pwNew').value, b = $('#pwNew2').value, msg = t => { $('#pwMsg').textContent = t; };
+      if (a.length < 8) return msg('La password nuova deve avere almeno 8 caratteri.');
+      if (a !== b) return msg('Le due password nuove non coincidono.');
+      $('#pwOk').disabled = true;
+      try {
+        const r = await srvApi(srv(), '/api/password', { method: 'POST', body: JSON.stringify({ old: o, new: a }) });
+        const s = srv(); s.tok = r.t; s.salt = r.s; persistServers(); d.close(); toast('Password cambiata.');
+      } catch (e) { $('#pwOk').disabled = false; msg(/403/.test(e.message) ? 'La password attuale non è giusta.' : /429/.test(e.message) ? 'Troppi tentativi: riprova fra qualche minuto.' : e.message); }
+    };
+    d.showModal();
+  }
+};
 /* ================= notifiche (capacità "notifiche", server/notifiche.py) ================= */
 I.bell = '<path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>';
-const NKIND = { import: 'nImport', download: 'nDownload', jam: 'nJam', dispositivi: 'nDev', sistema: null };
+const NKIND = { import: 'nImport', download: 'nDownload', jam: 'nJam', dispositivi: 'nDev', amici: 'nAmici', sistema: null };
 const Notif = {
   items: [], unread: 0,
   on() { return !!srv()?.me?.caps?.includes('notifiche') && !!srv()?.session; },
@@ -3442,7 +3546,7 @@ const Notif = {
 async function vNotifiche() {
   if (!Notif.on()) { view.innerHTML = '<h1>Notifiche</h1><div class="empty"><h3>Notifiche non disponibili</h3><p>Il server va aggiornato ad Armony 0.25 o successiva.</p></div>'; return; }
   if (!Notif.items.length) await Notif.load();
-  const KI = { import: 'down', download: 'down', jam: 'jam', dispositivi: 'shield', sistema: 'bell' };
+  const KI = { import: 'down', download: 'down', jam: 'jam', dispositivi: 'shield', amici: 'friends', sistema: 'bell' };
   const day = ts => { const d = new Date(ts * 1000), t = new Date(); const y = new Date(t - 864e5); return d.toDateString() === t.toDateString() ? 'Oggi' : d.toDateString() === y.toDateString() ? 'Ieri' : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }); };
   let last = '';
   view.innerHTML = `<div class="lhead"><h1>Notifiche</h1>${Notif.unread ? '<button class="btn sm" id="nAll">Segna tutte come lette</button>' : ''}</div>
@@ -3653,6 +3757,7 @@ function songMenu(t, ctx = {}) {
     t.albumId ? ['album', 'Vai all\'album', () => location.hash = '#/album/' + encodeURIComponent(t.albumId)] : null,
     t.artistId ? ['artist', 'Vai all\'artista', () => location.hash = '#/artista/' + encodeURIComponent(t.artistId)] : null,
     phoneT ? null : ['sliders', 'Crediti e dettagli', () => songInfo(t)],
+    Amici.on() && !t.fed && !phoneT ? ['send', 'Manda a un amico', () => Amici.manda({ kind: 'brano', id: t.id, title: t.title, sub: t.artist })] : null,
     !phoneT && can('condividi') ? ['share', 'Condividi', () => shareItem(t.id, `${t.title} - ${t.artist}`, t.serverId)] : null,
     phoneT && !Offline.has(t) ? null : Offline.has(t) ? ['trash', 'Togli dall\'offline', async () => { await Offline.remove(offKey(t)); toast('Rimosso dall\'offline.'); if (location.hash.startsWith('#/offline')) route(); }]
       : ['offline', 'Salva per l\'offline', () => Offline.save([t])],
@@ -3805,11 +3910,12 @@ function vSettings(id = location.hash.split('/')[2]) {
     <label class="check"><input type="checkbox" data-pb="sync" ${P.sync ? 'checked' : ''}><span>Stesse statistiche e impostazioni su tutti i dispositivi<small>Storico d'ascolto e preferenze vengono salvati sul server, legati al tuo utente. Chi gestisce il server può vederli. Volume e modalità compatibile restano di ogni dispositivo.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="live" ${P.live !== false ? 'checked' : ''}><span>Un solo dispositivo suona, gli altri lo comandano<small>Se avvii la musica qui, sugli altri tuoi dispositivi si ferma e il lettore mostra cosa suona qui. Da "Dove suona" nel lettore la sposti dove vuoi.</small></span></label>
     ${Presence.on() ? `<label class="check"><input type="checkbox" id="pShare" ${Presence.share ? 'checked' : ''}><span>Mostra agli altri cosa ascolto e cosa faccio<small>Gli utenti di questo server vedono il brano che ascolti e le tue attività (download, caricamenti, playlist pubbliche, Jam). Spento, non compari; tu vedi comunque gli altri.</small></span></label>` : ''}
-    <label class="f">Nome di questo dispositivo<input type="text" id="pDev" value="${esc(P.deviceName)}" placeholder="${esc(Live.name())}" maxlength="30"></label></div>`],
+    <label class="f">Nome di questo dispositivo<input type="text" id="pDev" value="${esc(P.deviceName)}" placeholder="${esc(Live.name())}" maxlength="30"></label>
+    ${Amici.on() ? '<div class="row"><button class="btn" id="pPw">Cambia password</button></div>' : ''}</div>`],
 
   srv()?.me?.caps?.includes('notifiche') ? ['dev', 'notifiche', 'Notifiche', 'bell', 'notifiche avvisi campanella importazioni download jam dispositivi', `<div class="panel stack">
     <label class="check"><input type="checkbox" id="pNotif" ${P.notifOn ? 'checked' : ''}><span>Avvisi su questo dispositivo<small>Quando ${NATIVE ? 'l\'app è in sottofondo' : 'Armony non è la scheda in primo piano'}, le notifiche arrivano come avvisi del ${NATIVE ? 'telefono' : 'sistema'}. Tutte restano comunque nella campanella.</small></span></label>
-    ${[['nImport', 'Importazioni e album finiti', 'Quanti brani sono arrivati e quanti non si trovano'], ['nDownload', 'Download singoli', 'Scaricati o non riusciti'], ['nJam', 'Jam degli amici', 'Quando qualcuno apre una Jam visibile'], ['nDev', 'Dispositivi da approvare', 'Un tuo dispositivo nuovo aspetta l\'approvazione']].map(([k, l, h]) => `<label class="check"><input type="checkbox" data-pb="${k}" ${P[k] !== false ? 'checked' : ''}><span>${l}<small>${h}</small></span></label>`).join('')}
+    ${[['nImport', 'Importazioni e album finiti', 'Quanti brani sono arrivati e quanti non si trovano'], ['nDownload', 'Download singoli', 'Scaricati o non riusciti'], ['nJam', 'Jam degli amici', 'Quando qualcuno apre una Jam visibile'], ['nDev', 'Dispositivi da approvare', 'Un tuo dispositivo nuovo aspetta l\'approvazione'], ['nAmici', 'Amici', 'Brani mandati a te, inviti e aggiunte nelle playlist collaborative']].map(([k, l, h]) => `<label class="check"><input type="checkbox" data-pb="${k}" ${P[k] !== false ? 'checked' : ''}><span>${l}<small>${h}</small></span></label>`).join('')}
     <p class="small" style="color:var(--muted);margin:0">${NATIVE ? 'Con l\'app chiusa del tutto gli avvisi non arrivano: li ritrovi nella campanella quando la riapri.' : 'Con il browser chiuso gli avvisi non arrivano: li ritrovi nella campanella.'}</p></div>`] : null,
 
   ['dev', 'ascolto', 'Ascolto', 'headphones', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
@@ -3901,6 +4007,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   view.querySelectorAll('.stab-back').forEach(b => b.onclick = () => navStack.at(-2) === '#/impostazioni' ? history.back() : location.hash = '#/impostazioni');
   $('#pNick').onchange = e => { P.nick = e.target.value.trim(); savePrefs(); };
   $('#pDev').onchange = e => { P.deviceName = e.target.value.trim(); savePrefs(); Live.connect(); };
+  if ($('#pPw')) $('#pPw').onclick = () => Amici.passwordSheet();
   if ($('#pNotif')) $('#pNotif').onchange = async e => {
     if (e.target.checked && !(await Notif.permission())) { e.target.checked = false; toast(NATIVE ? 'Consenti le notifiche ad Armony nelle impostazioni del telefono.' : 'Il browser non ha consentito le notifiche: abilitale dal lucchetto accanto all\'indirizzo.', 7000); return; }
     P.notifOn = e.target.checked; savePrefs(); toast(P.notifOn ? 'Avvisi attivi su questo dispositivo.' : 'Avvisi spenti: le notifiche restano nella campanella.');
@@ -4665,6 +4772,9 @@ view.addEventListener('click', async e => {
       case 'importpl': importPlaylist(); break;
       case 'libplus': libPlus(); break;
       case 'reorderpl': reorderPl(id); break;
+      case 'collabpl': Amici.collabSheet(id); break;
+      case 'sendpl': Amici.manda({ kind: 'playlist', id, title: el.dataset.name || '' }); break;
+      case 'sendalb': Amici.manda({ kind: 'album', id, title: el.dataset.name || '', sub: el.dataset.sub || '' }); break;
       case 'exportpl': { const p = (await api('getPlaylist', { id })).playlist; exportTracks(p.name, arr(p.entry).map(x => norm(x))); break; }
       case 'editpl': {
         const m = JSON.parse(view.dataset.plMeta || '{}'); const d = $('#dlg2');
@@ -5101,6 +5211,7 @@ const Live = {
     if (m.type === 'presence' || m.type === 'activity') return Presence.recv(m);  // gli altri utenti del server
     if (m.type === 'radio') return Radio.recv(m);  // stazioni e ascoltatori della Jam Radio
     if (m.type === 'notifica') return Notif.recv(m);
+    if (m.type === 'credenziali' && m.t && m.s) { const s = srv(); if (s && !s.local) { s.tok = m.t; s.salt = m.s; persistServers(); toast('Password cambiata: questo dispositivo resta collegato.'); } return; }
     if (m.type === 'libreria') { emitSoon('libreria'); if (m.playlists) emitSoon('playlists'); return; }  // brani nuovi, playlist completate dal server
     if (m.type === 'hello') {
       this.helloAt = now; Presence.hello(m); Radio.hello(m);
@@ -5593,7 +5704,7 @@ async function boot() {
   paintTheme();  // sul computer: due finestre visibili, il canale va a quella che si usa
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); HistSync.repair(); Scrob.flush(); Notif.load();
+  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); HistSync.repair(); Scrob.flush(); Notif.load(); Amici.load();
     window.Capacitor?.Plugins?.ArmonyFiles?.pending?.().then(r => { if (r?.link) location.hash = r.link; }).catch(() => {});
     if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
 }

@@ -630,6 +630,13 @@ body:has(#themeBtn[hidden]) #hBell{right:var(--s5)}
 .nrow time{color:var(--muted);font-size:var(--fs-small);flex:none}
 .nic{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--surface2);color:var(--accent-text);flex:none}
 .nic svg{width:20px;height:20px}
+.nrow.go{cursor:pointer}
+.blend{display:flex;align-items:center;gap:var(--s4);margin-top:var(--s3);flex-wrap:wrap}
+.blend .grow{flex:1;min-width:180px}
+.blend .grow b{display:block}
+.blend .grow small{display:block;color:var(--muted);font-size:var(--fs-small)}
+.blend-aff{display:grid;place-items:center;width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#c2410c);color:var(--on-accent);flex:none;line-height:1}
+.blend-aff b{font-size:1.2rem}.blend-aff small{font-size:.62rem;font-weight:600}
 .nhint{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s4)}
 @media (hover:hover) and (pointer:fine){.nrow:hover{background:var(--surface2)}}
 .qhead:first-child{margin-top:0}

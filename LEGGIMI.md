@@ -87,6 +87,12 @@ Poi, in Armony, **Impostazioni → Server musicali → Indirizzo pubblico di que
 - **Jam Radio**: stazioni che suonano senza fermarsi sul server, come una radio vera. Dalla sezione **Radio** (nella barra laterale, sul telefono in "Altro" o nella barra in basso se ce la metti; o dalla riga in cima alla Home quando una radio è in onda) crei una stazione da una playlist, un album, un genere, un artista o da tutta la libreria a caso. Gira finché non la fermi: finito l'elenco si rimescola e riparte, anche dopo un riavvio del server. Chiunque abbia un account sul server si sintonizza e sente lo stesso punto degli altri; vedi chi sta ascoltando. Mentre ascolti la radio non si salta e non si torna indietro: pausa vuol dire uscire, play rientrare al punto in cui è arrivata. Se il tuo server è collegato a quelli degli amici, sotto "Dalla rete" trovi anche le loro stazioni, con le stesse regole di visibilità della ricerca.
 - Biografie, artisti simili e brani più popolari nella pagina di ogni artista.
 
+### Fra amici
+- **Playlist collaborative**: nel menu ⋯ di una tua playlist, «Collaboratori», scegli gli amici del server. Possono aggiungere, togliere e riordinare i brani come te; ricevono un avviso quando li inviti e tu quando aggiungono qualcosa. La playlist diventa visibile agli altri utenti del server (serve l'amministratore di Navidrome in Impostazioni → Utenti → Registrazione).
+- **Manda a un amico**: dal menu di un brano, di un album o di una playlist scegli un amico e, se vuoi, scrivi due parole. Gli arriva una notifica e lo ritrova in Amici → Ricevuti.
+- **Il vostro mix** (Amici): scegli un amico e Armony fa un mix dai vostri ascolti degli ultimi sei mesi, prima i brani che piacciono a tutti e due, poi alternati quelli di ciascuno, con la vostra **affinità** e gli artisti in comune. Solo con chi mostra i suoi ascolti agli amici.
+- **Cambiare la password** dentro Armony (Impostazioni → Profilo): vale anche per le app Subsonic, e i tuoi dispositivi con Armony aperta restano collegati da soli.
+
 ### Jam: ascoltare insieme
 Ognuno sul suo telefono sente lo stesso brano nello stesso istante. Si propongono brani, si vota l'ordine della coda, si chatta e si mandano reazioni che volano sullo schermo di tutti.
 

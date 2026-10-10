@@ -249,7 +249,7 @@ def togli():
     own, u = owner_of(pid), g.who.get("user") or ""
     if own is None:
         return jsonify(error="Playlist non trovata"), 404
-    if not g.who["admin"] and (own.lower() != u.lower() or not g.who["perm"].get("playlist", True)):
+    if not g.who["admin"] and ((own.lower() != u.lower() and not A.amici.e_collab(pid, u)) or not g.who["perm"].get("playlist", True)):
         return jsonify(error="Non puoi modificare questa playlist."), 403
     if not A.nd_admin():
         return jsonify(error="Serve l'amministratore di Navidrome", code="nd"), 409
@@ -280,7 +280,7 @@ def ordina():
     own, u = owner_of(pid), g.who.get("user") or ""
     if own is None:
         return jsonify(error="Playlist non trovata"), 404
-    if not g.who["admin"] and (own.lower() != u.lower() or not g.who["perm"].get("playlist", True)):
+    if not g.who["admin"] and ((own.lower() != u.lower() and not A.amici.e_collab(pid, u)) or not g.who["perm"].get("playlist", True)):
         return jsonify(error="Non puoi modificare questa playlist."), 403
     if not A.nd_admin():
         return jsonify(error="Serve l'amministratore di Navidrome", code="nd"), 409

@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Fra amici: playlist collaborative, «Manda a un amico», mix di due amici, cambio password
+
+**Contesto:** fase 7 del piano: il gruppo di amici sullo stesso server.
+**Scelta:** `server/amici.py`, migrazione 13 (`collab`, `mandati`). Collaborative: Navidrome fa modificare solo il proprietario, quindi le aggiunte dei collaboratori le fa Armony come amministratore di Navidrome (sotto `importa.plock`), togliere e riordinare usano le rotte già esistenti con il permesso esteso ai collaboratori; con almeno un collaboratore la playlist diventa pubblica su Navidrome (i collaboratori la leggono anche dalle app Subsonic) e il filtro «solo le proprie» la lascia vedere a chi collabora. «Manda a un amico» è una riga in `mandati` più una notifica. Il mix di due amici usa gli scrobble di Navidrome degli ultimi 180 giorni e solo con chi condivide i propri ascolti; affinità = coseno fra i conteggi per artista. Cambio password: vecchia verificata su Navidrome, nuova scritta con l'API nativa, credenziali Subsonic nuove ai dispositivi dell'utente sul canale dal vivo.
+**Alternative scartate:** collaboratori come proprietari multipli su Navidrome (non esiste); mandare un brano come link di condivisione (scade, vale per chiunque, non arriva come avviso); mix calcolato nel client (non ha gli ascolti dell'altro); lasciare il cambio password a Navidrome (la sua pagina non è più raggiungibile da fuori, e i dispositivi restavano con credenziali vecchie, poi fermati dal limite dei tentativi).
+**Conseguenze:** una playlist collaborativa è visibile a tutti gli utenti del server (ma non modificabile da chi non collabora). Le credenziali nuove viaggiano sul canale dal vivo dei dispositivi dell'utente, come quelle dell'abbinamento.
+**Da rivedere se:** Navidrome aggiunge collaboratori nativi, o serve una playlist collaborativa non visibile agli altri.
+
 ## 2026-10-11 — Notifiche sul canale dal vivo, senza push
 
 **Contesto:** l'utente chiede notifiche su web e Android. Le notifiche push passano da servizi esterni (Firebase per Android, i server push dei browser per Web Push) con chiavi e account: già scartate per l'app (voci del 2026-10-10).

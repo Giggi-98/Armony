@@ -60,6 +60,8 @@ Armony - server di supporto.
   /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download";
                         /api/rete/playlist e /api/rete/abbonati: abbonamenti a playlist pubbliche (capacità "abbonamenti").
                         Fra i server, /fed/v1/canale: canale inverso per chi è dietro NAT (federazione.py)
+  /api/amici/utenti, /api/collab, /api/manda, /api/blend, /api/password   fra amici (amici.py): playlist collaborative,
+                        «Manda a un amico», il mix di due amici, cambio password. Capacità "amici"
   /api/notifiche        notifiche dell'utente (notifiche.py): elenco, non lette, segnate come lette; arrivano anche sul
                         canale /api/live ({"type": "notifica"}). Capacità "notifiche"
   /api/playlist/ordina  nuovo ordine di una playlist, riscritta in modo sicuro (importa.py, capacità "plordina")
@@ -106,6 +108,7 @@ import ascolti
 import diagnosi
 import dispositivi
 import importa
+import amici
 import notifiche
 import scelta
 import utenti
@@ -144,10 +147,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -2505,6 +2508,7 @@ diagnosi.init(app, sys.modules[__name__])
 importa.init(app, sys.modules[__name__])
 scelta.init(app, sys.modules[__name__])
 notifiche.init(app, sys.modules[__name__])
+amici.init(app, sys.modules[__name__])
 utenti.init(app, sys.modules[__name__])
 ascolti.init(app, sys.modules[__name__])
 

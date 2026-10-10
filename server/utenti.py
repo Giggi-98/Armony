@@ -280,8 +280,10 @@ def subsonic_error(fmt_json, code, msg):
 
 
 def filter_playlists(method, body, is_json, user):
-    """Toglie le playlist degli altri (getPlaylists) o nasconde quella chiesta (getPlaylist) a chi non può vederle."""
-    me = user.lower()
+    """Toglie le playlist degli altri (getPlaylists) o nasconde quella chiesta (getPlaylist) a chi non può vederle.
+    Restano quelle in cui collabora (amici.py)."""
+    me, mie = user.lower(), A.amici.collab_di(user)
+    ok = lambda owner, pid: str(owner or "").lower() == me or str(pid or "") in mie
     if is_json:
         try:
             j = json.loads(body)
@@ -289,16 +291,17 @@ def filter_playlists(method, body, is_json, user):
         except (ValueError, KeyError):
             return body
         if method == "getPlaylists" and isinstance(sr.get("playlists"), dict):
-            sr["playlists"]["playlist"] = [p for p in sr["playlists"].get("playlist") or [] if str(p.get("owner") or "").lower() == me]
-        elif method == "getPlaylist" and isinstance(sr.get("playlist"), dict) and str(sr["playlist"].get("owner") or "").lower() != me:
+            sr["playlists"]["playlist"] = [p for p in sr["playlists"].get("playlist") or [] if ok(p.get("owner"), p.get("id"))]
+        elif method == "getPlaylist" and isinstance(sr.get("playlist"), dict) and not ok(sr["playlist"].get("owner"), sr["playlist"].get("id")):
             return subsonic_error(True, 70, "Playlist non trovata")[0]
         return json.dumps(j).encode()
     text = body.decode("utf-8", "replace")
     if method == "getPlaylists":
         return re.sub(r'<playlist\b[^>]*?\bowner="([^"]*)"[^>]*?(/>|>.*?</playlist>)',
-                      lambda m: m.group(0) if m.group(1).lower() == me else "", text, flags=re.S).encode()
+                      lambda m: m.group(0) if ok(m.group(1), (re.search(r'\bid="([^"]*)"', m.group(0)) or [None, None])[1]) else "", text, flags=re.S).encode()
     m = re.search(r'<playlist\b[^>]*?\bowner="([^"]*)"', text)
-    if m and m.group(1).lower() != me:
+    pid = re.search(r'<playlist\b[^>]*?\bid="([^"]*)"', text)
+    if m and not ok(m.group(1), pid.group(1) if pid else None):
         return subsonic_error(False, 70, "Playlist non trovata")[0]
     return body
 

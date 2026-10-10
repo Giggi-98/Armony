@@ -126,6 +126,14 @@ MIGRATIONS = [
                             title TEXT NOT NULL, body TEXT, link TEXT, letta INTEGER NOT NULL DEFAULT 0, once TEXT);
     CREATE INDEX notifiche_user ON notifiche(user, id);
     """,
+    # 13: fra amici (amici.py): collaboratori delle playlist e cose mandate a un amico
+    """
+    CREATE TABLE collab (pid TEXT NOT NULL, user TEXT NOT NULL, added REAL, PRIMARY KEY (pid, user));
+    CREATE INDEX collab_user ON collab(user);
+    CREATE TABLE mandati (id INTEGER PRIMARY KEY AUTOINCREMENT, da TEXT NOT NULL, a TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL,
+                          ref TEXT NOT NULL, title TEXT, sub TEXT, msg TEXT);
+    CREATE INDEX mandati_a ON mandati(a, id);
+    """,
 ]
 
 _local = threading.local()

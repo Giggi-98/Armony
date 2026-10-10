@@ -30,6 +30,8 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - **Jam Radio**: stazioni che girano all'infinito sul server; ti sintonizzi e senti lo stesso punto degli altri, tipo Discord. Anche quelle dei server collegati.
 - Gli amici si creano un account da soli con un invito, oppure li crei tu in un attimo: mandi un link o un QR e al primo ingresso scelgono la loro password. Per ognuno decidi cosa può fare (playlist proprie, vedere quelle degli altri, scaricare, caricare, radio…).
 
+- **Playlist collaborative**, «Manda a un amico», il mix di due amici con la vostra affinità.
+
 **La libreria**
 - Download da YouTube, SoundCloud e centinaia di siti (yt-dlp), con copertina e metadati; caricamento di file dal dispositivo.
 - **Importazione da Spotify** (CSV di Exportify): la fa il server in pochi secondi anche con migliaia di brani, scarica i mancanti e tiene le playlist complete e nell'ordine di Spotify mentre arrivano, anche ad app chiusa. «Brani che ti piacciono» diventano anche i tuoi Preferiti.

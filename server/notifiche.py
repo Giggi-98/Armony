@@ -22,7 +22,7 @@ import db
 
 bp = Blueprint("notifiche", __name__)
 A = None
-KINDS = ("import", "download", "jam", "dispositivi", "sistema")
+KINDS = ("import", "download", "jam", "dispositivi", "amici", "sistema")
 KEEP = 200
 
 
