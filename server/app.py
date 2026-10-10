@@ -55,6 +55,7 @@ Armony - server di supporto.
                         ascoltatori e stazioni in tempo reale sul canale /api/live ({"type": "radio"})
 """
 import collections
+import gzip
 import hashlib
 import ipaddress
 import sqlite3
@@ -79,7 +80,10 @@ from flask import Flask, Response, abort, g, jsonify, request, send_from_directo
 from yt_dlp.postprocessor.metadataparser import MetadataParserPP
 
 import db
+import ascolti
+import diagnosi
 import dispositivi
+import importa
 import federazione
 import metadati
 import radio
@@ -100,6 +104,8 @@ except OSError:
     VERSION = "sviluppo"
 MCAST_GRP, MCAST_PORT = "239.255.77.77", 47777
 INSTANCE = uuid.uuid4().hex[:12]
+STARTED = time.time()
+THREADS = 96  # thread di waitress: ogni dispositivo collegato ne tiene uno (/api/live), più flussi audio e Jam
 
 AUDIO_FORMATS = {"mp3", "m4a", "opus", "flac"}
 AUDIO_QUALITIES = {"best": "0", "320": "320", "256": "256", "192": "192", "128": "128"}
@@ -108,10 +114,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/chiave", None), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/chiave", None), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -129,6 +135,42 @@ def cors(resp):
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Token, Range"
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     resp.headers["Access-Control-Expose-Headers"] = "Content-Range, Content-Length, Accept-Ranges"
+    return resp
+
+
+# gzip per JSON e file del client: in 5G l'app (570 kB di HTML e JS) e gli elenchi lunghi pesano un quarto.
+# Mai su audio, video, copertine e canali in streaming. I file statici compressi restano in memoria finché non cambiano
+GZ_TYPES = ("application/json", "text/javascript", "application/javascript", "text/css", "text/html", "text/plain", "image/svg+xml", "application/manifest+json")
+gz_cache = {}
+
+
+@app.after_request
+def comprimi(resp):
+    if (resp.status_code != 200 or resp.is_streamed and not resp.direct_passthrough or "gzip" not in request.headers.get("Accept-Encoding", "")
+            or resp.headers.get("Content-Encoding") or resp.mimetype not in GZ_TYPES or request.path.startswith(("/rest/", "/share/"))):
+        return resp
+    tag = resp.headers.get("ETag")
+    if resp.direct_passthrough:  # file del client (send_from_directory)
+        hit = gz_cache.get(request.path)
+        if hit and hit[0] == tag:
+            body = hit[1]
+        else:
+            resp.direct_passthrough = False
+            body = gzip.compress(resp.get_data(), 6)
+            if tag:
+                gz_cache[request.path] = (tag, body)
+    else:
+        raw = resp.get_data()
+        if len(raw) < 1400:
+            return resp
+        body = gzip.compress(raw, 5)
+    resp.direct_passthrough = False
+    resp.set_data(body)
+    resp.headers["Content-Encoding"] = "gzip"
+    resp.headers["Vary"] = "Accept-Encoding"
+    resp.headers.pop("Accept-Ranges", None)
+    if tag and not tag.startswith("W/"):
+        resp.headers["ETag"] = "W/" + tag
     return resp
 
 
@@ -473,12 +515,22 @@ def proxy(p):
                 q.setdefault(k, []).extend(v)
         threading.Thread(target=pl_attivita, args=(m, q, body), daemon=True).start()
         return Response(body, status=r.status_code, headers=out)
+    # flussi audio in corso, per lo stato del server (chi ascolta, a che qualità, quanti byte)
+    fk = diagnosi.flusso_apri((g.get("who") or {}).get("user") or request.args.get("u"), request.args.get("id"),
+                              request.args.get("format") or "raw") if m in ("stream", "download") and prefix == "rest" else None
+
     def body():
-        for chunk in r.iter_content(64 * 1024):
-            if dev and dev in dispositivi.CUT:
-                break  # revocato mentre ascoltava: l'audio si ferma qui, non a fine brano
-            yield chunk
-        r.close()
+        try:
+            for chunk in r.iter_content(64 * 1024):
+                if dev and dev in dispositivi.CUT:
+                    break  # revocato mentre ascoltava: l'audio si ferma qui, non a fine brano
+                if fk:
+                    diagnosi.flusso_byte(fk, len(chunk))
+                yield chunk
+        finally:
+            r.close()
+            if fk:
+                diagnosi.flusso_chiudi(fk)
     return Response(stream_with_context(body()), status=r.status_code, headers=out, direct_passthrough=True)
 
 
@@ -782,7 +834,7 @@ def live_stream():
     hb = request.args.get("hb") == "1"
     cid, q = uuid.uuid4().hex, queue.Queue(maxsize=200)
     me = {"device": dev, "name": name, "q": q, "hb": hb, "seen": time.time(),
-          "dev": g.who.get("dev"), "admin": g.who["admin"], "keyed": g.who.get("keyed", True), "net": dispositivi.net()}
+          "dev": g.who.get("dev"), "admin": g.who["admin"], "keyed": g.who.get("keyed", True), "net": dispositivi.net(), "t0": time.time()}
     with llock:
         old = [c for c in lconns.get(u, {}).values() if c["device"] == dev]
         if hb:
@@ -1053,7 +1105,8 @@ ytlock = threading.Lock()
 
 def yt_opts(**kw):
     """Opzioni comuni a ogni uso di yt-dlp: cookie dell'account secondario, se ci sono, e PO Token."""
-    return {"quiet": True, "no_warnings": True, "cookiefile": COOKIES if os.path.exists(COOKIES) else None,
+    # noprogress: senza, yt-dlp scrive l'avanzamento nei log del container anche con quiet
+    return {"quiet": True, "no_warnings": True, "noprogress": True, "cookiefile": COOKIES if os.path.exists(COOKIES) else None,
             "extractor_args": {"youtubepot-bgutilhttp": {"base_url": [POT_URL]}}, **kw}
 
 
@@ -1089,7 +1142,9 @@ def resume_jobs():
     # dopo un riavvio (anche un aggiornamento dal tasto) i download a metà ripartono:
     # yt-dlp riprende i file .part già scritti
     # più quelli che aspettano ancora di entrare in una playlist, anche se più vecchi
-    for r in db.all_("SELECT data FROM jobs ORDER BY created DESC LIMIT 200") + db.all_("SELECT data FROM jobs WHERE json_extract(data, '$.plwait') = 1"):
+    # (prima solo gli ultimi 200: in un'importazione da migliaia di brani il resto della coda si perdeva al riavvio)
+    for r in db.all_("SELECT data FROM jobs ORDER BY created DESC LIMIT 200") + db.all_("SELECT data FROM jobs WHERE json_extract(data, '$.plwait') = 1") \
+            + db.all_("SELECT data FROM jobs WHERE json_extract(data, '$.status') NOT IN ('completato', 'completato con errori', 'errore') ORDER BY created"):
         j = json.loads(r["data"])
         if j["id"] in jobs:
             continue
@@ -1114,6 +1169,7 @@ def worker():
             (run_brano if j.get("track") else federazione.run_copy if j.get("fed") else run_job)(jid, j)
         except Exception as e:  # noqa: BLE001 — un lavoro rotto non deve fermare la coda
             jupdate(jid, status="errore", error=str(e)[:400], finished=time.time())
+            diagnosi.errore("download", f"lavoro {jid} interrotto: {e}", e, user=jobs.get(jid, {}).get("by"))
 
 
 def lit(s):
@@ -1192,6 +1248,7 @@ def run_job(jid, j):
 
 
 # brani importati: da evitare se il titolo originale non li nomina
+BRANO_MIN = 1.5  # punteggio minimo di un risultato: almeno l'artista con la durata giusta, o il titolo
 BRANO_NO = re.compile(r"\b(live|cover|karaoke|instrumental|8d|slowed|sped up|nightcore|reverb|remix|acoustic)\b", re.I)
 
 
@@ -1202,8 +1259,8 @@ def run_brano(jid, j):
     m = j["track"]
     try:
         m = metadati.arricchisci(m)
-    except Exception:  # noqa: BLE001 — senza Deezer bastano i dati del CSV
-        pass
+    except Exception as e:  # noqa: BLE001 — senza Deezer bastano i dati del CSV
+        diagnosi.avviso("import", f"metadati da Deezer non disponibili per «{m.get('title')}»: {e}", user=jobs[jid].get("by"))
     artists, title, dur = m.get("artists") or [], m.get("title") or "", m.get("duration")
     tmp = os.path.join("/tmp/armony-dl", jid)
     shutil.rmtree(tmp, ignore_errors=True)
@@ -1266,9 +1323,17 @@ def run_brano(jid, j):
                 bloccato = True
                 if ferma():
                     return aspetta()
+        # ─── PERCHÉ una soglia ───
+        # Il migliore di otto risultati può essere un video che non c'entra ("Door Hinges" → come montare un
+        # fermaporta): sotto la soglia (né titolo, né artista con la durata giusta) quei risultati non si usano
+        found = [e for e in found if punteggio(e) >= BRANO_MIN]
         if not found:
+            last_err = last_err or f"nessun risultato abbastanza simile su {'YouTube' if su_yt else 'SoundCloud'}"
             continue
         found.sort(key=punteggio, reverse=True)
+        if punteggio(found[0]) < 3:  # scelta incerta: si scarica, ma resta nel registro da controllare
+            diagnosi.avviso("import", f"scelta incerta per «{q}»: {found[0].get('title')}", f"punteggio {punteggio(found[0]):.1f}, durata cercata {dur} s, trovata {found[0].get('duration')} s, {found[0].get('url')}",
+                            user=jobs[jid].get("by"))
         opts = yt_opts(outtmpl=os.path.join(tmp, "%(id)s.%(ext)s"), retries=3, ignoreerrors=False, progress_hooks=[progress],
                        # M4A e Opus arrivano già così da YouTube: si estrae senza ricodificare
                        format=f"bestaudio[ext={'webm' if fmt == 'opus' else fmt}]/bestaudio/best",
@@ -1307,6 +1372,8 @@ def run_brano(jid, j):
             return aspetta()
     if not got:
         shutil.rmtree(tmp, ignore_errors=True)
+        if not bloccato:
+            diagnosi.log("info", "import", f"non trovato: {q}", last_err, user=jobs[jid].get("by"))
         return jupdate(jid, status="errore", finished=time.time(),
                        error=YT_BLOCCO if bloccato else "Non trovato né su YouTube né su SoundCloud" + (f" ({last_err})" if last_err else ""))
     try:
@@ -1706,8 +1773,9 @@ def lib_loop():
         time.sleep(5)
         try:
             lib_giro()
+            importa.giro()
         except Exception as e:  # noqa: BLE001 — DB di Navidrome illeggibile, rete: si riprova al giro dopo
-            print("libreria:", e, flush=True)
+            diagnosi.errore("libreria", f"giro della libreria non riuscito: {e}", e)
 
 
 # ------------------------------------------------------------------ modifica dei brani e copertine
@@ -1925,8 +1993,7 @@ def clean_track(t):
 
 @app.post("/api/import")
 def import_tracks():
-    """I brani mancanti di un'importazione, tutti insieme. Un brano già in coda o già scaricato
-    (stesso ISRC, o stessi titolo e artista) non viene ripreso: prende solo le playlist nuove (pids).
+    """I brani mancanti di un'importazione, tutti insieme (vedi accoda).
     Risponde con l'id del lavoro di ogni brano, nell'ordine ricevuto, per seguirne l'avanzamento."""
     d = request.get_json(silent=True) or {}
     fmt = d.get("format") if d.get("format") in AUDIO_FORMATS else "m4a"
@@ -1934,35 +2001,42 @@ def import_tracks():
     pl_ok = "plserver" in caps()
     tracks = [(t, [str(p) for p in (r.get("pids") or [])[:50] if ID_RE.match(str(p))] if pl_ok else [])
               for t, r in ((clean_track(r), r) for r in raw) if t]
-    key = lambda t: t["isrc"] or metadati.norm(" ".join(t["artists"][:1]) + " " + t["title"])
+    r = accoda([t for t, _ in tracks], fmt, d.get("folder") or "Scaricati", str(d.get("label") or "Importazione")[:120], g.who["user"],
+               [p for _, p in tracks])
+    return jsonify(r), 201
+
+
+def accoda(tracks, fmt, folder, label, by, pids=None):
+    """Brani (già passati da clean_track) in coda per il download. Un brano già in coda o già scaricato (stesso ISRC,
+    o stessi titolo e artista) non viene ripreso: prende solo le playlist nuove (pids, client vecchi).
+    Più brani insieme sono un gruppo: la coda li mostra come una riga con l'avanzamento complessivo."""
+    key = importa.key
     with jlock:
         seen = {key(x["track"]): x for x in jobs.values() if x.get("track") and x["status"] != "errore"}
     added, ids = [], []
-    # più brani insieme sono un gruppo: la coda li mostra come una riga con l'avanzamento complessivo
     batch = uuid.uuid4().hex[:10] if len(tracks) > 1 else None
-    label = str(d.get("label") or "Importazione")[:120]
-    for t, pids in tracks:
-        k = key(t)
+    for n, t in enumerate(tracks):
+        k, pl = key(t), (pids[n] if pids else [])
         if k in seen:
             x = seen[k]
             with jlock:
-                new = [p for p in pids if p not in (x.get("pids") or [])]
+                new = [p for p in pl if p not in (x.get("pids") or [])]
                 if new:  # già in coda o già scaricato, ma da mettere anche in queste playlist
                     x.update(pids=(x.get("pids") or []) + new, plwait=True)
                     jsave(x["id"])
             ids.append(x["id"])
             continue
         jid = uuid.uuid4().hex[:10]
-        j = dict(url="", mode="audio", format=fmt, quality="best", playlist=False, folder=d.get("folder") or "Scaricati",
+        j = dict(url="", mode="audio", format=fmt, quality="best", playlist=False, folder=folder,
                  sponsorblock=False, meta={}, track=t, **({"batch": batch, "label": label} if batch else {}))
         with jlock:
             jobs[jid] = seen[k] = dict(j, id=jid, status="in coda", progress=0, title=f"{', '.join(t['artists'])} - {t['title']}",
-                                       created=time.time(), updated=time.time(), by=g.who["user"], **({"pids": pids, "plwait": True} if pids else {}))
+                                       created=time.time(), updated=time.time(), by=by, **({"pids": pl, "plwait": True} if pl else {}))
             jsave(jid)
         jq.put((jid, j))
         added.append(jid)
         ids.append(jid)
-    return jsonify(added=len(added), skipped=len(tracks) - len(added), jobs=ids), 201
+    return {"added": len(added), "skipped": len(tracks) - len(added), "jobs": ids}
 
 
 @app.get("/api/jobs")
@@ -2150,6 +2224,9 @@ def delete_video(p):
 federazione.init(app, sys.modules[__name__])
 dispositivi.init(app, sys.modules[__name__])
 radio.init(app, sys.modules[__name__])
+diagnosi.init(app, sys.modules[__name__])
+importa.init(app, sys.modules[__name__])
+ascolti.init(app, sys.modules[__name__])
 
 
 # ------------------------------------------------------------------ client
@@ -2179,6 +2256,7 @@ if __name__ == "__main__":
     threading.Thread(target=gc_rooms, daemon=True).start()
     federazione.start()
     radio.start()
+    diagnosi.start()
     if MULTICAST:
         threading.Thread(target=mcast_sender, daemon=True).start()
         threading.Thread(target=mcast_listener, daemon=True).start()
@@ -2187,5 +2265,5 @@ if __name__ == "__main__":
     # ogni dispositivo collegato tiene un thread per il canale dal vivo (/api/live), oltre a flussi audio e Jam
     # dal Funnel e da `tailscale serve` le richieste arrivano da tailscaled su 127.0.0.1: l'indirizzo vero è in X-Forwarded-For
     # (dispositivi.client_ip: limiti dei tentativi, registro, Jam vicine). Da altri indirizzi l'intestazione si scarta
-    serve(app, host="0.0.0.0", port=PORT, threads=96, channel_timeout=600,
+    serve(app, host="0.0.0.0", port=PORT, threads=THREADS, channel_timeout=600,
           trusted_proxy="127.0.0.1", trusted_proxy_headers={"x-forwarded-for"}, trusted_proxy_count=1)

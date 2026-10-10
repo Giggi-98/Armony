@@ -18,6 +18,7 @@ Registrato da app.py con init(): usa da lì sessione HTTP, credenziali di Navidr
 """
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -36,6 +37,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from flask import Blueprint, Response, abort, g, jsonify, request, stream_with_context
 
 import db
+import diagnosi
 
 PROTO = 1
 FED_DIR = os.environ.get("FED_DIR", "/federati")            # dove Armony scrive le copie
@@ -62,6 +64,7 @@ pool = ThreadPoolExecutor(max_workers=16)
 build_lock = threading.Lock()
 seen_rids = {}             # id delle richieste inoltrate già viste -> istante (contro i cicli)
 rate = {}                  # nodo -> [minuto, richieste]
+fails = {}                 # nodo -> (aggiornamenti falliti di fila, istante dell'ultimo tentativo)
 pair_failed = {}           # ip -> istanti dei tentativi di abbinamento falliti
 nd_tok = {"jwt": None}
 
@@ -232,6 +235,9 @@ def fed_guard():
     allowed = {"/fed/v1/pair": ("nuovo",), "/fed/v1/accettato": ("attesa", "attivo"), "/fed/v1/revoca": ("attesa", "richiesta", "attivo")}
     if n["state"] not in allowed.get(request.path, ("attivo",)):
         return jsonify(error="Collegamento non attivo" if n["state"] != "richiesta" else "Collegamento in attesa di conferma"), 403
+    # verso "ricevo": prendo dalla sua libreria ma la mia non la mostro a lui (né catalogo, né ricerca, né audio)
+    if n.get("dir") == "ricevo" and request.path not in allowed and request.path != "/fed/v1/ora":
+        return jsonify(error=f"{A.NAME} non condivide la sua libreria con questo server", code="verso"), 403
     w = int(time.time() // 60)
     rl = rate.setdefault(nid, [w, 0])
     if rl[0] != w:
@@ -253,7 +259,8 @@ def fed_sign(resp):
 
 
 def hello_payload():
-    return dict(nodo=ME, nome=A.NAME, proprietario=owner(), proto=PROTO, app=A.VERSION, pub=PUB)
+    # caps: funzioni in più senza alzare PROTO (un PROTO diverso chiude il collegamento)
+    return dict(nodo=ME, nome=A.NAME, proprietario=owner(), proto=PROTO, app=A.VERSION, pub=PUB, caps=["epoca", "verso"])
 
 
 @bp.get("/fed/hello")
@@ -284,6 +291,16 @@ def clean_url(u):
     p = urllib.parse.urlparse(u)
     if p.scheme not in ("http", "https") or not p.hostname or p.query or p.fragment:
         raise ValueError("Indirizzo non valido: serve http(s)://nome-o-ip[:porta]")
+    # un altro server non può farsi chiamare su un servizio interno di questa macchina (SSRF): LAN e Tailscale sì
+    try:
+        ip = ipaddress.ip_address(p.hostname)
+        if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+            raise ValueError("Indirizzo non valido: non può essere un indirizzo interno di questo server")
+    except ValueError as e:
+        if "interno" in str(e):
+            raise
+        if p.hostname.lower() in ("localhost", "localhost.localdomain") or p.hostname.lower().endswith(".localhost"):
+            raise ValueError("Indirizzo non valido: non può essere un indirizzo interno di questo server")
     return u
 
 
@@ -420,7 +437,7 @@ def build_catalog(force=False):
         set_setting("scan", last)
         set_setting("built", time.time())
     except (FedError, requests.RequestException, ValueError) as e:
-        print("federazione: catalogo non aggiornato:", e, flush=True)
+        diagnosi.avviso("federazione", f"catalogo non aggiornato: {e}")
     finally:
         build_lock.release()
 
@@ -439,7 +456,8 @@ def catalog():
         since = int(request.args.get("since", 0))
     except ValueError:
         since = 0
-    reset = since <= 0 or since > ver  # versione sconosciuta (es. il nodo ha perso il suo DB): tutto da capo
+    # versione sconosciuta, o epoca diversa (il nodo ha perso il suo DB e le versioni sono ripartite): tutto da capo
+    reset = since <= 0 or since > ver or (request.args.get("epoca") or epoca()) != epoca()
     if reset:
         rows = db.all_("SELECT data FROM fed_mine WHERE gone = 0")
         songs, gone = [json.loads(r["data"]) for r in rows], []
@@ -448,7 +466,17 @@ def catalog():
         songs = [json.loads(r["data"]) for r in rows if not r["gone"]]
         gone = [r["id"] for r in rows if r["gone"]]
     n, a = my_counts()
-    return jsonify(**hello_payload(), ver=ver, reset=reset, songs=songs, gone=gone, transitive=transitive(), total=n, albums=a)
+    return jsonify(**hello_payload(), ver=ver, reset=reset, songs=songs, gone=gone, transitive=transitive(), total=n, albums=a, epoca=epoca(),
+                   verso=g.fed_node.get("dir") or "entrambi")
+
+
+def epoca():
+    # nasce con il catalogo: se il DB si perde ne nasce una nuova e i vicini ripartono da zero invece di fidarsi delle versioni
+    e = setting("epoca")
+    if not e:
+        e = secrets.token_hex(6)
+        set_setting("epoca", e)
+    return e
 
 
 def refresh(nid):
@@ -457,17 +485,32 @@ def refresh(nid):
     if not n or n["state"] not in ("attivo", "attesa"):
         return
     try:
-        j = fed_json(n, "GET", "/fed/v1/catalogo", params={"since": n["ver"] if n["state"] == "attivo" else 0}, timeout=60)
+        j = fed_json(n, "GET", "/fed/v1/catalogo", params={"since": n["ver"] if n["state"] == "attivo" else 0, "epoca": setting("epoca:" + nid)},
+                     timeout=(5, 60))
     except FedError as e:
-        # chi aspetta la conferma riceve "in attesa": non è un errore da mostrare
-        msg = None if "attesa di conferma" in str(e) else str(e)[:200]
+        # chi aspetta la conferma riceve "in attesa": non è un errore da mostrare; "verso": non condivide con noi
+        msg = None if "attesa di conferma" in str(e) or "non condivide" in str(e) else str(e)[:200]
         db.run("UPDATE fed_nodes SET error = ? WHERE id = ?", msg, nid)
+        k = fails.get(nid, (0, 0))[0]
+        fails[nid] = (k + 1 if msg else k, time.time())
         return
+    fails.pop(nid, None)
     if int(j.get("proto") or 0) != PROTO:
         db.run("UPDATE fed_nodes SET error = ? WHERE id = ?", f"Versione incompatibile: aggiorna Armony su {n['name']} o qui", nid)
         return
     c = db.conn()
     c.execute("BEGIN")
+    try:
+        _store(c, nid, n, j)
+        c.execute("COMMIT")
+    except Exception:
+        c.execute("ROLLBACK")  # niente transazioni lasciate aperte sulla connessione del thread
+        raise
+    if j.get("epoca"):
+        set_setting("epoca:" + nid, j["epoca"])
+
+
+def _store(c, nid, n, j):
     if j.get("reset"):
         c.execute("DELETE FROM fed_catalog WHERE node = ?", (nid,))
     rows = []
@@ -486,7 +529,6 @@ def refresh(nid):
               "transitive = ?, error = NULL, seen = ?, synced = ? WHERE id = ?",
               (str(j.get("nome") or n["name"])[:60], str(j.get("proprietario") or "")[:60], str(j.get("app") or "")[:20],
                PROTO, int(j.get("ver") or 0), cnt[0], cnt[1], int(bool(j.get("transitive"))), time.time(), time.time(), nid))
-    c.execute("COMMIT")
 
 
 def loop():
@@ -494,14 +536,27 @@ def loop():
     while True:
         try:
             build_catalog()
-            for n in nodes("attivo") + nodes("attesa"):
-                if time.time() - (n["synced"] or 0) > REFRESH_S:
-                    refresh(n["id"])
+            # in parallelo: un nodo spento non deve fermare gli altri per un minuto ciascuno. Chi non risponde si
+            # riprova sempre più piano (10 min, 20, 40… fino a 6 ore); "offro" = non prendo niente da lui
+            due = [n for n in nodes("attivo") + nodes("attesa") if n.get("dir") != "offro"
+                   and time.time() - max(n["synced"] or 0, fails.get(n["id"], (0, 0))[1]) > min(6 * 3600, REFRESH_S * 2 ** fails.get(n["id"], (0, 0))[0])]
+            for f in [pool.submit(refresh, n["id"]) for n in due]:
+                try:
+                    f.result(timeout=90)
+                except Exception:  # noqa: BLE001
+                    pass
             now = time.time()
             for k in [k for k, t in seen_rids.items() if now - t > 120]:
                 seen_rids.pop(k, None)
+            # strutture in memoria che crescevano senza limite: nodi sconosciuti su /pair, tentativi vecchi, inviti scaduti
+            w = int(now // 60)
+            for k in [k for k, r in rate.items() if r[0] < w - 1]:
+                rate.pop(k, None)
+            for k in [k for k, ts in pair_failed.items() if all(now - t > 600 for t in ts)]:
+                pair_failed.pop(k, None)
+            db.run("DELETE FROM fed_invites WHERE expires < ?", now - 86400)
         except Exception as e:  # noqa: BLE001 — il giro dopo riprova
-            print("federazione:", e, flush=True)
+            diagnosi.avviso("federazione", str(e))
         time.sleep(60)
 
 
@@ -551,13 +606,18 @@ def forward(path, body, targets, deadline, skip):
 
 def visible_to(requester):
     # i vicini che posso mostrare a chi non li ha collegati: solo quelli che lo permettono
-    return [n for n in nodes() if n["id"] != requester and n["transitive"]]
+    return [n for n in pullable() if n["id"] != requester and n["transitive"]]
+
+
+def pullable():
+    # i vicini a cui chiedo (ricerca, audio, mappa): non quelli con cui ho scelto "offro", cioè solo dare
+    return [n for n in nodes() if n.get("dir") != "offro"]
 
 
 def net_search(q, ttl, skip, requester, rid, deadline):
     """Risultati dalla cache dei vicini (escluso chi chiede e chi è in skip), più quelli inoltrati se restano salti."""
     seen_rids[rid] = time.time()
-    near = [n for n in (nodes() if requester is None else visible_to(requester)) if n["id"] not in skip]
+    near = [n for n in (pullable() if requester is None else visible_to(requester)) if n["id"] not in skip]
     songs, albums = search_cache([n["id"] for n in near], q)
     for x in songs + albums:
         x["path"] = [x.pop("node")]
@@ -607,7 +667,7 @@ def fed_search():
 
 def net_map(ttl, skip, requester, rid, deadline):
     seen_rids[rid] = time.time()
-    near = [n for n in (nodes() if requester is None else visible_to(requester)) if n["id"] not in skip]
+    near = [n for n in (pullable() if requester is None else visible_to(requester)) if n["id"] not in skip]
     out = [{"id": n["id"], **node_info(n), "online": not n["error"], "seen": n["seen"], "path": [n["id"]]} for n in near]
     if ttl > 1 and near:
         nskip = set(skip) | {ME} | {n["id"] for n in nodes()}
@@ -746,7 +806,7 @@ def fed_info(sid):
 # ------------------------------------------------------------------ gestione (solo amministratori)
 def node_out(n):
     online = n["state"] == "attivo" and not n["error"] and n["seen"] and time.time() - n["seen"] < 3 * REFRESH_S
-    return {k: n[k] for k in ("id", "name", "owner", "url", "state", "created", "seen", "app", "songs", "albums", "error", "synced")} | {
+    return {k: n[k] for k in ("id", "name", "owner", "url", "state", "created", "seen", "app", "songs", "albums", "error", "synced", "dir")} | {
         "transitive": bool(n["transitive"]), "online": bool(online), "safety": safety(PUB, n["pub"])}
 
 
@@ -848,6 +908,21 @@ def fed_accept(nid):
         pass  # lo saprà alla prossima richiesta firmata che riceve risposta
     pool.submit(refresh, nid)
     return jsonify(node_out(node(nid)))
+
+
+@bp.put("/api/fed/nodes/<nid>/verso")
+def fed_dir(nid):
+    """entrambi: ci vediamo a vicenda; offro: lui vede me, io non chiedo niente a lui; ricevo: io vedo lui, lui non vede me."""
+    d = str((request.get_json(silent=True) or {}).get("dir") or "")
+    if d not in ("entrambi", "offro", "ricevo") or not node(nid):
+        return jsonify(error="Verso non valido"), 400
+    db.run("UPDATE fed_nodes SET dir = ? WHERE id = ?", d, nid)
+    if d == "offro":
+        db.run("DELETE FROM fed_catalog WHERE node = ?", nid)  # i suoi brani non compaiono più nelle mie ricerche
+    else:
+        db.run("UPDATE fed_nodes SET synced = 0 WHERE id = ?", nid)
+        pool.submit(refresh, nid)
+    return jsonify(ok=True, dir=d)
 
 
 @bp.post("/api/fed/nodes/<nid>/refresh")
@@ -1017,7 +1092,7 @@ def run_copy(jid, j):
             ensure_library()
             nd_get("startScan")
         except Exception as e:  # noqa: BLE001 — il file c'è; Navidrome lo troverà alla prossima scansione
-            print("federazione: libreria Navidrome:", e, flush=True)
+            diagnosi.avviso("federazione", f"libreria Navidrome: {e}")
         A.jupdate(jid, status="completato", progress=100, finished=time.time(), path=os.path.relpath(dest, FED_DIR),
                   note=("verificato sha256" if sha else "verificata la dimensione"))
     except (FedError, OSError, requests.RequestException) as e:

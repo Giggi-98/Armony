@@ -1218,6 +1218,68 @@ dialog.sheet .head .icon-btn{margin:-6px 0 -6px -6px}
 }
 @media (prefers-reduced-motion:reduce){.rdot.on{animation:none}}
 /* === fine R === */
+/* === D: diagnosi (diagnosi.js): stato del server e registro eventi === */
+.stgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,168px),1fr));gap:var(--s3);margin-bottom:var(--s4)}
+.sttile{display:flex;flex-direction:column;gap:2px;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);padding:var(--s3) var(--s4) var(--s2)}
+.sttile small{font-size:var(--fs-small);color:var(--muted);font-weight:600}
+.sttile b{font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sttile span{font-size:.8rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sttile.warn b{color:var(--danger)}
+.spark{width:100%;height:28px;margin-top:var(--s1);overflow:visible}
+.spark polyline{fill:none;stroke:var(--accent);stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.spark polyline.area{fill:color-mix(in srgb,var(--accent) 16%,transparent);stroke:none}
+.sttile.warn .spark polyline{stroke:var(--danger)}.sttile.warn .spark polyline.area{fill:color-mix(in srgb,var(--danger) 14%,transparent)}
+.stlist{margin-bottom:var(--s4)}
+.stlist .pav{width:32px;height:32px;flex:none}
+.stlist small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.logrow{border-top:1px solid var(--line)}
+.logrow:first-child{border-top:0}
+.logsum{display:flex;align-items:center;gap:var(--s3);width:100%;min-height:52px;padding:var(--s2) 0;background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.logsum .grow{min-width:0;display:flex;flex-direction:column}
+.logsum b{font-weight:600;font-size:.92rem;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
+.logsum small{color:var(--muted);font-size:.8rem}
+.logsum .tag{flex:none;min-width:58px;text-align:center}
+.logat{flex:none;font-variant-numeric:tabular-nums}
+.logdet{display:none;margin:0 0 var(--s3);padding:var(--s3);background:var(--surface2);border-radius:var(--r-m);font-size:.78rem;line-height:1.45;white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto}
+.logrow.open .logdet{display:block}
+@media (hover:hover) and (pointer:fine){.logsum:hover b{text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}}
+@media (max-width:520px){.logsum .tag{min-width:0}.logat{display:none}}
+.impst{display:flex;flex-direction:column;gap:var(--s1);margin:0 0 var(--s4);padding:var(--s3) var(--s4);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l)}
+.impst>.grow{display:flex;flex-direction:column;gap:2px;min-width:0}
+.impst b{font-weight:600;font-size:.92rem}
+.impst small{color:var(--muted);font-size:var(--fs-small)}
+.impst .bar{display:block;margin-top:var(--s2)}
+.impst.ok b{color:var(--sage)}
+/* ascolti sul server (Statistiche → Sul server) e conteggi accanto ai brani */
+.pcnt{font-variant-numeric:tabular-nums}
+.srvuser{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0;border-bottom:1px solid var(--line)}
+.srvuser .grow{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.srvuser .grow b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srvbar{display:block;height:6px;border-radius:99px;background:var(--surface2);overflow:hidden}
+.srvbar i{display:block;height:100%;background:var(--accent);border-radius:99px}
+.srvn{display:flex;flex-direction:column;align-items:flex-end;flex:none;font-variant-numeric:tabular-nums}
+.srvn small{color:var(--muted);font-size:.78rem}
+.srvlog{display:flex;flex-direction:column}
+.srvlogrow{display:flex;align-items:center;gap:var(--s3);min-height:44px;padding:var(--s1) 0;border-bottom:1px solid var(--line);font-size:.9rem}
+.srvlogrow[data-act]{cursor:pointer}
+.srvlogrow .grow{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srvlogrow .grow b{font-weight:600}
+.srvlogrow small{color:var(--muted)}
+.srvlogrow>small{flex:none;font-variant-numeric:tabular-nums}
+@media (hover:hover) and (pointer:fine){.srvlogrow[data-act]:hover .grow{text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}}
+/* menu col tasto destro (computer) */
+.cmenu{position:fixed;z-index:200;min-width:220px;max-width:300px;max-height:calc(100vh - 16px);overflow:auto;padding:var(--s1);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--shadow-float);animation:cmIn 120ms var(--ease-out)}
+@keyframes cmIn{from{opacity:0;transform:scale(.97)}}
+.cmenu .cm-head{display:flex;flex-direction:column;padding:var(--s2) var(--s3) var(--s2);border-bottom:1px solid var(--line);margin-bottom:var(--s1);min-width:0}
+.cmenu .cm-head b{font-weight:600;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmenu .cm-head small{color:var(--muted);font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmenu .mi{display:flex;width:100%;gap:var(--s3);align-items:center;min-height:34px;padding:6px var(--s3);border:0;background:none;border-radius:var(--r-s);font:inherit;font-size:.9rem;font-weight:500;cursor:pointer;text-align:left;color:inherit}
+.cmenu .mi svg{width:17px;height:17px;flex:none;color:var(--muted)}
+.cmenu .mi:focus-visible{background:var(--surface2);outline:none}
+@media (hover:hover) and (pointer:fine){.cmenu .mi:hover{background:var(--surface2)}}
+.cmenu .mi.danger,.cmenu .mi.danger svg{color:var(--danger)}
+@media (prefers-reduced-motion:reduce){.cmenu{animation:none}}
+/* === fine D === */
 </style>
 </head>
 <body>
@@ -1273,6 +1335,7 @@ dialog.sheet .head .icon-btn{margin:-6px 0 -6px -6px}
 <script src="radio.js"></script>
 <script src="telefono.js"></script>
 <script src="dispositivi.js"></script>
+<script src="diagnosi.js"></script>
 <script>boot();</script>
 </body>
 </html>

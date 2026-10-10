@@ -141,11 +141,11 @@ const QUALITIES = {
 const DEFAULT_PREFS = {
   quality: '192', qualityMobile: 'same', offlineQ: '192', crossfade: 0, rg: 'track', rgPre: 0, night: false, speed: 1,
   eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqOn: true, eqAuto: false, compat: false, lyricsOnline: true, syncQueue: true,
-  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true, live: true, deviceName: '', solo: false
+  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true, live: true, deviceName: '', solo: false, cacheMB: 1024
 };
 const P = Object.assign({}, DEFAULT_PREFS, store.get('prefs', {}));
 // restano su questo dispositivo anche con la sincronizzazione attiva
-const DEVICE_PREFS = ['compat', 'volume', 'sync', 'live', 'deviceName', 'solo'];
+const DEVICE_PREFS = ['compat', 'volume', 'sync', 'live', 'deviceName', 'solo', 'cacheMB'];
 const savePrefs = () => { store.set('prefs', P); store.set('prefsAt', Date.now()); PrefSync.schedule(); };
 const S = {
   servers: store.get('servers', []),
@@ -206,7 +206,7 @@ async function api(method, params, s = srv(), post = false, again = false) {
   try {
     r = post ? await fetch(apiBase(s, method), { method: 'POST', body: apiParams(s, params) })
       : await fetch(apiUrl(s, method, params));
-  } catch { throw new Error(`Non riesco a raggiungere ${s.name}. Controlla indirizzo e connessione.`); }
+  } catch { if (navigator.onLine) window.Diag?.report('avviso', 'rete', `${s.name} non raggiungibile (${method})`); throw new Error(`Non riesco a raggiungere ${s.name}. Controlla indirizzo e connessione.`); }
   if (r.status === 401 && s.armony && !again) {
     const j = await r.clone().json().catch(() => ({}));
     if (j.code === 'revocato') { Disp.revoke(s, true); throw new Error(j.error); }
@@ -214,7 +214,7 @@ async function api(method, params, s = srv(), post = false, again = false) {
     if (s.session) return api(method, params, s, post, true);
     throw new Error(s.pending ? 'Questo dispositivo aspetta l\'approvazione.' : j.error || 'Accesso scaduto: in Impostazioni modifica il server e reinserisci la password.');
   }
-  if (!r.ok) throw new Error(`${s.name} ha risposto con errore ${r.status}.`);
+  if (!r.ok) { if (r.status >= 500) window.Diag?.report('errore', 'rete', `${s.name}: errore ${r.status} su ${method}`); throw new Error(`${s.name} ha risposto con errore ${r.status}.`); }
   const sr = (await r.json())['subsonic-response'];
   if (sr.status !== 'ok') throw new Error(sr.error?.code === 40 ? 'Utente o password errati.' : sr.error?.message || 'Il server ha rifiutato la richiesta.');
   if (/^(create|update|delete)Playlist$/.test(method)) { emitSoon('playlists'); emitSoon('libreria'); }
@@ -232,6 +232,8 @@ const norm = (x, sid = S.active) => ({
 // coverBust: dopo aver cambiato una copertina, l'indirizzo cambia e il browser non mostra quella vecchia dalla cache
 let coverBust = 0;
 // brani della rete (server collegati, /api/rete): copertina e audio passano dal mio server Armony, che fa da proxy firmato
+// per il registro eventi: un indirizzo senza credenziali (token, sale, gettone, password)
+const safeUrl = u => String(u || '').replace(/([?&](t|s|k|p|token)=)[^&]*/g, '$1…');
 const reteUrl = (s, path, p) => absUrl(s.url) + '/api/rete/' + path + '?' + new URLSearchParams({ ...p, ...(s.tk ? { k: s.tk } : { token: s.session || '' }) });
 const coverUrl = (coverArt, size = 300, sid) => {
   const s = srv(sid); if (!coverArt || !s) return '';
@@ -688,6 +690,7 @@ async function vArtist(id) {
     `<div id="lDisco">${discoHtml(albums, early?.[0])}</div><div id="lSim">${simHtml(sim, early?.[0], early?.[1])}</div>` +
     (bio ? `<div class="bio-bottom"><h2>Informazioni</h2><p class="lbio">${esc(bio.slice(0, 700))}${bio.length > 700 ? '…' : ''}</p></div>` : '');
 
+  playCounts($('#lTop'), n);
   const more = $('#lTopMore');
   if (more) more.onclick = () => { const t = $('#lTop'); t.classList.toggle('all'); more.textContent = t.classList.contains('all') ? 'Mostra meno' : 'Mostra altri'; };
   const got = early || await dzP; if (!got || stale(n)) return;
@@ -810,7 +813,7 @@ async function vAlbum(id) {
       canEdit() && { act: 'editalbum', label: 'Modifica album', icon: 'pen' },
       canDelete() && { act: 'delalbum', label: 'Elimina album dal server', icon: 'trash', danger: true, data: { name: a.name } }] }) +
     `<div id="gapsNote"></div><div id="lList">${songList(songs, opts)}</div>`;
-  albumGaps(a, songs, n);
+  albumGaps(a, songs, n); playCounts($('#lList'), n);
   // tempo reale: le tracce scaricate entrano nell'album appena Navidrome le vede, le grigie si ricalcolano
   let raw = a;
   lLive(n, async () => { raw = (await api('getAlbum', { id })).album; return arr(raw.song).map(x => norm(x)); }, opts,
@@ -1119,8 +1122,9 @@ async function vPlaylist(id) {
       { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
       !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
       { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
-    `<div id="lList">${songList(songs, empty)}</div>`;
+    `<div id="impSt"></div><div id="lList">${songList(songs, empty)}</div>`;
   view.dataset.pl = id;
+  impStatus(id, n);
   view.dataset.plMeta = JSON.stringify({ name: p.name, comment: p.comment || '', public: !!p.public });
   // tempo reale: brani aggiunti da altri dispositivi o arrivati dai download entrano senza ricaricare
   let art = (p.songCount ? 1 : 0) + '|' + p.coverArt;  // la copertina cambia quando la playlist si riempie
@@ -1128,8 +1132,32 @@ async function vPlaylist(id) {
     const q = (await api('getPlaylist', { id })).playlist; const c = $('#lCount'); if (c) c.textContent = count(q);
     const k = (q.songCount ? 1 : 0) + '|' + q.coverArt, el = $('#view .phero-art');
     if (k !== art && el) { art = k; el.innerHTML = q.songCount ? imgTag(q.coverArt, 500) : ic('list'); }
+    impStatus(id, n);
     return arr(q.entry).map(x => norm(x));
   }, empty);
+}
+// ascolti sul server accanto ai brani (album, popolari dell'artista): una richiesta per tutta la lista
+async function playCounts(box, n) {
+  const s = srv(), lst = box?.querySelector('.songs[data-l]'); if (!lst || !s?.me?.caps?.includes('ascolti')) return;
+  const tracks = Lists.get(+lst.dataset.l) || [], ids = tracks.filter(t => !t.fed).map(t => t.id).slice(0, 500); if (!ids.length) return;
+  let m; try { m = await srvApi(s, '/api/ascolti/brani?ids=' + ids.map(encodeURIComponent).join(',')); } catch { return; }
+  if (stale(n)) return;
+  lst.querySelectorAll('.song[data-i]').forEach(el => {
+    const t = tracks[+el.dataset.i], c = t && m[t.id], sm = el.querySelector('.t small'); if (!sm) return;
+    sm.querySelector('.pcnt')?.remove();
+    if (c) sm.insertAdjacentHTML('beforeend', `<span class="pcnt"> · ${c.toLocaleString('it-IT')} ${c === 1 ? 'ascolto' : 'ascolti'}</span>`);
+  });
+}
+// playlist importata (server/importa.py): quanti brani del file sono in libreria, in download, non trovati
+async function impStatus(id, n) {
+  if (!srv()?.me?.caps?.includes('importsrv')) return;
+  let st; try { st = await dlApi('/api/import/stato?pid=' + encodeURIComponent(id)); } catch { return; }
+  const box = $('#impSt'); if (!box || stale(n) || !st?.total) return;
+  const f = x => x.toLocaleString('it-IT'), all = st.inlib >= st.total;
+  box.innerHTML = `<div class="impst${all ? ' ok' : ''}"><div class="grow"><b>${all ? `Tutti i ${f(st.total)} brani del file importato sono in libreria` : `${f(st.inlib)} di ${f(st.total)} brani del file importato in libreria`}</b>
+    <small>${[st.dl ? `${f(st.dl)} in download` : '', st.err ? `${f(st.err)} non trovati online` : '', st.miss ? `${f(st.miss)} da scaricare` : ''].filter(Boolean).join(' · ') || 'Si completa da sola quando arrivano brani nuovi.'}</small>
+    ${all ? '' : `<span class="bar"><i style="width:${st.inlib / st.total * 100}%"></i></span>`}</div>
+    ${st.failed?.length ? `<details class="jerr"><summary>Vedi i non trovati</summary>${st.failed.map(x => `<div><b>${esc(x.title)}</b><small>${esc(x.error || '')}</small></div>`).join('')}</details>` : ''}</div>`;
 }
 
 async function vStarred() {
@@ -1181,7 +1209,7 @@ const DB = {
   _db: null,
   open() {
     return this._db ||= new Promise((res, rej) => {
-      const r = indexedDB.open('armony', 3);
+      const r = indexedDB.open('armony', 4);
       r.onupgradeneeded = e => {
         const d = r.result;
         if (e.oldVersion < 1) {
@@ -1190,6 +1218,7 @@ const DB = {
         }
         if (e.oldVersion < 2) d.createObjectStore('telefono', { keyPath: 'k' });  // telefono.js
         if (e.oldVersion < 3) d.createObjectStore('chiavi', { keyPath: 'k' });  // dispositivi.js: chiavi private non esportabili
+        if (e.oldVersion < 4) d.createObjectStore('acache', { keyPath: 'k' });  // cache dei brani (ACache)
       };
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     });
@@ -1241,6 +1270,58 @@ const Offline = {
     if (location.hash.startsWith('#/offline')) route();
   },
   async remove(k) { await DB.del('offline', k); this.keys.delete(k); }
+};
+
+/* ================= cache dei brani: come Spotify, i prossimi della coda arrivano prima che servano =================
+   Mentre suona un brano si scaricano per intero i prossimi (2 col Wi-Fi, 1 in rete mobile, nessuno con «risparmio
+   dati»), alla qualità in uso; un brano in cache parte subito e senza rete. Restano fino al limite scelto in
+   Impostazioni → Ascolto (P.cacheMB, per dispositivo), poi se ne vanno i meno recenti. IndexedDB e non Cache Storage:
+   funziona anche aprendo Armony senza HTTPS. L'indice (dimensioni, ultimo uso) sta in localStorage */
+const ACache = {
+  idx: store.get('acIdx', {}), busy: new Set(), t: null,
+  k: (t, q) => `${key(t)}@${q}`,
+  max: () => (P.cacheMB ?? 1024) * 1e6,
+  size() { return Object.values(this.idx).reduce((n, x) => n + x.size, 0); },
+  ok(t) { return !!t && P.cacheMB !== 0 && !Offline.has(t) && !srv(t.serverId)?.local && !t.fed && !!srv(t.serverId); },
+  has(t, q = activeQuality()) { return !!this.idx[this.k(t, q)]; },
+  save() { store.set('acIdx', this.idx); },
+  async url(t, q = activeQuality()) {
+    const k = this.k(t, q); if (!this.idx[k]) return null;
+    try {
+      const r = await DB.get('acache', k);
+      if (!r?.blob) { delete this.idx[k]; this.save(); return null; }
+      this.idx[k].at = Date.now(); this.save();
+      return URL.createObjectURL(r.blob);
+    } catch { return null; }
+  },
+  async get(t, q = activeQuality()) {
+    const k = this.k(t, q); if (!this.ok(t) || this.idx[k] || this.busy.has(k) || !navigator.onLine) return;
+    this.busy.add(k);
+    try {
+      const r = await fetch(streamUrl(t, q)); if (!r.ok) return;
+      const blob = await r.blob(); if (blob.size < 20000) return;  // una risposta d'errore, non un brano
+      await DB.put('acache', { k, blob, at: Date.now() });
+      this.idx[k] = { size: blob.size, at: Date.now() }; this.save(); this.trim();
+    } catch {} finally { this.busy.delete(k); }
+  },
+  async trim() {
+    let tot = this.size(); const max = this.max(); if (tot <= max) return;
+    for (const [k, x] of Object.entries(this.idx).sort((a, b) => a[1].at - b[1].at)) {
+      if (tot <= max * .9) break;
+      await DB.del('acache', k).catch(() => {}); delete this.idx[k]; tot -= x.size;
+    }
+    this.save();
+  },
+  async clear() { await DB.clear('acache').catch(() => {}); this.idx = {}; this.save(); },
+  // dopo un cambio di brano, lasciato il tempo al brano attuale di riempire il suo buffer
+  ahead() {
+    clearTimeout(this.t);
+    if (P.cacheMB === 0 || navigator.connection?.saveData || Jam.role === 'guest' || Radio.st || Live.remote()) return;
+    this.t = setTimeout(async () => {
+      const n = onMobileData() ? 1 : 2;
+      for (let i = 1; i <= n; i++) { const t = S.queue[S.index + i]; if (t) await this.get(t); }
+    }, 6000);
+  }
 };
 
 /* ================= storico e statistiche ================= */
@@ -1517,17 +1598,19 @@ const Engine = {
     return Math.min(lin, 4);
   },
   setGain(i, v) { const g = this.gains[i]; if (!g) return; const now = this.ctx.currentTime; g.gain.cancelScheduledValues(now); g.gain.setValueAtTime(v, now); },
-  async load(t, i, { autoplay = true, startAt = 0 } = {}) {
+  // lazy: solo i metadati finché non si preme play (il brano ripreso all'avvio non deve rubare la rete alla Home)
+  async load(t, i, { autoplay = true, startAt = 0, lazy = false } = {}) {
     const a = this.decks[i], k = key(t);
+    a.preload = lazy ? 'metadata' : 'auto';
     a.dataset.key = k; a.dataset.q = activeQuality();
-    const blob = Offline.has(t) ? await Offline.url(t) : null;
+    const blob = Offline.has(t) ? await Offline.url(t) : ACache.has(t) ? await ACache.url(t) : null;
     if (a.dataset.key !== k) { if (blob) URL.revokeObjectURL(blob); return false; }
     if (this.blobUrls[i]) URL.revokeObjectURL(this.blobUrls[i]);
     this.blobUrls[i] = blob;
     a.src = blob || streamUrl(t); a.playbackRate = P.speed;
     if (startAt) a.addEventListener('loadedmetadata', () => { try { a.currentTime = startAt; } catch {} }, { once: true });
     this.setGain(i, i === this.cur ? this.rg(t) : 0);
-    if (autoplay) { this.graph(); try { await a.play(); } catch (e) { if (e.name === 'NotAllowedError') toast('Tocca play per iniziare.'); } }
+    if (autoplay) { this.graph(); try { await a.play(); } catch (e) { if (e.name === 'NotAllowedError') toast('Tocca play per iniziare.'); else if (e.name !== 'AbortError') window.Diag?.report('avviso', 'audio', `play() non riuscito: ${e.name} ${e.message}`, safeUrl(a.src)); } }
     return true;
   },
   swap(t) {
@@ -1552,7 +1635,8 @@ const Engine = {
         Disp.fresh(sv, true).then(() => { if (!sv.tk || sv.revoked || el.getAttribute('src') !== src) return; el.src = src.replace(/([?&]k=)[^&]*/, '$1' + encodeURIComponent(sv.tk)); el._tk = el.src; el.currentTime = at; if (go) el.play().catch(() => {}); });
         return;
       }
-      const off = !navigator.onLine;
+      const off = !navigator.onLine, me = this.el.error;
+      if (!off) window.Diag?.report('errore', 'audio', `brano non riproducibile: ${currentTrack()?.title || '?'}`, `codice ${me?.code ?? '?'} ${me?.message || ''}\n${safeUrl(src)}`);
       toast(off ? 'Sei offline e questo brano non è salvato sul dispositivo.' : 'Impossibile riprodurre questo brano, passo al successivo.');
       if (Jam.role !== 'guest' && !Radio.st) setTimeout(() => ctlNext(true), 1500);
       return;
@@ -1639,7 +1723,7 @@ function trackChanged(t) {
   updateNowPlaying();
   $$('.song').forEach(el => { const x = S.lastList[+el.dataset.i]; el.classList.toggle('now', !!x && !!t && key(x) === key(t)); });
   if (t && srv(t.serverId) && !t.fed && Jam.role !== 'guest') api('scrobble', { id: t.id, submission: false }, srv(t.serverId)).catch(() => {});
-  QSync.schedule(); emit('track', t);
+  QSync.schedule(); emit('track', t); ACache.ahead();
   if (location.hash.startsWith('#/ora')) vNow();
   else if (location.hash.startsWith('#/coda')) vQueue();
 }
@@ -2017,7 +2101,14 @@ async function vNow() {
     const rows = [['Server', s?.name || 'non configurato'], ['Formato originale', raw ? `${(raw.suffix || '').toUpperCase()}, ${raw.bitRate || '?'} kbps${raw.samplingRate ? ', ' + (raw.samplingRate / 1000) + ' kHz' : ''}${raw.bitDepth ? ', ' + raw.bitDepth + ' bit' : ''}` : '?'],
       ['Ascolto attuale', Offline.has(t) ? 'Dal dispositivo (offline)' : QUALITIES[activeQuality()].label], ['Genere', t.genre || raw?.genre || '—'], ['Anno', t.year || raw?.year || '—'],
       ['Normalizzazione', t.rg ? `brano ${t.rg.trackGain ?? '—'} dB, album ${t.rg.albumGain ?? '—'} dB` : 'nessun dato ReplayGain'],
-      ['Ascolti', raw?.playCount ?? '—'], ['File', raw?.path || '—']];
+      ['Ascolti tuoi', raw?.playCount ?? '—'], ['File', raw?.path || '—']];
+    // ascolti di tutti gli utenti del server e indice di popolarità di Deezer (capacità "ascolti", server/ascolti.py)
+    if (s?.me?.caps?.includes('ascolti') && !t.fed) {
+      const a = await srvApi(s, '/api/ascolti/brano?dz=1&id=' + encodeURIComponent(t.id)).catch(() => null);
+      if (a) rows.splice(rows.length - 1, 0, ['Ascolti sul server', `${a.total.toLocaleString('it-IT')}${a.users.length ? ' · ' + a.users.map(u => `${u.name} ${u.plays}`).join(', ') : ''}${a.hidden ? ` · altri ${a.hidden}` : ''}`],
+        ...(a.deezer?.rank ? [['Popolarità su Deezer', `${a.deezer.rank.toLocaleString('it-IT')} (indice da 0 a 1.000.000, non il numero di stream)`]] : []));
+      if (currentTrack() !== t || !$('#nowPane')) return;
+    }
     pane.innerHTML = `<div class="panel">${rows.map(([a, b]) => `<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:16px"><span style="color:var(--muted)">${a}</span><span style="text-align:right;word-break:break-word">${esc(b)}</span></div>`).join('')}</div>`;
   }
 }
@@ -2044,6 +2135,10 @@ async function vOffline() {
 async function vStats() {
   const period = sessionStorage.getItem('armony:sp') || '30';
   const n = Scene.nav;
+  // "I tuoi ascolti" (storico di questo utente) o "Sul server" (tutti gli utenti, server/ascolti.py)
+  const svOk = !!srv()?.me?.caps?.includes('ascolti'), sv = svOk && sessionStorage.getItem('armony:sv') === 'server';
+  const svTabs = svOk ? `<div class="lpills" role="navigation" aria-label="Quali ascolti">${[['me', 'I tuoi ascolti'], ['server', 'Sul server']].map(([k, l]) => `<a href="#/statistiche" data-act="sv" data-k="${k}" class="${(k === 'server') === sv ? 'on' : ''}"${(k === 'server') === sv ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>` : '';
+  if (sv) return vStatsServer(period, svTabs, n);
   const all = await Stats.all();
   if (stale(n)) return;
   const from = period === 'all' ? 0 : period === 'year' ? new Date(new Date().getFullYear(), 0, 1).getTime() : Date.now() - (+period) * 864e5;
@@ -2060,7 +2155,7 @@ async function vStats() {
   const sub = syncable(srv()) ? `Calcolate sui tuoi ascolti da tutti i tuoi dispositivi collegati a ${esc(srv().name)}.` : 'Calcolate sui tuoi ascolti da questo dispositivo. Restano qui, non vengono inviate a nessuno.';
   // nessun ascolto in assoluto: una pagina che invita ad ascoltare, non una fila di zeri
   if (!all.length) {
-    view.innerHTML = `<h1>Statistiche</h1><p class="sub">${sub}</p>
+    view.innerHTML = `<h1>Statistiche</h1>${svTabs}<p class="sub">${sub}</p>
       <div class="stats-empty"><div class="vinyl" aria-hidden="true"></div><div>
         <h3>Il primo ascolto apre le statistiche</h3>
         <p>Ogni brano che ascolti finisce qui: quanti minuti, gli artisti che torni a cercare, le ore in cui suoni di più.</p>
@@ -2069,7 +2164,7 @@ async function vStats() {
     return;
   }
   const label = { '7': 'negli ultimi 7 giorni', '30': 'negli ultimi 30 giorni', year: 'quest\'anno', all: 'da quando usi Armony' }[period];
-  view.innerHTML = `<h1>Statistiche</h1><p class="sub">${sub}</p>
+  view.innerHTML = `<h1>Statistiche</h1>${svTabs}<p class="sub">${sub}</p>
     <div class="row" style="margin-bottom:24px"><div class="seg">${[['7', '7 giorni'], ['30', '30 giorni'], ['year', 'Quest\'anno'], ['all', 'Sempre']].map(([v, l]) => `<label><input type="radio" name="sp" value="${v}" ${v === period ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
       ${h.length ? `<button class="btn" data-act="wrapped">${ic('image')} Crea immagine da condividere</button>` : ''}</div>
     ${!h.length ? `<div class="empty"><h3>Nessun ascolto ${label}</h3><p>Hai ${num(all.length)} ascolti in tutto.</p><button class="btn" data-act="spall">Guarda da sempre</button></div>` : `
@@ -2085,6 +2180,22 @@ async function vStats() {
     <h2>I tuoi dati</h2><div class="row"><button class="btn" data-act="histexport">Esporta storico (CSV)</button><button class="btn danger" data-act="histclear">Cancella storico</button></div>`;
   view.querySelectorAll('[name=sp]').forEach(r => r.onchange = () => { sessionStorage.setItem('armony:sp', r.value); vStats(); });
   view._wrapped = { secs, h, artists, songs, period };
+}
+// tutti gli ascolti del server: chi ascolta di più, i brani più ascoltati e un registro degli ultimi ascolti
+async function vStatsServer(period, tabs, n) {
+  const days = { '7': 7, '30': 30, year: Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 864e5), all: 3650 }[period] || 30;
+  const d = await srvApi(srv(), '/api/ascolti/server?days=' + days);
+  if (stale(n)) return;
+  const f = x => x.toLocaleString('it-IT'), max = Math.max(1, ...d.users.map(u => u.plays));
+  const label = { '7': 'negli ultimi 7 giorni', '30': 'negli ultimi 30 giorni', year: 'quest\'anno', all: 'da sempre' }[period];
+  view.innerHTML = `<h1>Statistiche</h1>${tabs}<p class="sub">Gli ascolti di tutti gli utenti di ${esc(srv().name)}, contati dal server: valgono anche per le app Subsonic collegate. Chi non vuole comparire conta nei totali ma non per nome.</p>
+    <div class="row" style="margin-bottom:24px"><div class="seg">${[['7', '7 giorni'], ['30', '30 giorni'], ['year', 'Quest\'anno'], ['all', 'Sempre']].map(([v, l]) => `<label><input type="radio" name="sp" value="${v}" ${v === period ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
+    <div class="statshero"><div class="lead"><b>${f(d.total)}</b><span>ascolti sul server ${label}${d.users[0] ? `, il più assiduo è <em>${esc(d.users[0].name)}</em>` : ''}</span></div>
+      <dl class="minor"><div><dt>da sempre</dt><dd>${f(d.ever)}</dd></div><div><dt>${d.users.length === 1 ? 'utente' : 'utenti'}</dt><dd>${f(d.users.length)}</dd></div></dl></div>
+    <div class="grid2"><div><h2>Per utente</h2>${d.users.length ? `<div class="srvusers">${d.users.map(u => `<div class="srvuser">${pavatar(u, 's')}<span class="grow"><b>${esc(u.name)}</b><span class="srvbar"><i style="width:${u.plays / max * 100}%"></i></span></span><span class="srvn"><b>${f(u.plays)}</b><small>${u.last ? ago(u.last * 1000) : ''}</small></span></div>`).join('')}${d.others ? `<p class="small" style="color:var(--muted)">Altri utenti: ${f(d.others)} ascolti.</p>` : ''}</div>` : '<div class="empty">Nessun ascolto in questo periodo.</div>'}</div>
+      <div><h2>I più ascoltati</h2>${d.top.length ? `<ol class="rank">${d.top.map(t => `<li${t.albumId ? ` data-act="album" data-id="${esc(t.albumId)}" style="cursor:pointer"` : ''}><span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></span><small>${f(t.plays)} ascolti${t.listeners > 1 ? ` · ${t.listeners} persone` : ''}</small></li>`).join('')}</ol>` : '<div class="empty">Ancora niente.</div>'}</div></div>
+    <h2>Ultimi ascolti</h2>${d.recent.length ? `<div class="srvlog">${d.recent.map(r => `<div class="srvlogrow"${r.albumId ? ` data-act="album" data-id="${esc(r.albumId)}"` : ''}>${pavatar(r, 's')}<span class="grow"><b>${esc(r.name)}</b> ha ascoltato <b>${esc(r.title)}</b> <small>· ${esc(r.artist)}</small></span><small data-at="${r.at * 1000}">${ago(r.at * 1000)}</small></div>`).join('')}</div>` : '<div class="empty">Nessun ascolto registrato.</div>'}`;
+  view.querySelectorAll('[name=sp]').forEach(r => r.onchange = () => { sessionStorage.setItem('armony:sp', r.value); vStats(); });
 }
 async function makeWrapped() {
   const w = view._wrapped; if (!w) return;
@@ -2418,6 +2529,7 @@ async function importPlaylist() {
   const lists = [];
   for (const f of files) { try { const p = parsePlaylistFile(f.name, await f.text()); if (p.items.length) lists.push(p); } catch (e) { toast(`${f.name}: ${e.message || 'file non valido'}`); } }
   if (!lists.length) return toast('Nessun brano trovato nei file.');
+  if (srv()?.me?.caps?.includes('importsrv')) return importOnServer(lists);
   const total = lists.reduce((n, l) => n + l.items.length, 0), d = $('#dlg'); d.className = '';
   d.innerHTML = `<h3>Importo ${lists.length > 1 ? `${lists.length} playlist` : `"${esc(lists[0].title)}"`}</h3><p class="sub" id="impMsg">0 di ${total}</p><div class="bar"><i id="impBar" style="width:0"></i></div>`; d.showModal();
   const k = it => it.isrc || cleanTxt(`${it.artist} ${it.title}`), seen = new Map(), missing = new Map(), report = [];
@@ -2470,6 +2582,41 @@ async function importPlaylist() {
       store.set('pending', pend);
       d.close(); toast(`${r.added} download in coda${r.skipped ? `, ${r.skipped} già in coda` : ''}. Li aggiungo alle playlist quando sono pronti.`); location.hash = '#/scarica';
     } catch (e) { toast(e.message); }
+  };
+  if (location.hash.startsWith('#/playlist')) route();
+}
+// importazione sul server (capacità "importsrv", server/importa.py): il server riconosce i brani sul suo database,
+// ricorda l'elenco e tiene la playlist completa e in ordine mentre i mancanti arrivano, anche ad app chiusa.
+// La playlist la crea il client, così è dell'utente; un secondo invio con download=true mette in coda i mancanti
+async function importOnServer(lists) {
+  const d = $('#dlg'); d.className = '';
+  d.innerHTML = `<h3>Importo ${lists.length > 1 ? `${lists.length} playlist` : `"${esc(lists[0].title)}"`}</h3><p class="sub" id="impMsg">Riconosco i brani sul server…</p><div class="bar"><i id="impBar" style="width:4%"></i></div>`; d.showModal();
+  const me = srv().user, mine = arr((await api('getPlaylists').catch(() => null))?.playlists?.playlist).filter(p => !p.owner || p.owner === me);
+  const send = (x, download) => dlApi('/api/import/playlist', { method: 'POST', body: JSON.stringify({ pid: x.pid, name: x.title, items: x.items, download, folder: store.get('impDir', 'Spotify'), format: 'm4a' }) });
+  const done = [];
+  for (const [i, l] of lists.entries()) {
+    $('#impMsg').textContent = `${l.title} · ${i + 1} di ${lists.length}`;
+    try {
+      const pid = mine.find(p => p.name === l.title)?.id || await createPlaylist(l.title, []);
+      const items = l.items.map(it => ({ ...it, artists: it.artists?.length ? it.artists : [it.artist].filter(Boolean) }));
+      done.push({ title: l.title, pid, items, r: await send({ pid, title: l.title, items }, false) });
+    } catch (e) { done.push({ title: l.title, err: e.message }); }
+    $('#impBar').style.width = ((i + 1) / lists.length * 100) + '%';
+  }
+  emit('playlists');
+  const ok = done.filter(x => x.r), tot = ok.reduce((n, x) => n + x.r.total, 0), have = ok.reduce((n, x) => n + x.r.inlib, 0);
+  const miss = ok.reduce((n, x) => n + x.r.miss, 0), canDl = !!S.dl.url && access().download;
+  d.innerHTML = `<h3>Importazione conclusa</h3>
+    <p>${have.toLocaleString('it-IT')} brani su ${tot.toLocaleString('it-IT')} erano già in libreria${ok.length > 1 ? `, in ${ok.length} playlist` : ''}: sono già al loro posto.</p>
+    ${done.length > 1 || done.some(x => x.err) ? `<div class="code" style="font-family:inherit;font-size:.88rem;max-height:180px">${done.map(x => x.err ? `${esc(x.title)}: <span style="color:var(--danger)">${esc(x.err)}</span>` : `${esc(x.title)}: ${x.r.inlib} di ${x.r.total}`).join('<br>')}</div>` : ''}
+    ${miss ? `<p class="sub" style="margin:12px 0 6px">${miss} brani mancano sul server${ok.length === 1 && ok[0].r.missing?.length ? ':' : '.'}</p>
+      ${ok.length === 1 && ok[0].r.missing?.length ? `<div class="code" style="font-family:inherit;font-size:.88rem;max-height:160px">${ok[0].r.missing.map(esc).join('<br>')}${miss > ok[0].r.missing.length ? '<br>…' : ''}</div>` : ''}
+      <p class="small" style="color:var(--muted)">${canDl ? 'Armony li cerca online con la durata giusta e li scarica con copertina, album e numero di traccia. Entrano nella playlist al loro posto appena arrivano, anche se chiudi l\'app.' : 'Per scaricarli serve il permesso di download.'}</p>` : ''}
+    <div class="row">${miss && canDl ? `<button class="btn primary" id="getMissing">Scarica i ${miss} mancanti</button>` : ''}<button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
+  if (miss && canDl) $('#getMissing').onclick = async () => {
+    $('#getMissing').disabled = true; let q = 0;
+    try { for (const x of ok) if (x.r.miss) q += (await send(x, true)).queued; } catch (e) { return toast(e.message); }
+    d.close(); toast(`${q} download in coda: entrano nelle playlist appena sono in libreria.`); location.hash = '#/scarica';
   };
   if (location.hash.startsWith('#/playlist')) route();
 }
@@ -2716,12 +2863,90 @@ function songMenu(t, ctx = {}) {
     canEdit(t.serverId) ? ['pen', 'Modifica informazioni', () => editTrack(t)] : null,
     canDelete(t.serverId) ? ['trash', 'Elimina dal server', () => deleteTracks([t], t.title), 'danger'] : null
   ].filter(Boolean);
+  if (ctx.q != null && !Live.remote() && Jam.role !== 'guest') items.splice(2, 0, ['close', 'Togli dalla coda', () => { const b = document.createElement('button'); b.hidden = true; b.dataset.act = 'qrm'; b.dataset.i = ctx.q; view.append(b); b.click(); b.remove(); }]);
+  if (ctx.at) return ctxMenu(ctx.at, items, `<b>${esc(t.title)}</b><small>${esc(t.artist)}</small>`);
   d.innerHTML = `<div class="head"><span class="pic">${imgTag(t.coverArt, 100, t.serverId)}</span><span style="min-width:0"><b style="display:block">${esc(t.title)}</b><small style="color:var(--muted)">${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}${t.fed ? '<br>' + netSrc(t.fed) : ''}</small></span></div>
     ${items.map(([i, l, , cls], n) => `<button class="mi${cls ? ' ' + cls : ''}" data-n="${n}">${ic(i)}${l}</button>`).join('')}`;
   d.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { d.close(); items[+b.dataset.n][2](); });
   d.onclose = () => { d.className = ''; d.onclose = null; };
   d.showModal();
 }
+
+/* ================= menu col tasto destro (computer) =================
+   Su un dispositivo con il mouse ogni brano, album, artista, playlist, voce di navigazione e il lettore hanno un menu
+   vicino al puntatore, con le stesse azioni del tasto ⋯. Maiusc + tasto destro apre quello del browser. */
+const albumTracks = async (id, sid = S.active) => arr((await api('getAlbum', { id }, srv(sid))).album.song).map(x => norm(x, sid));
+const plTracks = async id => arr((await api('getPlaylist', { id })).playlist.entry).map(x => norm(x));
+const artistTracks = async id => (await Promise.all(arr((await api('getArtist', { id })).artist.album).map(a => albumTracks(a.id)))).flat();
+// le azioni di sempre su un gruppo di brani, caricato solo quando si sceglie la voce
+function groupItems(get, before = [], after = []) {
+  const run = f => async () => { try { const l = await get(); if (!l.length) return toast('Non ci sono brani.'); f(l); } catch (e) { toast(e.message); } };
+  const guest = l => Jam.role === 'guest' && (l.slice(0, 10).forEach(t => Jam.suggest(t)), true);
+  return [...before,
+    ['play', 'Riproduci', run(l => setQueue(l, 0))],
+    ['shuffle', 'Riproduci in ordine casuale', run(l => setQueue(l, 0, true))],
+    ['nextup', 'Riproduci dopo', run(l => { if (guest(l)) return; S.queue.splice(S.index + 1, 0, ...l); persistQueue(); toast(l.length === 1 ? 'Verrà riprodotto dopo il brano attuale.' : `${l.length} brani dopo quello attuale.`); })],
+    ['plus', 'Aggiungi alla coda', run(l => { if (guest(l)) return; S.queue.push(...l); persistQueue(); toast(`${l.length} brani aggiunti alla coda.`); })],
+    ['addlist', 'Aggiungi a una playlist', run(l => addToPlaylistDialog(l))],
+    srv()?.local ? null : ['offline', 'Salva per l\'offline', run(l => Offline.save(l))], ...after].filter(Boolean);
+}
+function ctxMenu([x, y], items, head = '') {
+  $('#cmenu')?.remove();
+  const m = document.createElement('div'); m.id = 'cmenu'; m.className = 'cmenu'; m.setAttribute('role', 'menu');
+  m.innerHTML = (head ? `<div class="cm-head">${head}</div>` : '') + items.map(([i, l, , cls], n) => `<button role="menuitem" class="mi${cls ? ' ' + cls : ''}" data-n="${n}">${ic(i)}<span>${esc(l)}</span></button>`).join('');
+  document.body.append(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
+  const close = () => { m.remove(); removeEventListener('pointerdown', out, true); removeEventListener('keydown', keys, true); removeEventListener('scroll', close, true); removeEventListener('blur', close); removeEventListener('hashchange', close); };
+  const out = e => { if (!m.contains(e.target)) close(); };
+  const keys = e => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const b = [...m.querySelectorAll('button')], i = b.indexOf(document.activeElement); b[(i + (e.key === 'ArrowDown' ? 1 : -1) + b.length) % b.length]?.focus(); }
+  };
+  m.onclick = e => { const b = e.target.closest('[data-n]'); if (!b) return; close(); items[+b.dataset.n][2](); };
+  addEventListener('pointerdown', out, true); addEventListener('keydown', keys, true); addEventListener('scroll', close, true); addEventListener('blur', close); addEventListener('hashchange', close);
+  m.querySelector('button')?.focus({ preventScroll: true });
+}
+document.addEventListener('contextmenu', e => {
+  if (e.shiftKey || !matchMedia('(pointer:fine)').matches || e.target.closest('input,textarea,select,[contenteditable],dialog,#cmenu,.lyrics')) return;
+  const at = [e.clientX, e.clientY], go = h => () => { location.hash = h; }, menu = (items, head) => { e.preventDefault(); ctxMenu(at, items, head); };
+  const song = e.target.closest('.song[data-i]:not(.ghost)');
+  if (song) {
+    const lst = song.closest('.songs[data-l]'), t = (lst && Lists.get(+lst.dataset.l) || S.lastList)[+song.dataset.i]; if (!t) return;
+    const q = song.dataset.act === 'qplay' ? +song.dataset.i : null, pl = view.dataset.pl && song.closest('#lList') ? +song.dataset.i : null;
+    e.preventDefault(); return songMenu(t, { at, pl, q });
+  }
+  if (e.target.closest('#player .np, #player .meta, #disc') && currentTrack()) { e.preventDefault(); return songMenu(currentTrack(), { at }); }
+  const alb = e.target.closest('.card:not(.ghost), .qk, .hbest');
+  const aid = alb?.querySelector('[data-act="playalbum"],[data-act="playalb"]')?.dataset.id || (alb?.dataset.act === 'album' ? alb.dataset.id : null);
+  if (aid) {
+    const sid = alb.querySelector('[data-sid]')?.dataset.sid || S.active, name = alb.querySelector('b')?.textContent || 'Album';
+    return menu(groupItems(() => albumTracks(aid, sid), [['album', 'Apri l\'album', go('#/album/' + encodeURIComponent(aid))]],
+      [srv(sid)?.local ? null : ['share', 'Condividi un link', () => shareItem(aid, name, sid)]].filter(Boolean)), `<b>${esc(name)}</b><small>Album</small>`);
+  }
+  const art = e.target.closest('[data-act="artist"][data-id]');
+  if (art) {
+    const id = art.dataset.id, name = art.querySelector('b')?.textContent || 'Artista';
+    return menu(groupItems(() => artistTracks(id), [['artist', 'Apri l\'artista', go('#/artista/' + encodeURIComponent(id))]],
+      [['radio', 'Radio dell\'artista', async () => { try { setQueue((await artistRadio(id)).map(x => norm(x)), 0, true); } catch (er) { toast(er.message); } }]]), `<b>${esc(name)}</b><small>Artista</small>`);
+  }
+  const pl = e.target.closest('[data-act="openpl"][data-id], #sidePl a[data-pl]');
+  if (pl) {
+    const id = pl.dataset.id || pl.dataset.pl, name = pl.querySelector('b')?.textContent || 'Playlist';
+    return menu(groupItems(() => plTracks(id), [['list', 'Apri la playlist', go('#/playlist/' + encodeURIComponent(id))]],
+      [['down', 'Esporta (M3U, JSON, CSV)', async () => { try { exportTracks(name, await plTracks(id)); } catch (er) { toast(er.message); } }],
+       srv()?.local ? null : ['share', 'Condividi un link', () => shareItem(id, name)]].filter(Boolean)), `<b>${esc(name)}</b><small>Playlist</small>`);
+  }
+  const ghost = e.target.closest('.card.ghost [data-act="dzalbum"], .card.ghost')?.closest('.card');
+  if (ghost) { const id = ghost.querySelector('[data-act="dzalbum"]')?.dataset.id; if (id) return menu([['album', 'Apri (non in libreria)', go('#/album-dz/' + encodeURIComponent(id))]]); }
+  const nav = e.target.closest('#nav a[data-r], #tabs a[data-r]');
+  if (nav) {
+    const h = '#/' + nav.dataset.r;
+    return menu([['chevr', 'Apri', go(h)], ['share', 'Apri in una nuova finestra', () => open(location.pathname + h, '_blank')],
+      nav.closest('#tabs') ? ['sliders', 'Personalizza la barra', tabsEditor] : null].filter(Boolean));
+  }
+});
 
 /* ================= impostazioni =================
    Due aree: "Questo dispositivo" (preferenze, i miei dispositivi, server collegati, telefono, backup) e "Server" (solo
@@ -2752,6 +2977,9 @@ function vSettings(id = location.hash.split('/')[2]) {
       <label class="f">Qualità per l'offline<select data-p="offlineQ">${opt(qOpts, P.offlineQ)}</select></label>
       <label class="f">Normalizzazione volume<select data-p="rg">${opt({ off: 'Spenta', track: 'Per brano', album: 'Per album' }, P.rg)}</select></label>
     </div>
+    <label class="f">Cache dei brani su questo dispositivo<select id="cacheMB">${opt({ 0: 'Spenta', 512: '500 MB', 1024: '1 GB', 2048: '2 GB', 5120: '5 GB' }, P.cacheMB ?? 1024)}</select></label>
+    <div class="row between" style="flex-wrap:nowrap;margin-top:calc(-1 * var(--s2))"><small id="cacheUse" style="color:var(--muted)">${bytes(ACache.size())} usati</small><button class="btn sm" data-act="cacheclear">Svuota la cache</button></div>
+    <p class="small" style="color:var(--muted);margin:0">Mentre ascolti, i prossimi brani della coda si scaricano prima: partono subito e senza rete. Col Wi-Fi due, in rete mobile uno, con «risparmio dati» nessuno.</p>
     <label class="f">Dissolvenza tra i brani: <span id="cfv">${P.crossfade ? P.crossfade + ' secondi' : 'spenta'}</span><input type="range" min="0" max="12" step="1" value="${P.crossfade}" id="cf"></label>
     <label class="check"><input type="checkbox" data-pb="night" ${P.night ? 'checked' : ''}><span>Volume notte<small>Comprime la dinamica: i passaggi forti si abbassano, quelli piano si sentono. Utile di sera o in auto.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="visualizer" ${P.visualizer ? 'checked' : ''}><span>Visualizzatore nella schermata In riproduzione</span></label>
@@ -2810,7 +3038,10 @@ function vSettings(id = location.hash.split('/')[2]) {
   adm && caps.includes('youtube') ? ['srv', 'youtube', 'YouTube', 'film', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>'] : null,
   adm && netOk() ? ['srv', 'librerie', 'Librerie collegate', 'wifi', 'federazione rete server amici collegare invito codice sicurezza', '<p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare subito o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>'] : null,
   adm ? ['srv', 'aggiornamenti', 'Aggiornamenti', 'repeat', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>'] : null,
-  adm && srv()?.session && caps.includes('spazio') ? ['srv', 'disco', 'Spazio del server', 'disk', 'memoria disco spazio occupato libero gb musica video', '<div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>'] : null
+  // stato del server (diagnosi.js) con dentro lo spazio del disco; sui server che non lo conoscono, solo lo spazio
+  adm && ds?.session && caps.includes('diagnosi') ? ['srv', 'stato', 'Stato del server', 'pulse', 'cpu processore memoria ram carico rete thread ascolti flussi dispositivi risorse monitor disco spazio occupato libero', '<div id="statoBox"><p class="sub">Misuro…</p></div><h3>Spazio</h3><div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>']
+    : adm && srv()?.session && caps.includes('spazio') ? ['srv', 'disco', 'Spazio del server', 'disk', 'memoria disco spazio occupato libero gb musica video', '<div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>'] : null,
+  adm && ds?.session && caps.includes('diagnosi') ? ['srv', 'registro', 'Registro eventi', 'bug', 'log errori debug problemi eventi ambiguità guasti', '<div id="logBox"><p class="sub">Caricamento…</p></div>'] : null
   ].filter(Boolean);
   const ro = `<p class="ro-note" hidden>${ic('lock')}<span>Sola lettura. Da internet le impostazioni del server si cambiano solo da un dispositivo con chiave (l'app, o Armony aperta con HTTPS) oppure da casa o da Tailscale.</span></p>`;
   view.innerHTML = `<div class="setp"><h1>Impostazioni</h1><p class="sub">Tutto resta su questo dispositivo, salvo ciò che sta sui server.</p>
@@ -2838,9 +3069,10 @@ function vSettings(id = location.hash.split('/')[2]) {
     if (el.dataset.pb === 'sync' && P.sync) { PrefSync.pull(); HistSync.run(); }
     if (el.dataset.pb === 'live') Live.connect();
   });
+  $('#cacheMB').onchange = e => { P.cacheMB = +e.target.value; savePrefs(); if (!P.cacheMB) ACache.clear().then(() => { $('#cacheUse').textContent = '0 MB usati'; }); else ACache.trim(); };
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  refreshSpazio(); refreshApk(); Disp.paint();
+  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint();
   $('#pubSave')?.addEventListener('click', async () => {
     try {
       const r = await dlApi('/api/indirizzo', { method: 'PUT', body: JSON.stringify({ url: $('#pubUrl').value.trim() }) });
@@ -2922,7 +3154,7 @@ async function refreshSpazio() {
   try {
     const e = await navigator.storage.estimate(), off = (await DB.all('offline').catch(() => [])).reduce((n, r) => n + (r.size || 0), 0);
     devHtml = `<div><h3>${here}</h3><p class="sub">Armony usa ${bytes(e.usage)} di ${bytes(e.quota)} concessi${NATIVE ? ' dal telefono' : ' dal browser'}.</p>
-      ${spazioBar(e.quota, [{ v: Math.min(off, e.usage), l: 'Brani offline', c: 'var(--accent)' }, { v: Math.max(0, e.usage - off), l: 'Copertine e dati', c: 'var(--muted)' }], Math.max(0, e.quota - e.usage))}</div>`;
+      ${spazioBar(e.quota, [{ v: Math.min(off, e.usage), l: 'Brani offline', c: 'var(--accent)' }, { v: Math.min(ACache.size(), Math.max(0, e.usage - off)), l: 'Cache dei brani', c: 'var(--sage)' }, { v: Math.max(0, e.usage - off - ACache.size()), l: 'Copertine e dati', c: 'var(--muted)' }], Math.max(0, e.quota - e.usage))}</div>`;
   } catch { devHtml = `<div><h3>${here}</h3><p class="sub">Questo browser non dice quanto spazio usa.</p></div>`; }
   if ($('#spazioBox') !== box) return;
   // amministratore: il disco del server sta in Server → Spazio del server
@@ -3148,9 +3380,14 @@ async function refreshFed() {
         ${x.error ? `<small style="display:block;color:var(--danger)">${esc(x.error)}</small>` : ''}<small style="display:block">Codice di sicurezza <span class="safety">${esc(x.safety)}</span></small></span>
       <span class="tag ${c}">${esc(l)}</span>
       ${x.state === 'richiesta' ? `<button class="btn sm primary" data-act="fedok" data-id="${esc(x.id)}" data-name="${esc(x.name)}" data-safety="${esc(x.safety)}">Accetta</button>` : ''}
+      ${x.state === 'attivo' && x.dir ? `<select class="fedverso" data-id="${esc(x.id)}" aria-label="Verso del collegamento con ${esc(x.name)}" style="width:auto">${[['entrambi', 'Ci vediamo a vicenda'], ['offro', 'Solo lui vede me'], ['ricevo', 'Solo io vedo lui']].map(([v, l]) => `<option value="${v}" ${x.dir === v ? 'selected' : ''}>${l}</option>`).join('')}</select>` : ''}
       ${x.state === 'attivo' ? `<button class="icon-btn" data-act="fedsync" data-id="${esc(x.id)}" aria-label="Aggiorna ora" title="Aggiorna ora">${ic('repeat')}</button>` : ''}
       <button class="icon-btn" data-act="fedrm" data-id="${esc(x.id)}" data-name="${esc(x.name)}" aria-label="${x.state === 'richiesta' ? 'Rifiuta' : 'Scollega'}">${ic('trash')}</button></div>`; }).join('')
       : '<div class="empty">Nessun server collegato. Crea un invito e mandalo a un amico che ha Armony, oppure incolla il suo.</div>'}`;
+  box.querySelectorAll('.fedverso').forEach(el => el.onchange = async () => {
+    try { await dlApi(`/api/fed/nodes/${el.dataset.id}/verso`, { method: 'PUT', body: JSON.stringify({ dir: el.value }) }); toast({ entrambi: 'Le due librerie si vedono a vicenda.', offro: 'Lui vede la tua libreria, tu non cerchi più nella sua.', ricevo: 'Vedi la sua libreria, lui non vede più la tua.' }[el.value]); refreshFed(); }
+    catch (e) { toast(e.message); refreshFed(); }
+  });
   const save = async body => { try { await dlApi('/api/fed/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('Salvato.'); } catch (e) { toast(e.message); refreshFed(); } };
   $('#fedOwner').onchange = e => save({ owner: e.target.value.trim() });
   $('#fedUrl').onchange = e => save({ url: e.target.value.trim() });
@@ -3491,6 +3728,7 @@ view.addEventListener('click', async e => {
       }
       case 'staralbum': await api(el.dataset.on === '1' ? 'unstar' : 'star', { albumId: id }); route(); break;
       case 'shareitem': shareItem(id, el.dataset.name); break;
+      case 'sv': e.preventDefault(); sessionStorage.setItem('armony:sv', el.dataset.k); vStats(); break;
       case 'spall': sessionStorage.setItem('armony:sp', 'all'); vStats(); break;
       case 'radio': { const r = await api('getRandomSongs', { size: 80 }); setQueue(arr(r.randomSongs.song).map(x => norm(x)), 0); break; }
       case 'mixfav': { const r = (await api('getStarred2')).starred2; const so = arr(r.song).map(x => norm(x)); if (!so.length) return toast('Non hai ancora brani preferiti.'); setQueue(so, 0, true); break; }
@@ -3561,6 +3799,7 @@ view.addEventListener('click', async e => {
         Engine.el.pause(); d.onclose = () => { d.className = ''; d.innerHTML = ''; d.onclose = null; }; d.showModal(); break;
       }
       case 'delvideo': if (confirm('Eliminare questo video dal server?')) { await dlApi('/api/videos/' + el.dataset.path.split('/').map(encodeURIComponent).join('/'), { method: 'DELETE' }); refreshVideos(); } break;
+      case 'cacheclear': await ACache.clear(); $('#cacheUse').textContent = bytes(0) + ' usati'; toast('Cache dei brani svuotata.'); refreshSpazio(); break;
       case 'offclear': if (confirm('Eliminare tutti i brani salvati per l\'offline?')) { await DB.clear('offline'); Offline.keys.clear(); route(); } break;
       case 'histexport': { const h = await Stats.all(); saveFile('armony-storico.csv', 'Data,Titolo,Artista,Album,Durata (s)\n' + h.map(x => [new Date(x.ts).toISOString(), x.title, x.artist, x.album, x.duration].map(csvCell).join(',')).join('\n'), 'text/csv'); break; }
       case 'histclear': {
@@ -4012,7 +4251,7 @@ const Live = {
     if (!this.target && !v) return;  // sparito mentre lo comandavamo: lo dice già "si è scollegato"
     const name = this.devices.get(to) || this.gone?.[to] || 'Il dispositivo';
     this.devices.delete(to); this.states.delete(to); this.target = null;
-    toast(`${name} non risponde: suono qui.`);
+    toast(`${name} non risponde: suono qui.`); window.Diag?.report('avviso', 'live', `${name} non ha risposto al comando entro 5 s`, v ? 'transfer' : '');
     if (v) this.exec({ cmd: 'transfer', value: v }); else this.paint();
   },
   publish() {
@@ -4340,12 +4579,21 @@ async function boot() {
   if (Local.on() && !navigator.onLine && !srv()?.local) S.active = Local.id;  // senza rete suona il telefono
   fillSelectors(); updateNowPlaying(); paintTime();
   const t = S.queue[S.index];
-  if (t && (srv(t.serverId) || Offline.has(t))) await Engine.load(t, Engine.cur, { autoplay: false, startAt: store.get('pos', 0) });
+  if (t && (srv(t.serverId) || Offline.has(t))) await Engine.load(t, Engine.cur, { autoplay: false, startAt: store.get('pos', 0), lazy: true });
   addEventListener('hashchange', route);
   addEventListener('online', () => { toast('Di nuovo online.'); fillSelectors(); });
   addEventListener('offline', () => toast('Sei offline: puoi ascoltare i brani salvati.'));
   navigator.connection?.addEventListener?.('change', fillSelectors);
-  if ('serviceWorker' in navigator && /^https?:/.test(location.protocol) && !NATIVE) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && /^https?:/.test(location.protocol) && !NATIVE) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+    // sw.js apre l'app dalla cache e intanto scarica la versione nuova: appena aperta e ferma si ricarica subito, altrimenti alla prossima apertura
+    const t0 = Date.now();
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (e.data?.type !== 'aggiornata') return;
+      if (Date.now() - t0 < 15000 && !isPlaying() && !$('dialog[open]')) location.reload();
+      else toast('Armony è stata aggiornata: la versione nuova parte alla prossima apertura.', 5000);
+    });
+  }
   NativeMedia.init(); Phone.init(); if (NATIVE) { nativeBack(); AppUpdate.init(); NetDns.need(''); }
   Jam.init();
   route();

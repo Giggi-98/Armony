@@ -58,11 +58,19 @@ jobs:
           cp "$RUNNER_TEMP/out/armony-$GITHUB_REF_NAME.apk" "$RUNNER_TEMP/out/armony.apk"
           (cd "$RUNNER_TEMP/out" && sha256sum armony.apk > armony.apk.sha256)
 
+      # note della release scritte a mano (docs/rilasci/vX.Y.Z.md); senza, quelle generate da GitHub.
+      # L'app mostra le prime righe "- …" nel foglio dell'aggiornamento
+      - id: note
+        run: |
+          f="docs/rilasci/$GITHUB_REF_NAME.md"
+          if [ -f "$f" ]; then echo "path=$f" >> "$GITHUB_OUTPUT"; echo "gen=false" >> "$GITHUB_OUTPUT"; else echo "gen=true" >> "$GITHUB_OUTPUT"; fi
+
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
+          body_path: ${{ steps.note.outputs.path }}
           files: |
             ${{ runner.temp }}/out/armony-${{ github.ref_name }}.apk
             ${{ runner.temp }}/out/armony-${{ github.ref_name }}.apk.sha256
             ${{ runner.temp }}/out/armony.apk
             ${{ runner.temp }}/out/armony.apk.sha256
-          generate_release_notes: true
+          generate_release_notes: ${{ steps.note.outputs.gen == 'true' }}

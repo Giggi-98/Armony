@@ -302,7 +302,7 @@ def own_net():
 def net_radio(ttl, skip, requester, rid, deadline):
     """Le stazioni dei vicini (e dei loro vicini finché restano salti), con gli istanti sul mio orologio."""
     F.seen_rids[rid] = time.time()
-    near = [n for n in (F.nodes() if requester is None else F.visible_to(requester)) if n["id"] not in skip]
+    near = [n for n in (F.pullable() if requester is None else F.visible_to(requester)) if n["id"] not in skip]
     out = own_net() if requester is not None else []
     if ttl < 1 or not near:
         return out

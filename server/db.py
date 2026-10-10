@@ -88,6 +88,19 @@ MIGRATIONS = [
     INSERT INTO settings (key, value) SELECT 'legacy_grace', CAST(strftime('%s', 'now') + 14 * 86400 AS TEXT)
       WHERE EXISTS (SELECT 1 FROM sessions);
     """,
+    # 8: registro degli eventi (diagnosi.py): errori e ambiguità di server e client, i ripetuti sommati in una riga
+    # (n, last). Importazioni ricordate dal server (pid = playlist di Navidrome): l'elenco del CSV nell'ordine
+    # originale, per completare e riordinare la playlist ogni volta che un brano entra in libreria. Verso di ogni
+    # collegamento fra server (federazione.py): entrambi, offro (solo do), ricevo (solo prendo)
+    """
+    CREATE TABLE log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, last REAL NOT NULL, n INTEGER NOT NULL,
+                      level TEXT NOT NULL, area TEXT NOT NULL, msg TEXT NOT NULL, detail TEXT, user TEXT, dev TEXT,
+                      src TEXT NOT NULL, sig TEXT NOT NULL);
+    CREATE INDEX log_last ON log(last);
+    CREATE TABLE imports (pid TEXT PRIMARY KEY, owner TEXT NOT NULL, name TEXT NOT NULL, items TEXT NOT NULL,
+                          created REAL NOT NULL, updated REAL NOT NULL, state TEXT);
+    ALTER TABLE fed_nodes ADD COLUMN dir TEXT NOT NULL DEFAULT 'entrambi';
+    """,
 ]
 
 _local = threading.local()
