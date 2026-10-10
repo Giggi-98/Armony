@@ -216,6 +216,9 @@ Object.defineProperty(S, 'dl', {
 const access = () => dlSrv()?.session ? dlSrv().me || {} : S.dl.token ? { admin: true, upload: true, download: true } : {};
 // con "Questo telefono" in uso download e caricamenti vanno al server del backup (telefono.js)
 const dlSrv = () => srv()?.local ? Local.target() : srv();
+// chi sono negli indirizzi che non possono avere intestazioni (EventSource, <video>, link da scaricare): il gettone del
+// dispositivo (12-24 ore, spento con la sessione) e non la sessione, che vale giorni e resterebbe in cronologia e nei log
+const authQ = (s, tok = s?.session) => s?.tk ? 'k=' + encodeURIComponent(s.tk) : 'token=' + encodeURIComponent(tok || '');
 if (P.theme !== 'auto') document.documentElement.dataset.theme = P.theme;
 const srv = id => (id || S.active) === 'telefono' ? (Local.on() ? Local.srv : undefined) : S.servers.find(s => s.id === (id || S.active));
 const key = t => t.serverId + ':' + t.id;
@@ -1487,6 +1490,7 @@ async function vPlaylist(id) {
       owner && !srv().local && Amici.on() && { act: 'collabpl', label: 'Collaboratori', icon: 'friends', data: { id } },
       Amici.on() && !srv().local && { act: 'sendpl', label: 'Manda a un amico', icon: 'send', data: { id, name: p.name } },
       mine && !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
+      mine && p.public && can('rete') && srv().me?.caps?.includes('fedofferta') && { act: 'offerpl', label: 'Server collegati…', icon: 'globe', data: { id } },
       { act: 'dirpl', label: PlDir.of(id) ? `Nella cartella «${PlDir.of(id).n}»` : 'Sposta in una cartella', icon: 'folder', data: { id } },
       mine && { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
     `<div id="impSt"></div>${songs.length > 1 ? Ord.bar(ok) : ''}<div id="lList">${songList(Ord.apply(songs, Ord.get(ok)), popts)}</div>`;
@@ -3060,7 +3064,7 @@ async function dlApi(path, opts = {}, retry = true) {
   return j;
 }
 const scanned = new Set(store.get('scanned', []));
-const videoUrl = (p, dl) => `${S.dl.url.replace(/\/+$/, '')}/api/videos/${p.split('/').map(encodeURIComponent).join('/')}?token=${encodeURIComponent(S.dl.token)}${dl ? '&dl=1' : ''}`;
+const videoUrl = (p, dl) => `${S.dl.url.replace(/\/+$/, '')}/api/videos/${p.split('/').map(encodeURIComponent).join('/')}?${authQ(dlSrv(), S.dl.token)}${dl ? '&dl=1' : ''}`;
 function dlOptions() {
   return { mode: $('[name=mode]:checked').value, format: $('#dFmt').value, quality: $('#dQ').value, playlist: $('#dPl').checked, folder: $('#dDir').value.trim() || 'Scaricati', sponsorblock: $('#dSb').checked };
 }
@@ -4992,6 +4996,13 @@ view.addEventListener('click', async e => {
         if (ids.length > 200) await addSongsToPlaylist(id, ids.slice(200), S.active);
         toast(`Fatto: ${keep.length} brani.`); emit('playlists'); route(); break;
       }
+      case 'offerpl': {  // consenso del proprietario: una playlist pubblica va ai server collegati solo se la offre
+        const on = (await srvApi(srv(), '/api/rete/offerte')).includes(id);
+        if (!confirm(on ? 'Questa playlist è offerta ai server collegati: i loro utenti possono vederla e abbonarsi. Smettere di offrirla?'
+          : 'Offrire questa playlist ai server collegati? I loro utenti potranno vederla e abbonarsi (senza il tuo nome utente).')) break;
+        await srvApi(srv(), '/api/rete/offerta', { method: 'POST', body: JSON.stringify({ pid: id, on: !on }) });
+        toast(on ? 'Non più offerta ai server collegati.' : 'Offerta ai server collegati.'); break;
+      }
       case 'dirpl': { const r = $('[data-act="lmore"]')?.getBoundingClientRect(); PlDir.pick(id, r ? [r.left, r.bottom + 4] : [innerWidth / 2, innerHeight / 3]); break; }  // dal menu ⋯: vicino al suo tasto
       case 'delpl': if (confirm('Eliminare questa playlist? I brani restano in libreria.')) { await api('deletePlaylist', { id }); location.hash = '#/playlist'; } break;
       case 'upforce': { const u = Up.list[+el.dataset.i]; if (u) { u.force = true; u.status = 'in coda'; upRun(); } break; }
@@ -5344,7 +5355,7 @@ const Live = {
     const was = this.target; this.stop(); this.want = was;
     if (!this.on()) return Presence.clear();
     const s = srv(), hb = this.hb();
-    const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&token=${encodeURIComponent(s.session)}${hb ? '&hb=1' : ''}`);
+    const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&${authQ(s)}${hb ? '&hb=1' : ''}`);
     this.last = Date.now();
     es.onmessage = e => { this.last = Date.now(); try { this.recv(JSON.parse(e.data)); } catch {} };
     es.onopen = () => { this.fails = 0; this.last = Date.now(); this.sent = null; this.publish(); };

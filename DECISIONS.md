@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Il gettone del dispositivo negli indirizzi; playlist ai server collegati solo col consenso
+
+**Contesto:** voci 3.12 e 7.8 del piano. Il canale dal vivo (EventSource) e i video portavano la sessione nell'indirizzo (`?token=`): una credenziale che vale giorni, finita in cronologia e nei log dei proxy. `/api/lan/servers` e le Jam vicine mostravano a internet gli indirizzi della rete di casa. Ogni playlist pubblica andava a tutti i server collegati.
+**Scelta:** negli indirizzi senza intestazioni il client usa il gettone del dispositivo (`?k=`, già usato per audio e copertine: 12-24 ore, valido solo finché il dispositivo ha una sessione viva), con `authQ`; la sessione resta solo per i server vecchi senza gettone. Gli elenchi della rete di casa rispondono vuoti a chi non è in casa né su Tailscale. Una playlist pubblica va ai server collegati solo se il proprietario la offre (`fed_offerte` nelle impostazioni, `/api/rete/offerta`); al primo uso le pubbliche di allora restano offerte e i proprietari ricevono un avviso.
+**Alternative scartate:** un gettone nuovo apposta per il canale dal vivo (quello del dispositivo ha già scadenza, legame con la sessione e revoca: un secondo meccanismo uguale non aggiunge niente); rifiutare subito `?token=` (gli APK vecchi non aggiornati perderebbero il canale dal vivo); togliere l'offerta a tutte le pubbliche esistenti (romperebbe gli abbonamenti già fatti sugli altri server senza che il proprietario lo sappia).
+**Conseguenze:** un EventSource aperto resta aperto anche se il gettone scade nel frattempo; al primo ricollegamento con il gettone scaduto il server risponde 401 e il client rinnova sessione e gettone (`relogin`).
+**Da rivedere se:** tutti i client in uso hanno il gettone: allora `?token=` si può rifiutare del tutto.
+
 ## 2026-10-11 — Cartelle di playlist nelle preferenze; doppioni dei caricamenti per brano; avvisi esterni con un indirizzo
 
 **Contesto:** cartelle di playlist (voce 6.10), voci 5.10 e 4.7 del piano.

@@ -12,7 +12,8 @@ Armony - federazione: server Armony collegati fra loro (docs/FEDERAZIONE.md).
     file/<id>, cover/<id>, info/<id> il brano (Range), la copertina, dimensione e sha256; ?via=a,b a catena
     radio, radio/<id>, ora           Jam Radio: le definisce radio.py su questo blueprint (stesse firme)
   /api/fed/*             gestione, solo amministratori: impostazioni, inviti, collegamenti
-  /api/rete/*            per gli utenti: cerca, stream, cover, mappa; copia (permesso "download")
+  /api/rete/*            per gli utenti: cerca, stream, cover, mappa; copia (permesso "download");
+                         offerte (GET), offerta {pid, on} (POST): quali playlist pubbliche vanno ai server collegati
 
 Registrato da app.py con init(): usa da lì sessione HTTP, credenziali di Navidrome e coda dei lavori.
 """
@@ -1334,12 +1335,58 @@ def rete_copy():
 SUB_S = 600
 
 
+# ─── PERCHÉ un consenso a parte ───
+# «Pubblica» in Navidrome vuol dire visibile agli utenti di questo server; fino alla 0.32 bastava anche per finire su
+# tutti i server collegati. Ora va ai server collegati solo una playlist pubblica che il proprietario ha offerto. Le
+# pubbliche che c'erano restano offerte (altrimenti gli abbonamenti già fatti dagli altri server si rompevano) e i
+# proprietari ricevono un avviso che dice come toglierle.
+def offerte():
+    v = setting("offerte")
+    if v is not None:
+        return set(json.loads(v))
+    pls = (nd_get("getPlaylists").get("playlists") or {}).get("playlist") or []
+    ids = [p["id"] for p in pls if p.get("public")]
+    set_setting("offerte", json.dumps(ids))
+    for p in pls:
+        if p.get("public") and p.get("owner"):
+            A.notifiche.notifica(p["owner"], "sistema", f"«{p.get('name') or 'Playlist'}» resta offerta ai server collegati",
+                                 "Le playlist pubbliche ora vanno agli altri server solo se lo scegli: puoi toglierla dal menu ⋯ della playlist",
+                                 "#/playlist/" + p["id"], only_once="offerta:" + p["id"])
+    return set(ids)
+
+
 @bp.get("/fed/v1/playlist")
 def fed_playlists():
     pls = (nd_get("getPlaylists").get("playlists") or {}).get("playlist") or []
+    ok = offerte()
     # pubblica in Navidrome vuol dire per gli utenti di questo server: agli altri server niente nome utente del proprietario
     return jsonify(playlists=[{"id": p["id"], "name": p.get("name") or "Playlist", "songs": p.get("songCount") or 0,
-                               "comment": (p.get("comment") or "")[:300]} for p in pls if p.get("public")])
+                               "comment": (p.get("comment") or "")[:300]} for p in pls if p.get("public") and p["id"] in ok])
+
+
+@bp.get("/api/rete/offerte")
+def rete_offerte():
+    return jsonify(sorted(offerte()))
+
+
+@bp.post("/api/rete/offerta")
+def rete_offerta():
+    d = request.get_json(silent=True) or {}
+    pid = str(d.get("pid") or "")
+    if not A.ID_RE.match(pid):
+        return jsonify(error="Playlist non valida"), 400
+    try:
+        pl = nd_get("getPlaylist", id=pid)["playlist"]
+    except FedError:
+        return jsonify(error="Playlist non trovata"), 404
+    if not g.who["admin"] and (pl.get("owner") or "").lower() != (g.who.get("user") or "").lower():
+        return jsonify(error="Solo chi ha creato la playlist può offrirla ai server collegati"), 403
+    if d.get("on") and not pl.get("public"):
+        return jsonify(error="Prima rendi pubblica la playlist"), 400
+    ok = offerte()
+    (ok.add if d.get("on") else ok.discard)(pid)
+    set_setting("offerte", json.dumps(sorted(ok)))
+    return jsonify(ok=True, on=pid in ok)
 
 
 @bp.get("/fed/v1/playlist/<pid>")
@@ -1350,7 +1397,7 @@ def fed_playlist(pid):
         pl = nd_get("getPlaylist", id=pid)["playlist"]
     except FedError:
         return jsonify(error="Playlist non trovata"), 404
-    if not pl.get("public"):
+    if not pl.get("public") or pid not in offerte():
         return jsonify(error="Playlist non trovata"), 404
     entries = pl.get("entry") or []
     ids = [e["id"] for e in entries]
