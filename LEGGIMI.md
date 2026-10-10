@@ -74,11 +74,12 @@ Poi, in Armony, **Impostazioni → Server musicali → Indirizzo pubblico di que
 - **Cache dei brani**, come su Spotify: mentre ascolti, i prossimi brani della coda si scaricano per intero sul dispositivo (due col Wi-Fi, uno in rete mobile, nessuno con «risparmio dati»). Quando arriva il loro turno partono subito, anche se la rete va e viene, e riascoltarli non consuma dati. Si tengono fino al limite scelto in Impostazioni → Ascolto (1 GB di base, da «Spenta» a 5 GB), poi se ne vanno i meno recenti; lì c'è anche «Svuota la cache». Vale per quel dispositivo.
 
 ### Scoperta
+- **Cerca trova anche le playlist** (tue, collaborative e pubbliche) col nome che contiene quello che scrivi.
 - **Cerca anche fuori dalla libreria**: sotto i risultati di Cerca compare «Non in libreria» con i brani e gli album che non hai (da Deezer, che perdona anche gli errori di battitura). Tocca la copertina per sentire 30 secondi di anteprima, «Scarica» per averlo in libreria; gli album si aprono e si scaricano interi.
 - **Nuove uscite** in Home: i dischi usciti negli ultimi due mesi degli artisti che ascolti di più, non ancora in libreria.
 - **Popolari** dell'artista anche se Navidrome non è collegato a Last.fm: i brani più ascoltati secondo Deezer che hai in libreria.
 - **Cronologia** (Libreria → Cronologia): i brani che hai ascoltato, giorno per giorno.
-- **Testi sincronizzati** in stile karaoke. Tocchi una riga e la musica salta lì, e puoi correggere la sincronia di mezzo secondo alla volta. I testi arrivano dal server o, se non ci sono, da LRCLIB (si può disattivare).
+- **Testi sincronizzati** in stile karaoke (salvati insieme ai brani offline, quindi anche senza rete). Tocchi una riga e la musica salta lì, e puoi correggere la sincronia di mezzo secondo alla volta. I testi arrivano dal server o, se non ci sono, da LRCLIB (si può disattivare).
 - **Visualizzatore** circolare attorno al disco.
 - **Radio da un brano o da un artista**, basata su brani simili, genere e popolarità.
 - **Mix pronti**: casuale, preferiti, "Riscoperte" (brani che non ascolti da almeno due mesi), per decennio, per genere.
@@ -161,6 +162,8 @@ Minuti di ascolto, artisti, brani, album e generi preferiti, giorni consecutivi 
 
 ### Comodità
 **Notifiche.** La campanella (in alto a destra) raccoglie importazioni e album finiti, download singoli finiti o non riusciti, le Jam aperte dagli amici e i tuoi dispositivi nuovi da approvare; il numero dice quante sono da leggere e aprirle le segna come lette su tutti i tuoi dispositivi. In Impostazioni → Notifiche le fai arrivare anche come avvisi del telefono o del computer quando Armony non è in primo piano, scegliendo quali. Con l'app o il browser chiusi del tutto gli avvisi non arrivano (niente servizi push esterni): li ritrovi nella campanella.
+
+**Aggiungere a una playlist** come su Spotify: le usate di recente in cima, una ricerca se sono tante, e se il brano c'è già Armony lo dice e ti lascia saltare i doppioni. Nei **Preferiti** «Aggiunti di recente» segue il momento in cui hai messo il cuore; la playlist importata «Brani che ti piacciono» resta allineata: i brani arrivati dopo l'importazione prendono il cuore da soli.
 
 **Riordinare una playlist.** Nel menu ⋯ della playlist, «Riordina i brani»: trascini la maniglia di ogni brano (col dito o col mouse, oppure frecce su e giù dalla tastiera) e «Fatto». Se la playlist era importata da Spotify, da lì in poi vale il tuo ordine e i brani nuovi arrivano in fondo.
 

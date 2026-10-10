@@ -278,7 +278,7 @@ const norm = (x, sid = S.active) => ({
   id: x.id, title: x.title || 'Senza titolo', artist: x.displayArtist || x.artist || 'Artista sconosciuto',
   // "[Unknown Album]" è il segnaposto di Navidrome per i file senza album: non si mostra
   artistId: x.artistId, album: x.album === '[Unknown Album]' ? '' : x.album || '', albumId: x.albumId, duration: x.duration || 0, track: x.track,
-  coverArt: x.coverArt, starred: !!x.starred, suffix: x.suffix, bitRate: x.bitRate, genre: x.genre, year: x.year, created: x.created,
+  coverArt: x.coverArt, starred: !!x.starred, starredAt: x.starred || undefined, suffix: x.suffix, bitRate: x.bitRate, genre: x.genre, year: x.year, created: x.created,
   rg: x.replayGain ? { trackGain: x.replayGain.trackGain, albumGain: x.replayGain.albumGain, trackPeak: x.replayGain.trackPeak, albumPeak: x.replayGain.albumPeak } : null,
   serverId: sid
 });
@@ -1179,14 +1179,21 @@ async function vSearch() {
         ${top.length ? `<section class="hbest-songs"><div class="hsec"><h2>Brani</h2>${so.length > 4 ? `<button class="hsec-more" id="allSongs">Mostra tutti (${so.length})</button>` : ''}</div><div id="songsBox">${songList(top)}</div></section>` : ''}
         </div>
         ${ar.length ? `<div class="hsec"><h2>Artisti</h2></div><div class="hgrid shelf">${ar.map(lArtistCard).join('')}</div>` : ''}
-        ${al.length ? `<div class="hsec"><h2>Album</h2></div>${albumGrid(al, { strip: true })}` : ''}<div id="catRes"></div><div id="netRes"></div></div>`;
-      catSearch(v, n, q); netSearch(v, n, q);
+        ${al.length ? `<div class="hsec"><h2>Album</h2></div>${albumGrid(al, { strip: true })}` : ''}<div id="plRes"></div><div id="catRes"></div><div id="netRes"></div></div>`;
+      plSearch(V, n, q, v); catSearch(v, n, q); netSearch(v, n, q);
       $('#allSongs')?.addEventListener('click', e => { $('#songsBox').innerHTML = listActions() + songList(so); e.target.remove(); $('#res .hbest-wrap').classList.add('open'); });
     } catch (e) { $('#res').innerHTML = `<p class="sub">${esc(e.message)}</p>`; }
   };
   q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 260); });
   q.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(t); run(); } });
   run();
+}
+// le playlist (tue, collaborative e pubbliche) col nome che contiene la ricerca, come su Spotify
+async function plSearch(V, n, q, v) {
+  let pls; try { pls = arr((await api('getPlaylists')).playlists.playlist); } catch { return; }
+  const box = $('#plRes'); if (!box || q.value.trim() !== v || stale(n)) return;
+  const hit = pls.filter(p => cleanTxt(p.name).includes(V)).slice(0, 12);
+  if (hit.length) box.innerHTML = `<div class="hsec"><h2>Playlist</h2></div><div class="lcards shelf">${hit.map(lPlCard).join('')}</div>`;
 }
 /* ---- fuori dalla libreria (capacità "catalogo", /api/catalogo): brani e album di Deezer, anteprima e "Scarica" ---- */
 async function catSearch(v, n, q) {
@@ -1478,12 +1485,28 @@ async function impStatus(id, n) {
     ${st.failed?.length ? `<details class="jerr"><summary>Vedi i non trovati</summary>${st.failed.map(x => `<div><b>${esc(x.title)}</b><small>${esc(x.error || '')}</small></div>`).join('')}</details>` : ''}</div>`;
 }
 
+// «Brani che ti piacciono» importata da Spotify: i brani che arrivano dopo l'importazione entrano nella playlist ma non
+// prendevano il cuore. Aprendo i Preferiti (al più una volta l'ora) si mette il cuore a quelli che mancano
+async function likedSync(have) {
+  if (Date.now() - (store.get('likedSync', 0)) < 3600e3) return; store.set('likedSync', Date.now());
+  try {
+    const me = (srv()?.user || '').toLowerCase(), on = new Set(have.map(t => t.id));
+    const pls = arr((await api('getPlaylists')).playlists.playlist).filter(p => (p.owner || '').toLowerCase() === me && /^(liked[ _]songs|brani che ti piacciono)$/i.test(p.name.trim()));
+    let add = [];
+    for (const p of pls) add = add.concat(arr((await api('getPlaylist', { id: p.id })).playlist.entry).map(x => x.id).filter(id => !on.has(id)));
+    add = [...new Set(add)];
+    for (let i = 0; i < add.length; i += 100) await api('star', { id: add.slice(i, i + 100) });
+    if (add.length) { toast(`${add.length} brani di «Brani che ti piacciono» aggiunti ai Preferiti.`); if (location.hash.startsWith('#/preferiti')) route(); }
+  } catch {}
+}
 async function vStarred() {
   if (!srv()) return noServer();
   const n = Scene.nav;
   const r = (await api('getStarred2')).starred2;
   if (stale(n)) return;
   const songs = arr(r.song).map(x => norm(x)), ar = arr(r.artist), al = arr(r.album), fopts = { empty: 'Tocca il cuore accanto a un brano per ritrovarlo qui.', sortable: true };
+  songs.forEach(t => { if (t.starredAt) t.created = t.starredAt; });  // «Aggiunti di recente» = quando hai messo il cuore, come su Spotify
+  likedSync(songs);
   view.innerHTML = lPhero({ kind: 'Raccolta', title: 'Preferiti', tile: 'linear-gradient(135deg,#4a2fbd,#c7a0ff)', art: ic('heart', true),
       meta: `${songs.length} brani · ${al.length} album · ${ar.length} artisti` }) +
     lActionBar({ offline: false, extra: srv().local ? '' : pinBtn('preferiti'), more: [{ act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' }] }) +
@@ -1593,7 +1616,8 @@ const Offline = {
         const blob = await r.blob(); if (blob.size < 20000) throw 0;
         let cover = null;
         if (t.coverArt) { try { const c = await fetch(coverUrl(t.coverArt, 300, t.serverId)); if (c.ok) cover = await c.blob(); } catch {} }
-        await DB.put('offline', { key: key(t), track: t, blob, cover, size: blob.size, q: P.offlineQ, added: Date.now() });
+        let lyr = null; try { lyr = await Lyrics.get(t); } catch {}  // il testo resta disponibile anche senza rete
+        await DB.put('offline', { key: key(t), track: t, blob, cover, lyr, size: blob.size, q: P.offlineQ, added: Date.now() });
         this.keys.add(key(t)); done++;
       } catch { fail++; }
     }
@@ -1793,7 +1817,9 @@ const Lyrics = {
   cache: new Map(),
   async get(t) {
     const k = key(t); if (this.cache.has(k)) return this.cache.get(k);
-    let res = null; const s = srv(t.serverId);
+    // salvato offline insieme al brano: senza rete il testo c'è lo stesso
+    if (Offline.has(t)) { try { const r = await DB.get('offline', key(t)); if (r?.lyr) { this.cache.set(k, r.lyr); return r.lyr; } } catch {} }
+    let res = null, fail = false; const s = srv(t.serverId);
     if (s) {
       try {
         const L = arr((await api('getLyricsBySongId', { id: t.id }, s)).lyricsList?.structuredLyrics);
@@ -1804,19 +1830,22 @@ const Lyrics = {
     }
     if (!res && P.lyricsOnline) {
       try {
+        // il primo artista: «A, B» non trova niente nella ricerca esatta di LRCLIB
+        const a1 = String(t.artist || '').split(/\s*[,•&]\s*|\s+feat\.?\s+/i)[0];
         const u = new URL('https://lrclib.net/api/get');
-        u.search = new URLSearchParams({ artist_name: t.artist, track_name: t.title, album_name: t.album || '', duration: Math.round(t.duration || 0) });
-        let r = await fetch(u);
-        if (r.status === 404) { const s2 = new URL('https://lrclib.net/api/search'); s2.search = new URLSearchParams({ artist_name: t.artist, track_name: t.title }); r = await fetch(s2); }
+        u.search = new URLSearchParams({ artist_name: a1, track_name: t.title, album_name: t.album || '', duration: Math.round(t.duration || 0) });
+        let r = await fetch(u, { signal: AbortSignal.timeout?.(10000) });
+        if (r.status === 404) { const s2 = new URL('https://lrclib.net/api/search'); s2.search = new URLSearchParams({ artist_name: a1, track_name: t.title }); r = await fetch(s2, { signal: AbortSignal.timeout?.(10000) }); }
         if (r.ok) {
-          let j = await r.json(); if (Array.isArray(j)) j = j.find(x => x.syncedLyrics) || j[0];
+          // nella ricerca di riserva solo un risultato col titolo giusto e la durata entro 3 s: prima prendeva il primo, anche di un altro brano
+          let j = await r.json(); if (Array.isArray(j)) { const T = cleanTxt(t.title), ok = x => cleanTxt(x.trackName || '') === T && (!t.duration || !x.duration || Math.abs(x.duration - t.duration) <= 3); j = j.find(x => ok(x) && x.syncedLyrics) || j.find(ok); }
           if (j?.instrumental) res = { instrumental: true };
           else if (j?.syncedLyrics) res = { ...parseLrc(j.syncedLyrics), src: 'LRCLIB' };
           else if (j?.plainLyrics) res = { synced: false, lines: j.plainLyrics.split('\n').map(v => ({ t: null, v })), src: 'LRCLIB' };
         }
-      } catch {}
+      } catch { fail = true; }  // rete giù: non si ricorda "niente testo", si riprova la prossima volta
     }
-    this.cache.set(k, res); return res;
+    if (!fail) this.cache.set(k, res); return res;
   }
 };
 
@@ -2337,6 +2366,11 @@ const Wave = {
 };
 function paintTime() {
   const d = playDur(), p = playPos();
+  // a schermo spento niente barra, onda e testi da ridisegnare: solo posizione per il sistema, l'app e gli altri dispositivi
+  if (document.hidden) {
+    if ('mediaSession' in navigator && d && navigator.mediaSession.setPositionState) { try { navigator.mediaSession.setPositionState({ duration: d, position: Math.min(p, d), playbackRate: P.speed }); } catch {} }
+    NativeMedia.sync(); Live.publish(); return;
+  }
   if (!seeking) { $('#seek').value = d ? p / d * 1000 : 0; $('#tCur').textContent = fmt(p); }
   rangeFill($('#seek'));
   $('#tDur').textContent = fmt(d);
@@ -3377,13 +3411,21 @@ async function addToPlaylistDialog(tracks) {
     const sid = tracks[0].serverId;
     // le mie e quelle in cui collaboro (le altre pubbliche si vedono ma non si modificano)
     const me = (srv(sid)?.user || '').toLowerCase(), pls = arr((await api('getPlaylists', {}, srv(sid))).playlists.playlist).filter(p => !p.owner || p.owner.toLowerCase() === me || Amici.collab.has(p.id) || access().admin);
+    pls.sort((a, b) => String(b.changed || '').localeCompare(String(a.changed || '')));  // le usate di recente in cima
     d.innerHTML = `<h3>Aggiungi ${tracks.length > 1 ? tracks.length + ' brani' : 'a playlist'}</h3>
-      <div style="max-height:45vh;overflow:auto">${pls.map(p => `<div class="list-item" data-pl="${esc(p.id)}"><span class="grow"><b>${esc(p.name)}</b>${Amici.collab.has(p.id) ? `<small>collaborativa · di ${esc(p.owner)}</small>` : ''}</span><small>${p.songCount}</small></div>`).join('')}</div>
+      ${pls.length > 6 ? '<input type="search" id="apQ" placeholder="Cerca una playlist" style="margin-bottom:8px">' : ''}
+      <div style="max-height:45vh;overflow:auto" id="apList">${pls.map(p => `<div class="list-item" data-pl="${esc(p.id)}"><span class="grow"><b>${esc(p.name)}</b>${Amici.collab.has(p.id) ? `<small>collaborativa · di ${esc(p.owner)}</small>` : ''}</span><small>${p.songCount}</small></div>`).join('')}</div>
       <div class="row" style="margin-top:12px;flex-wrap:nowrap"><input type="text" id="npName" placeholder="Nuova playlist"><button class="btn primary" id="npGo">Crea</button></div>
       <div class="row" style="margin-top:10px"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
     const ids = tracks.map(t => t.id);
+    $('#apQ')?.addEventListener('input', e => { const q = cleanTxt(e.target.value); d.querySelectorAll('#apList [data-pl]').forEach(el => { el.hidden = !!q && !cleanTxt(el.textContent).includes(q); }); });
     d.querySelectorAll('[data-pl]').forEach(el => el.onclick = async () => {
       try {
+        // come Spotify: avviso se ci sono già, e si può saltare i doppioni
+        const there = new Set(arr((await api('getPlaylist', { id: el.dataset.pl }, srv(sid))).playlist.entry).map(x => x.id));
+        const dup = ids.filter(i => there.has(i));
+        if (dup.length === ids.length) { d.close(); return toast(ids.length === 1 ? 'È già nella playlist.' : 'Sono già tutti nella playlist.'); }
+        if (dup.length && !confirm(`${dup.length === 1 ? 'Un brano è' : dup.length + ' brani sono'} già nella playlist.\n\nOK = aggiungili comunque, Annulla = salta i doppioni`)) ids.splice(0, ids.length, ...ids.filter(i => !there.has(i)));
         if (Amici.collab.has(el.dataset.pl)) await srvApi(srv(sid), '/api/collab/aggiungi', { method: 'POST', body: JSON.stringify({ pid: el.dataset.pl, ids }) });
         else await addSongsToPlaylist(el.dataset.pl, ids, sid);
         d.close(); toast('Aggiunto alla playlist.');
@@ -3528,7 +3570,12 @@ const Notif = {
     this.system(n);
   },
   // avviso di sistema: notifica del telefono nell'app, del browser sul web (solo con la pagina nascosta)
+  // più avvisi in pochi secondi (un album che finisce brano per brano, aggiunte in una playlist) diventano uno solo
   system(n) {
+    (this.burst ||= []).push(n); clearTimeout(this.bt);
+    this.bt = setTimeout(() => { const b = this.burst; this.burst = []; this.show(b.length === 1 ? b[0] : { id: b[b.length - 1].id, title: `${b.length} nuove notifiche`, body: b.map(x => x.title).slice(0, 4).join(' · '), link: '#/notifiche' }); }, 4000);
+  },
+  show(n) {
     const F = NATIVE && window.Capacitor?.Plugins?.ArmonyFiles;
     if (F) { F.notify({ id: n.id, title: n.title, body: n.body || '', link: n.link || '' }).catch(() => {}); return; }
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
