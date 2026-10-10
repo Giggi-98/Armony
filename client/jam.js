@@ -650,9 +650,7 @@ async function vJam(sub = '') {
   }
   if (!Jam.role) {
     const canRelay = SUBTLE && !!signalBase() && !!srv(), defNet = canRelay ? 'server' : 'lan';
-    const radios = [...Radio.list.values()].filter(x => x.on).length;
     view.innerHTML = `<h1>Jam</h1><p class="sub">Ascoltate la stessa musica nello stesso momento, ognuno dal suo telefono. Proponete brani, votate, chattate.</p>
-    ${Radio.ok() ? `<a class="hbanner" href="#/radio">${ic('radio')}<span class="grow"><small>Jam Radio${radios ? ` · ${radios} in onda` : ''}</small><b>Stazioni sempre accese: sintonizzati</b></span>${ic('chevr')}</a>` : ''}
     <div class="grid2" style="align-items:start">
       <div class="panel stack"><h3>Crea una Jam</h3>
         <label class="f">Il tuo nome<input type="text" id="jName" value="${esc(P.nick)}" maxlength="30"></label>

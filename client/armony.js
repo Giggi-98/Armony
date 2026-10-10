@@ -92,8 +92,8 @@ const I = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
   play: '<path d="M7 4l13 8-13 8z" fill="currentColor"/>',
   pause: '<path d="M7 4h4v16H7zM13 4h4v16h-4z" fill="currentColor"/>',
-  prev: '<path d="M18 5L9 12l9 7zM6 5v14"/>',
-  next: '<path d="M6 5l9 7-9 7zM18 5v14"/>',
+  prev: '<path d="M19 6.5 10 12l9 5.5z" fill="currentColor"/><path d="M5.5 6v12" stroke-width="2.6"/>',
+  next: '<path d="M5 6.5 14 12l-9 5.5z" fill="currentColor"/><path d="M18.5 6v12" stroke-width="2.6"/>',
   shuffle: '<path d="M3 7h3c6 0 6 10 12 10h3M3 17h3c2 0 3-1.2 4-3M14 10c1-1.8 2-3 4-3h3M18 4l3 3-3 3M18 14l3 3-3 3"/>',
   repeat: '<path d="M4 11V9a3 3 0 0 1 3-3h13M17 3l3 3-3 3M20 13v2a3 3 0 0 1-3 3H4M7 21l-3-3 3-3"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -337,29 +337,36 @@ function flyToQueue(from) {
   f.firstChild.animate([{ transform: 'translateY(0) scale(1)', opacity: 1 }, { transform: `translateY(${b.top + b.height / 2 - y0}px) scale(.6)`, opacity: .9 }], { ...o, easing: 'cubic-bezier(.6,0,.9,.6)' })
     .finished.then(() => { f.remove(); q.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 300, easing: 'cubic-bezier(.2,.8,.2,1)' }); });
 }
-// play/pausa: le due metà del triangolo diventano le due barre (stessa sequenza di punti, la forma si trasforma)
-const PP = { play: ['M7 4L13.5 8L13.5 16L7 20Z', 'M13.5 8L20 12L20 12L13.5 16Z'], pause: ['M7 4L11 4L11 20L7 20Z', 'M13 4L17 4L17 20L13 20Z'] };
+// play/pausa: le due metà del triangolo diventano le due barre (stessa sequenza di punti, la forma si trasforma).
+// Il contorno da 2 px arrotonda gli spigoli e allarga ogni forma di 1 px per lato: le barre della pausa sono larghe
+// 4,5 px con 4,5 px di vuoto fra loro, il triangolo sta un poco a destra del centro perché all'occhio sembri centrato
+const PP = { play: ['M8 5.5L13.25 8.75L13.25 15.25L8 18.5Z', 'M13.25 8.75L18.5 12L18.5 12L13.25 15.25Z'], pause: ['M6.25 6L8.75 6L8.75 18L6.25 18Z', 'M15.25 6L17.75 6L17.75 18L15.25 18Z'] };
 
 /* ================= router ================= */
 const NAV = [
   ['home', 'Home', 'home'], ['cerca', 'Cerca', 'search'], ['libreria', 'Libreria', 'lib'], ['playlist', 'Playlist', 'list'],
-  ['preferiti', 'Preferiti', 'heart'], ['jam', 'Jam', 'jam'], ['amici', 'Amici', 'friends'], ['rete', 'Rete', 'globe'], ['offline', 'Offline', 'offline'],
+  ['preferiti', 'Preferiti', 'heart'], ['jam', 'Jam', 'jam'], ['radio', 'Radio', 'radio'], ['amici', 'Amici', 'friends'], ['rete', 'Rete', 'globe'], ['offline', 'Offline', 'offline'],
   ['statistiche', 'Statistiche', 'stats'], ['scarica', 'Scarica', 'down'], ['impostazioni', 'Impostazioni', 'gear']
 ];
 const view = $('#view');
-const ROUTE_PARENT = { album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria', radio: 'jam' };
-// su telefono: quattro sezioni nella barra in basso, le altre nel foglio "Altro"
-const TABS = ['home', 'cerca', 'libreria', 'jam'];
-const MORE = [...NAV.map(n => n[0]).filter(h => !TABS.includes(h)), 'tasti'];
+const ROUTE_PARENT = { album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria' };
+// su telefono: fino a quattro sezioni nella barra in basso (scelte in Impostazioni → Aspetto, o tenendo premuta la barra),
+// le altre nel foglio "Altro". Si salvano su questo dispositivo; una sezione che non esiste più riporta al predefinito
+const TABS_DEF = ['home', 'cerca', 'libreria', 'jam'];
+const tabsOf = () => { const t = store.get('tabs', null); return Array.isArray(t) && t.length && t.length <= 4 && new Set(t).size === t.length && t.every(h => NAV.some(n => n[0] === h)) ? t : TABS_DEF; };
+const inMore = h => h === 'tasti' || (NAV.some(n => n[0] === h) && !tabsOf().includes(h));
 let viewTimers = [];
 const viewInterval = (fn, ms) => viewTimers.push(setInterval(fn, ms));
+function markNav(r) {
+  $$('#nav a, #tabs a').forEach(a => { const on = a.dataset.r === r || ROUTE_PARENT[r] === a.dataset.r; a.classList.toggle('on', on); on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'); });
+  $('#tabMore')?.classList.toggle('on', inMore(ROUTE_PARENT[r] || r));
+}
 async function route() {
   viewTimers.forEach(clearInterval); viewTimers = [];
   emit('route');
   const [r = 'home', ...rest] = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
   const id = rest.join('/');
-  $$('#nav a, #tabs a').forEach(a => { const on = a.dataset.r === r || ROUTE_PARENT[r] === a.dataset.r; a.classList.toggle('on', on); on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'); });
-  $('#tabMore')?.classList.toggle('on', MORE.includes(ROUTE_PARENT[r] || r));
+  markNav(r);
   $$('#sidePl a').forEach(a => a.classList.toggle('on', r === 'playlist' && a.dataset.pl === id));
   const fn = {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
@@ -859,6 +866,7 @@ const recentQ = {
   add(q) { q = q.trim(); if (q.length < 2) return; store.set('searches', [q, ...this.get().filter(x => x.toLowerCase() !== q.toLowerCase())].slice(0, 12)); },
   del(q) { store.set('searches', this.get().filter(x => x !== q)); }
 };
+let searchFocus = false;  // la lente in alto (telefono): Cerca si apre con il campo già pronto
 async function vSearch() {
   if (!srv()) return noServer();
   const n = Scene.nav;
@@ -867,7 +875,8 @@ async function vSearch() {
     <div id="res"></div>`;
   let t;
   const q = $('#q'); q.value = sessionStorage.getItem('armony:q') || '';
-  if (!NATIVE && matchMedia('(pointer:fine)').matches) q.focus();
+  if (searchFocus || (!NATIVE && matchMedia('(pointer:fine)').matches)) q.focus();
+  searchFocus = false;
   const L1 = r => arr(r?.albumList2?.album)[0];
   const tile = (label, attrs, k) => `<a class="htile" ${attrs} data-k="${esc(k)}" style="--th:${tileColor(label)}" ${attrs.startsWith('href') ? '' : 'role="link" tabindex="0"'}><b>${esc(label)}</b><span class="ht-art"></span></a>`;
   // aprire o ascoltare un risultato salva la ricerca fra le recenti
@@ -2678,7 +2687,8 @@ function vSettings() {
     : grp('app', 'App Android', 'apk app android telefono scarica installa qr', '<div class="panel" id="apkBox"><p class="sub">Controllo…</p></div>')}
   ${access().admin ? grp('aggiornamenti', 'Aggiornamenti', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>') : ''}
 
-  ${grp('aspetto', 'Aspetto', 'tema chiaro scuro automatico colori', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`)}
+  ${grp('aspetto', 'Aspetto', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+    <div class="tbset"><span class="grow"><b>Barra in basso</b><small>${[...tabsOf().map(h => NAV.find(n => n[0] === h)[1]), 'Altro'].join(' · ')}</small></span><button class="btn sm" data-act="tabsedit">Personalizza</button></div>`)}
 
   ${grp('backup', 'Backup e trasferimento', 'esporta importa file amico scorciatoie tastiera', `<p class="sub">Sposta tutto su un altro telefono, o passa la configurazione a un amico in dieci secondi.</p>
   <div class="row"><button class="btn" data-act="exportset">Esporta impostazioni</button><button class="btn" data-act="importset">Importa impostazioni</button><a class="btn" href="#/tasti">Scorciatoie da tastiera</a></div>`)}
@@ -3048,12 +3058,56 @@ function ctxDialog() {
 function moreSheet() {
   const d = $('#dlg'); d.className = 'sheet';
   const cur = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
-  const items = NAV.filter(([h]) => !TABS.includes(h));
+  const items = NAV.filter(([h]) => inMore(h));
   if (matchMedia('(any-hover:hover)').matches) items.push(['tasti', 'Scorciatoie da tastiera', 'more']);
   const dot = h => h === 'amici' && Presence.on() && Presence.playingCount() ? '<i class="dot pdot" aria-label="qualcuno sta ascoltando"></i>' : '';
   d.innerHTML = `<div class="head"><b>Altre sezioni</b></div>${items.map(([h, l, i]) => `<a class="mi ${h === cur ? 'on' : ''}" href="#/${h}" ${h === cur ? 'aria-current="page"' : ''}>${ic(i)}${l}${dot(h)}</a>`).join('')}`;
   d.querySelectorAll('a').forEach(a => a.onclick = () => d.close());
   closeOutside(d); d.showModal();
+}
+// barra in basso del telefono: le sezioni scelte (tabsOf) e "Altro", sempre ultimo
+function paintTabs() {
+  const navOf = h => NAV.find(n => n[0] === h);
+  $('#tabs').innerHTML = tabsOf().map(navOf).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span>${l}</span></a>`).join('')
+    + `<button type="button" id="tabMore" aria-haspopup="dialog">${ic('more')}<span>Altro</span></button>`;
+  $('#tabMore').onclick = moreSheet;
+  markNav(location.hash.replace(/^#\/?/, '').split('/')[0] || 'home');
+  Presence.paint();
+}
+// scegliere e ordinare le voci della barra: frecce (accessibili, niente trascinamento da indovinare), anteprima in cima
+function tabsEditor() {
+  const d = $('#dlg'); d.className = 'sheet tbed';
+  d.innerHTML = `<div class="head" tabindex="-1" autofocus><span class="grow"><b style="display:block">Barra in basso</b><small style="color:var(--muted)">Fino a quattro sezioni, poi Altro con tutte le altre. Vale su questo dispositivo.</small></span></div>
+    <div class="tbprev" id="tbPrev" aria-hidden="true"></div>
+    <p class="sh" id="tbInH">Nella barra</p><div id="tbIn" role="list" aria-labelledby="tbInH"></div>
+    <p class="sh" id="tbOutH"></p><div class="tbout" id="tbOut" role="list" aria-labelledby="tbOutH"></div>
+    <div class="row tbfoot"><button class="btn" id="tbReset">Ripristina</button><button class="btn primary" id="tbOk">Fatto</button></div>`;
+  const navOf = h => NAV.find(n => n[0] === h), save = t => { store.set('tabs', t); paintTabs(); paint(); };
+  const paint = () => {
+    const t = tabsOf(), full = t.length >= 4, out = NAV.filter(([h]) => !t.includes(h));
+    const sum = $('.tbset small'); if (sum) sum.textContent = [...t.map(h => navOf(h)[1]), 'Altro'].join(' · ');
+    $('#tbPrev').innerHTML = t.map(navOf).map(([, l, i]) => `<span>${ic(i)}<small>${l}</small></span>`).join('') + `<span>${ic('more')}<small>Altro</small></span>`;
+    keyed($('#tbIn'), t.map(navOf).map(([h, l, i], k) => ({ k: h, cls: 'tbrow', attrs: { role: 'listitem' }, html: `${ic(i)}<b class="grow">${l}</b>
+      <button class="icon-btn" data-x="up" aria-label="Sposta ${l} a sinistra"${k ? '' : ' disabled'}>${ic('up')}</button><button class="icon-btn" data-x="dn" aria-label="Sposta ${l} a destra"${k < t.length - 1 ? '' : ' disabled'}>${ic('dn')}</button>
+      <button class="icon-btn" data-x="del" aria-label="Togli ${l} dalla barra"${t.length > 1 ? '' : ' disabled'}>${ic('close')}</button>` })));
+    $('#tbOutH').textContent = full ? 'In Altro · la barra è piena: togline una per aggiungerne un\'altra' : 'In Altro · tocca per aggiungere alla barra';
+    keyed($('#tbOut'), out.map(([h, l, i]) => ({ k: h, attrs: { role: 'listitem' }, html: `<button class="chip" data-x="add" aria-label="Aggiungi ${l} alla barra"${full ? ' disabled' : ''}>${ic(i)}${l}</button>` })));
+  };
+  const act = e => {
+    const b = e.target.closest('[data-x]'); if (!b) return;
+    const h = b.closest('[data-k]').dataset.k, x = b.dataset.x, t = [...tabsOf()], k = t.indexOf(h);
+    if (x === 'add') t.push(h); else if (x === 'del') t.splice(k, 1);
+    else { const j = x === 'up' ? k - 1 : k + 1; [t[k], t[j]] = [t[j], t[k]]; }
+    save(t);
+    // il tasto premuto può essere stato ridisegnato o essersi spostato: il fuoco resta sulla stessa sezione
+    if (!d.contains(document.activeElement) || document.activeElement.disabled) d.querySelector(`[data-k="${h}"] [data-x="${x}"]:not(:disabled)`)?.focus() || d.querySelector(`[data-k="${h}"] button:not(:disabled)`)?.focus();
+  };
+  $('#tbReset').onclick = () => { store.set('tabs', null); paintTabs(); paint(); };
+  $('#tbOk').onclick = () => d.close();
+  [$('#tbIn'), $('#tbOut')].forEach(b => window.autoAnimate?.(b));
+  paint();
+  closeOutside(d); const out = d.onclick; d.onclick = e => { out(e); act(e); };  // prima il tocco fuori: il foglio cambia misura
+  d.showModal();
 }
 function qualityDialog() {
   const d = $('#dlg'); d.className = 'sheet';
@@ -3163,6 +3217,7 @@ view.addEventListener('click', async e => {
       }
       case 'artistradio': setQueue((await artistRadio(id)).map(x => norm(x)), 0, true); break;
       case 'rnew': Radio.create(); break;
+      case 'tabsedit': tabsEditor(); break;
       case 'qup': if (i > 0) { [S.queue[i - 1], S.queue[i]] = [S.queue[i], S.queue[i - 1]]; if (S.index === i) S.index--; else if (S.index === i - 1) S.index++; persistQueue(); vQueue(); } break;
       case 'qdn': if (i < S.queue.length - 1) { [S.queue[i + 1], S.queue[i]] = [S.queue[i], S.queue[i + 1]]; if (S.index === i) S.index++; else if (S.index === i + 1) S.index--; persistQueue(); vQueue(); } break;
       case 'qrm':
@@ -3812,8 +3867,8 @@ const Presence = {
         `<button class="pgo" data-pact="open">${pavatar(e)}<span class="grow"><b>${esc(pname(e))}${peq(e.playing)}</b><small>${e.playing ? '' : 'In pausa · '}${e.radio ? `Radio «${esc(e.radio.name)}» · ` : ''}${esc(t.title)} · ${esc(t.artist)}</small></span></button>
         <button class="icon-btn" data-pact="listen" aria-label="Ascolta anche tu" title="Ascolta anche tu">${ic('headphones')}</button>`, attrs: { 'data-pk': pkey(e) } }; }));
     }
-    // puntino su Amici: nella barra laterale e, sul telefono, su "Altro" (Amici sta lì)
-    $$('#nav a[data-r="amici"], #tabMore').forEach(a => { const d = a.querySelector(':scope>.dot'); if (playing.length && !d) a.insertAdjacentHTML('beforeend', '<i class="dot pdot" aria-hidden="true"></i>'); else if (!playing.length && d) d.remove(); });
+    // puntino su Amici: nella barra laterale e, sul telefono, sulla sua voce in basso o su "Altro" se Amici sta lì
+    $$(`#nav a[data-r="amici"], ${inMore('amici') ? '#tabMore' : '#tabs a[data-r="amici"]'}`).forEach(a => { const d = a.querySelector(':scope>.dot'); if (playing.length && !d) a.insertAdjacentHTML('beforeend', '<i class="dot pdot" aria-hidden="true"></i>'); else if (!playing.length && d) d.remove(); });
     this.paintView(ppl, playing);
     this.progress();
     // ogni secondo l'avanzamento; ogni 30 secondi un giro intero (chi è in pausa da troppo sparisce)
@@ -3943,9 +3998,9 @@ async function sidePlaylists() {
 async function boot() {
   $('#nav').innerHTML = NAV.map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
   Bus.addEventListener('playlists', sidePlaylists); sidePlaylists();
-  $('#tabs').innerHTML = NAV.filter(([h]) => TABS.includes(h)).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span>${l}</span></a>`).join('')
-    + `<button type="button" id="tabMore" aria-haspopup="dialog">${ic('more')}<span>Altro</span></button>`;
-  $('#tabMore').onclick = moreSheet;
+  paintTabs();
+  $('#tabs').oncontextmenu = e => { e.preventDefault(); tabsEditor(); };  // tenere premuta la barra la personalizza
+  $('#hSearch').onclick = e => { if (location.hash.startsWith('#/cerca')) { e.preventDefault(); $('#q')?.focus(); } else searchFocus = true; };
   Wave.init();
   Engine.init(); wirePlayer();
   await Offline.init(); await Local.init();
