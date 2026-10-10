@@ -512,6 +512,8 @@ function lActionBar({ play = { act: 'playall' }, shuffle = { act: 'shuffleall' }
     ${extra}${lMoreItems.length ? `<button class="icon-btn ab" data-act="lmore" aria-label="Altre azioni" title="Altro">${ic('more')}</button>` : ''}
   </div>`;
 }
+// "sempre offline" (OffPin) al posto del semplice salvataggio, per playlist e Preferiti
+const pinBtn = pid => { const on = OffPin.has(pid); return `<button class="icon-btn ab${on ? ' on' : ''}" data-act="offpin" data-id="${esc(pid)}" aria-pressed="${on}" aria-label="${on ? 'Sempre offline: attivo' : 'Tieni sempre offline'}" title="${on ? 'Sempre offline' : 'Tieni sempre offline'}">${ic('offline')}</button>`; };
 // il foglio "⋯": ogni voce ripete la sua azione come un clic nella pagina (la delegazione è su #view)
 function lMore() {
   const d = $('#dlg'); d.className = 'sheet';
@@ -1115,7 +1117,7 @@ async function vPlaylist(id) {
   Glow.show(coverUrl(p.coverArt, 300), 'album');
   view.innerHTML = lPhero({ kind: p.public ? 'Playlist condivisa' : 'Playlist', title: p.name, ph: p.coverArt, art: p.songCount ? imgTag(p.coverArt, 500) : ic('list'),
       meta: `${p.comment ? `<span class="phero-desc">${esc(p.comment)}</span>` : ''}${p.owner ? `<b>${esc(p.owner)}</b> · ` : ''}<span id="lCount">${count(p)}</span>` }) +
-    lActionBar({ more: [
+    lActionBar({ offline: false, extra: srv().local ? '' : pinBtn(id), more: [
       { act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' },
       !srv().local && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: p.name } },
       { act: 'exportpl', label: 'Esporta (M3U, JSON, CSV)', icon: 'down', data: { id } },
@@ -1168,7 +1170,7 @@ async function vStarred() {
   const songs = arr(r.song).map(x => norm(x)), ar = arr(r.artist), al = arr(r.album);
   view.innerHTML = lPhero({ kind: 'Raccolta', title: 'Preferiti', tile: 'linear-gradient(135deg,#4a2fbd,#c7a0ff)', art: ic('heart', true),
       meta: `${songs.length} brani · ${al.length} album · ${ar.length} artisti` }) +
-    lActionBar({ more: [{ act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' }] }) +
+    lActionBar({ offline: false, extra: srv().local ? '' : pinBtn('preferiti'), more: [{ act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' }] }) +
     `<div id="lList">${songList(songs, { empty: 'Tocca il cuore accanto a un brano per ritrovarlo qui.' })}</div>` +
     (al.length ? `<h2>Album</h2>${albumGrid(al, { strip: true })}` : '') +
     (ar.length ? `<h2>Artisti</h2><div class="lcards shelfish">${ar.map(lArtistCard).join('')}</div>` : '');
@@ -1248,14 +1250,15 @@ const Offline = {
   async init() { try { (await DB.keys('offline')).forEach(k => this.keys.add(k)); } catch {} },
   has(t) { return !!t && this.keys.has(offKey(t)); },
   async url(t) { try { const r = await DB.get('offline', offKey(t)); return r ? URL.createObjectURL(r.blob) : null; } catch { return null; } },
-  async save(tracks) {
+  // quiet: salvataggio in sottofondo delle playlist sempre offline (OffPin), senza avvisi a ogni brano
+  async save(tracks, quiet = false) {
     const todo = tracks.filter(t => !this.has(t) && !srv(t.serverId)?.local);
-    if (!todo.length) return toast(tracks.some(t => srv(t.serverId)?.local) ? 'Questi brani sono già sul telefono.' : 'Questi brani sono già disponibili offline.');
-    if (this.busy) return toast('Sto già salvando altri brani, attendi.');
+    if (!todo.length) return quiet ? 0 : toast(tracks.some(t => srv(t.serverId)?.local) ? 'Questi brani sono già sul telefono.' : 'Questi brani sono già disponibili offline.');
+    if (this.busy) return quiet ? 0 : toast('Sto già salvando altri brani, attendi.');
     this.busy = true; navigator.storage?.persist?.();
     let done = 0, fail = 0;
     for (const t of todo) {
-      toast(`Salvo per l'offline ${done + 1} di ${todo.length}…`, 60000);
+      if (!quiet) toast(`Salvo per l'offline ${done + 1} di ${todo.length}…`, 60000);
       try {
         const r = await fetch(streamUrl(t, P.offlineQ)); if (!r.ok) throw 0;
         const blob = await r.blob();
@@ -1266,11 +1269,45 @@ const Offline = {
       } catch { fail++; }
     }
     this.busy = false;
-    toast(fail ? `${done} brani salvati, ${fail} non riusciti.` : `${done} brani disponibili offline.`);
+    if (!quiet) toast(fail ? `${done} brani salvati, ${fail} non riusciti.` : `${done} brani disponibili offline.`);
     if (location.hash.startsWith('#/offline')) route();
+    return done;
   },
   async remove(k) { await DB.del('offline', k); this.keys.delete(k); }
 };
+
+/* ================= playlist e preferiti sempre offline (come «Scarica» di Spotify) =================
+   Una playlist (o i Preferiti) segnata «sempre offline» si salva sul dispositivo e resta aggiornata: i brani che
+   entrano dopo si salvano da soli, col Wi-Fi, all'avvio, quando le playlist cambiano e ogni mezz'ora. Per dispositivo */
+const OffPin = {
+  busy: false, t: null,
+  all: () => store.get('offPins', {}),
+  k: (pid, sid = S.active) => `${sid}:${pid}`,
+  has(pid) { return !!this.all()[this.k(pid)]; },
+  async toggle(pid, name, tracks) {
+    const a = this.all(), k = this.k(pid);
+    if (a[k]) { delete a[k]; store.set('offPins', a); return toast('Non più sempre offline. I brani già salvati restano (Offline → Elimina per toglierli).'); }
+    a[k] = { sid: S.active, pid, name }; store.set('offPins', a);
+    toast(`«${name}» sempre offline: i brani nuovi si salvano da soli col Wi-Fi.`, 4500);
+    if (tracks?.length) Offline.save(tracks);
+  },
+  tracks: async (pin, s) => pin.pid === 'preferiti' ? arr((await api('getStarred2', {}, s)).starred2.song).map(x => norm(x, pin.sid))
+    : arr((await api('getPlaylist', { id: pin.pid }, s)).playlist.entry).map(x => norm(x, pin.sid)),
+  async sync() {
+    if (this.busy || !navigator.onLine || onMobileData() || Offline.busy) return;
+    this.busy = true; let n = 0;
+    try {
+      for (const pin of Object.values(this.all())) {
+        const s = srv(pin.sid); if (!s || s.local) continue;
+        try { n += await Offline.save(await this.tracks(pin, s), true) || 0; } catch {}
+      }
+    } finally { this.busy = false; }
+    if (n) toast(`${n} ${n === 1 ? 'brano nuovo salvato' : 'brani nuovi salvati'} per l'offline.`);
+  },
+  soon(ms = 60000) { clearTimeout(this.t); this.t = setTimeout(() => this.sync(), ms); }
+};
+Bus.addEventListener('playlists', () => OffPin.soon()); Bus.addEventListener('libreria', () => OffPin.soon());
+setInterval(() => OffPin.sync(), 30 * 60000);
 
 /* ================= cache dei brani: come Spotify, i prossimi della coda arrivano prima che servano =================
    Mentre suona un brano si scaricano per intero i prossimi (2 col Wi-Fi, 1 in rete mobile, nessuno con «risparmio
@@ -3723,6 +3760,7 @@ view.addEventListener('click', async e => {
       case 'shuffleall': setQueue(list, 0, true); break;
       case 'enqueueall': if (Jam.role === 'guest') { list.slice(0, 10).forEach(t => Jam.suggest(t)); break; } S.queue.push(...list); persistQueue(); flyToQueue(el); toast(`${list.length} brani aggiunti alla coda.`); break;
       case 'offlineall': Offline.save(list); break;
+      case 'offpin': { const name = id === 'preferiti' ? 'Preferiti' : JSON.parse(view.dataset.plMeta || '{}').name || 'Playlist'; await OffPin.toggle(id, name, list); el.outerHTML = pinBtn(id); break; }
       case 'addalltopl': addToPlaylistDialog(list); break;
       case 'enqueue': if (Jam.role === 'guest') { Jam.suggest(list[i]); break; } S.queue.push(list[i]); persistQueue(); flyToQueue(el); toast('Aggiunto alla coda.'); break;
       case 'more': songMenu(list[i], { pl: view.dataset.pl ? i : null }); break;
@@ -4606,5 +4644,5 @@ async function boot() {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
+  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
 }
