@@ -834,7 +834,11 @@ async function albumGaps(a, songs, n) {
   $('#gapsNote').innerHTML = `<div class="gaps-note"><span>Questo album ha ${sc.tracks.length} tracce, in libreria ne hai ${sc.tracks.length - miss.length}.</span>
     <button class="btn sm primary" id="gapsAll">${ic('down')} Scarica le ${miss.length} mancanti</button></div>`;
   // i file arrivano con gli stessi album e artista dell'album della libreria: Navidrome li mette nello stesso album
-  gapButtons(box, miss, { album: a.name, albumartist: a.artist || sc.albumartist, date: sc.date || (a.year ? String(a.year) : ''), cover: sc.cover });
+  // la data dev'essere quella dell'album in libreria, così com'è: Navidrome separa gli album anche per data, e con
+  // la data completa di Deezer su un album che ha solo l'anno (o nessuna) la traccia finirebbe in un album a parte
+  const rd = a.releaseDate, p2 = n => String(n).padStart(2, '0');
+  const date = rd?.year ? `${rd.year}${rd.month ? '-' + p2(rd.month) + (rd.day ? '-' + p2(rd.day) : '') : ''}` : a.year ? String(a.year) : '';
+  gapButtons(box, miss, { album: a.name, albumartist: a.artist || sc.albumartist, date, cover: sc.cover });
 }
 // tasti "Scarica" delle righe fantasma ([data-gap] = indice in miss) e "Scarica tutte" (#gapsAll): /api/import, stessa cartella
 function gapButtons(box, miss, alb) {
