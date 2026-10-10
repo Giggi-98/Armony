@@ -120,6 +120,12 @@ MIGRATIONS = [
     """
     UPDATE sessions SET token = sha256(token) WHERE length(token) != 64;
     """,
+    # 12: notifiche per utente (notifiche.py): campanella e avvisi di sistema; once = chiave per non ripeterne una
+    """
+    CREATE TABLE notifiche (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL,
+                            title TEXT NOT NULL, body TEXT, link TEXT, letta INTEGER NOT NULL DEFAULT 0, once TEXT);
+    CREATE INDEX notifiche_user ON notifiche(user, id);
+    """,
 ]
 
 _local = threading.local()

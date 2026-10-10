@@ -135,6 +135,23 @@ Il registro e la configurazione reale di produzione hanno mostrato rischi concre
 | 8.5 | Cache dei brani: data d'uso salvata a parte (non riscrivere il file intero a ogni ascolto); coda in IndexedDB invece che in localStorage | Scritture inutili sulla memoria del telefono; coda persa se la quota si riempie | medio | S/M |
 | 8.6 | A schermo spento niente disegni né calcoli della coda a ogni `timeupdate` | Batteria | basso | S |
 
+## Fase 9 — Notifiche (web e Android)
+
+Richiesta dell'utente (2026-10-11). Vincolo da `DECISIONS.md`: niente servizi push esterni (Firebase, chiavi, account),
+quindi le notifiche viaggiano sul canale dal vivo che i dispositivi tengono già aperto, e restano salvate sul server.
+
+| # | Cosa | Come | Peso | Sforzo |
+|---|---|---|---|---|
+| 9.1 | **Centro notifiche** (campanella con il numero da leggere, pagina Notifiche per giorno, «segna tutte come lette») | Tabella `notifiche` per utente (migrazione 12, ultime 200), `/api/notifiche`, messaggio `{"type":"notifica"}` sul canale dal vivo; lette su un dispositivo = lette su tutti | alto | M — **fatto (0.25)** |
+| 9.2 | **Eventi**: importazione o album finiti (quanti brani, quanti non trovati), download singolo finito o non riuscito, sostituzione non riuscita, Jam visibile aperta da un amico, dispositivo in attesa di approvazione | Dal server dove l'evento nasce (`jupdate`, `jam_open`, `dispositivi.login`); `only_once` evita i doppioni | alto | S — **fatto (0.25)** |
+| 9.3 | **Avvisi di sistema sul web**: con la scheda non in primo piano, Notification API del browser; tocco = apre la pagina giusta | Permesso chiesto da Impostazioni → Notifiche (mai al caricamento) | medio | S — **fatto (0.25)** |
+| 9.4 | **Avvisi di sistema su Android**: canale «Avvisi» separato da quello della riproduzione; tocco = apre l'app sulla pagina giusta, anche ad app chiusa | Plugin `ArmonyFiles.notify` / `pending`; permesso Android 13+ | medio | S — **fatto (0.25)** |
+| 9.5 | **Preferenze per tipo** (importazioni, download, Jam, dispositivi) e per dispositivo | Preferenze locali `notifOn`, `nImport`… | basso | S — **fatto (0.25)** |
+| 9.6 | **Android con l'app chiusa o in pausa a schermo spento**: oggi gli avvisi arrivano solo mentre il canale dal vivo è aperto (app aperta, in riproduzione o appena chiusa) | Lo stesso canale nativo leggero della voce 2.9 (WorkManager ogni 15 min: `/api/notifiche?dopo=` e notifiche native), senza wake lock continuo; misurare la batteria | medio | M |
+| 9.7 | **Web con il browser chiuso** | Web Push con chiavi VAPID generate dal server (nessun account, ma passa dai server push del browser): da proporre all'utente, riapre la decisione «niente push» per il solo web | basso | M |
+| 9.8 | **Altri eventi**: nuova versione disponibile (amministratori), brani nuovi nelle playlist abbonate, «Da controllare» con brani nuovi, amico che manda un brano (7.5), nuove uscite (6.5) | Da aggiungere man mano con la funzione corrispondente | medio | S ciascuno |
+| 9.9 | **Riepilogo** invece di raffiche: più eventi dello stesso tipo in pochi minuti diventano una notifica sola sul telefono | Raggruppamento per `kind` nel client prima di `notify` | basso | S |
+
 ---
 
 ## Stato

@@ -57,6 +57,8 @@ Armony - server di supporto.
   /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download";
                         /api/rete/playlist e /api/rete/abbonati: abbonamenti a playlist pubbliche (capacità "abbonamenti").
                         Fra i server, /fed/v1/canale: canale inverso per chi è dietro NAT (federazione.py)
+  /api/notifiche        notifiche dell'utente (notifiche.py): elenco, non lette, segnate come lette; arrivano anche sul
+                        canale /api/live ({"type": "notifica"}). Capacità "notifiche"
   /api/playlist/togli   toglie un brano da una playlist per id, non per posizione (importa.py, capacità "pltogli")
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
                         Navidrome, playlist completata e riordinata a ogni brano nuovo; capacità "importsrv"
@@ -100,6 +102,7 @@ import ascolti
 import diagnosi
 import dispositivi
 import importa
+import notifiche
 import scelta
 import utenti
 import federazione
@@ -137,10 +140,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/notifiche", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -684,6 +687,11 @@ def jam_open(rid):
         vis = bool(d.get("visible"))
         attivita(who["user"], "jam", f"ha aperto la Jam «{str(d.get('name', 'Jam'))[:60]}»" if vis else "ha avviato una Jam",
                  {"amici": 1} if vis else None)
+        # una Jam visibile: avviso agli altri utenti del server (chi la apre ha scelto di mostrarsi agli amici)
+        if vis and who["user"] and pres_who(who["user"])[0]:
+            for r in db.all_("SELECT DISTINCT user FROM devices WHERE state = 'fidato' AND lower(user) != lower(?)", who["user"]):
+                notifiche.notifica(r["user"], "jam", f"{pres_who(who['user'])[1]} ha aperto una Jam", f"«{str(d.get('name', 'Jam'))[:60]}»: entra da Jam → Jam vicine",
+                                   "#/jam", only_once=f"jam:{rid}")
     return jsonify(ok=True)
 
 
@@ -1314,6 +1322,34 @@ def jupdate(jid, **kw):
         jobs[jid].update(kw, updated=time.time())
         if kw.keys() & {"status", "title", "error"}:
             jsave(jid)
+        j = dict(jobs[jid]) if kw.get("status") in DONE else None
+        # un gruppo (album, importazione) si annuncia una volta, quando è finito tutto
+        last = j and j.get("batch") and not any(x.get("batch") == j["batch"] and x["status"] not in DONE for x in jobs.values())
+        grp = [x for x in jobs.values() if x.get("batch") == j["batch"]] if last else []
+    if j:
+        avvisa_job(j, grp)
+
+
+def avvisa_job(j, grp):
+    """Notifica a chi ha chiesto il download (notifiche.py): un brano singolo, o il riepilogo di un gruppo finito."""
+    u = j.get("by")
+    if not u or j.get("nonotify"):
+        return
+    if j.get("batch"):
+        if not grp:
+            return
+        ok = sum(1 for x in grp if x["status"].startswith("completato"))
+        notifiche.notifica(u, "import" if j.get("track") else "download", f"«{j.get('label') or 'Download'}» finito",
+                           f"{ok} di {len(grp)} brani in libreria" + (f", {len(grp) - ok} non trovati" if ok < len(grp) else ""),
+                           "#/scarica", only_once="batch:" + j["batch"])
+    elif j.get("sost"):
+        if j["status"] != "errore":
+            return  # la sostituzione riuscita la vede già chi l'ha scelta (riga che sparisce, brano che riparte)
+        notifiche.notifica(u, "download", "Sostituzione non riuscita", f"{j.get('title') or ''}: {j.get('error') or ''}", "#/scarica", only_once="job:" + j["id"])
+    else:
+        ok = j["status"].startswith("completato")
+        notifiche.notifica(u, "download", "Scaricato" if ok else "Download non riuscito", (j.get("title") or "")[:200] + ("" if ok else f" ({(j.get('error') or '')[:120]})"),
+                           "#/scarica", only_once="job:" + j["id"])
 
 
 def resume_jobs():
@@ -2394,6 +2430,7 @@ radio.init(app, sys.modules[__name__])
 diagnosi.init(app, sys.modules[__name__])
 importa.init(app, sys.modules[__name__])
 scelta.init(app, sys.modules[__name__])
+notifiche.init(app, sys.modules[__name__])
 utenti.init(app, sys.modules[__name__])
 ascolti.init(app, sys.modules[__name__])
 

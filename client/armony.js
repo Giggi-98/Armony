@@ -50,13 +50,37 @@ function toast(msg, ms = 3200) {
   const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg; document.body.append(t);
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), ms);
 }
-function saveFile(name, data, type = 'text/plain') {
+// nell'app Android un link "download" non fa niente: i file vanno in Download/Armony, le immagini nel foglio Condividi
+const blobB64 = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
+async function saveFile(name, data, type = 'text/plain') {
+  const F = NATIVE && window.Capacitor?.Plugins?.ArmonyFiles;
+  if (F) {
+    const b = data instanceof Blob ? data : new Blob([data], { type });
+    try {
+      const args = { name, mime: b.type || type, data: await blobB64(b) };
+      if ((b.type || type).startsWith('image/')) await F.share({ ...args, title: name });
+      else { const r = await F.save(args); toast(r.where === 'shared' ? 'Scegli dove salvarlo.' : `Salvato in ${r.where}.`, 5000); }
+    } catch (e) { toast(e.message || 'Salvataggio non riuscito.'); }
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type })); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
 function pickFile(accept, multiple = false) {
-  return new Promise(res => { const f = $('#filePick'); f.accept = accept; f.multiple = multiple; f.value = ''; f.onchange = () => res(multiple ? [...f.files] : f.files[0] || null); f.click(); });
+  // nell'app nessun filtro: Android dà ai CSV scaricati tipi diversi (text/comma-separated-values…) e li mostrava in grigio
+  return new Promise(res => { const f = $('#filePick'); f.accept = NATIVE ? '' : accept; f.multiple = multiple; f.value = ''; f.onchange = () => res(multiple ? [...f.files] : f.files[0] || null); f.click(); });
+}
+// il file originale di un brano: nel browser un link, nell'app scaricato dall'app (passa dal suo DNS di riserva) e salvato
+async function downloadOriginal(t) {
+  const u = apiUrl(srv(t.serverId), 'download', { id: t.id });
+  if (!NATIVE) { const a = document.createElement('a'); a.href = u; a.download = ''; a.click(); return; }
+  toast('Scarico il file originale…', 30000);
+  try {
+    const r = await fetch(u); if (!r.ok || /json|xml/.test(r.headers.get('content-type') || '')) throw new Error('Il server non ha dato il file.');
+    const b = await r.blob(), ext = ({ 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/flac': 'flac', 'audio/ogg': 'ogg', 'audio/opus': 'opus' })[b.type] || (t.suffix || 'audio');
+    await saveFile(safeName(`${t.artist} - ${t.title}.${ext}`), b, b.type);
+  } catch (e) { toast(e.message); }
 }
 async function copyText(t) { try { await navigator.clipboard.writeText(t); return true; } catch { prompt('Copia questo testo:', t); return false; } }
 const safeName = n => String(n).replace(/[\\/:*?"<>|]/g, '_');
@@ -143,11 +167,12 @@ const QUALITIES = {
 const DEFAULT_PREFS = {
   quality: '192', qualityMobile: 'same', offlineQ: '192', crossfade: 0, rg: 'track', rgPre: 0, night: false, speed: 1,
   eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqOn: true, eqAuto: false, compat: false, lyricsOnline: true, syncQueue: true,
-  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true, live: true, deviceName: '', solo: false, cacheMB: 1024, autoplay: true
+  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true, live: true, deviceName: '', solo: false, cacheMB: 1024, autoplay: true,
+  notifOn: false, nImport: true, nDownload: true, nJam: true, nDev: true
 };
 const P = Object.assign({}, DEFAULT_PREFS, store.get('prefs', {}));
 // restano su questo dispositivo anche con la sincronizzazione attiva
-const DEVICE_PREFS = ['compat', 'volume', 'sync', 'live', 'deviceName', 'solo', 'cacheMB'];
+const DEVICE_PREFS = ['compat', 'volume', 'sync', 'live', 'deviceName', 'solo', 'cacheMB', 'notifOn', 'nImport', 'nDownload', 'nJam', 'nDev'];
 const savePrefs = () => { store.set('prefs', P); store.set('prefsAt', Date.now()); PrefSync.schedule(); };
 const S = {
   servers: store.get('servers', []),
@@ -423,7 +448,7 @@ async function route() {
   const fn = Disp.gate(r) || {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
+    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav;
   if (changed && Scene.hash) Scene.back = Scene.r === 'ora' ? Scene.back : Scene.hash;  // dove torna la freccia del lettore
@@ -2897,7 +2922,7 @@ async function refreshVideos() {
     const v = await dlApi('/api/videos');
     box.innerHTML = v.length ? v.map(x => `<div class="list-item" data-act="playvideo" data-path="${esc(x.path)}" data-name="${esc(x.name)}">
       <span class="pic" style="display:grid;place-items:center">${ic('film')}</span><span class="grow"><b>${esc(x.name)}</b><small>${esc(x.folder)}, ${bytes(x.size)}</small></span>
-      <a class="icon-btn" href="${esc(videoUrl(x.path, true))}" aria-label="Scarica sul dispositivo" onclick="event.stopPropagation()">${ic('down')}</a>
+      <a class="icon-btn" href="${esc(videoUrl(x.path, true))}"${NATIVE ? ' target="_blank" rel="noopener"' : ''} aria-label="Scarica sul dispositivo" onclick="event.stopPropagation()">${ic('down')}</a>
       <button class="icon-btn" data-act="delvideo" data-path="${esc(x.path)}" aria-label="Elimina">${ic('trash')}</button></div>`).join('')
       : '<div class="empty">Nessun video. Scegli "Video" per scaricarne uno.</div>';
   } catch { box.innerHTML = ''; }
@@ -3247,6 +3272,70 @@ async function artistRadio(id) {
   if (!songs.length) { const a = (await api('getArtist', { id })).artist; const albums = await Promise.all(arr(a.album).map(al => api('getAlbum', { id: al.id }))); songs = albums.flatMap(r => arr(r.album.song)); }
   return songs;
 }
+/* ================= notifiche (capacità "notifiche", server/notifiche.py) ================= */
+I.bell = '<path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>';
+const NKIND = { import: 'nImport', download: 'nDownload', jam: 'nJam', dispositivi: 'nDev', sistema: null };
+const Notif = {
+  items: [], unread: 0,
+  on() { return !!srv()?.me?.caps?.includes('notifiche') && !!srv()?.session; },
+  async load() {
+    if (!this.on()) { this.paint(); return; }
+    try { const r = await srvApi(srv(), '/api/notifiche'); this.items = r.items; this.unread = r.unread; } catch {}
+    this.paint();
+  },
+  paint() {
+    const b = $('#hBell'); if (!b) return;
+    b.hidden = !this.on();
+    b.innerHTML = ic('bell') + (this.unread ? `<i class="nbadge">${this.unread > 9 ? '9+' : this.unread}</i>` : '');
+    b.setAttribute('aria-label', this.unread ? `Notifiche, ${this.unread} da leggere` : 'Notifiche');
+  },
+  // dal canale dal vivo: una nuova, o lette su un altro dispositivo
+  recv(m) {
+    if (m.lette) { if (m.lette === 'tutte') { this.items.forEach(x => x.letta = 1); this.unread = 0; } else { this.items.forEach(x => { if (m.lette.includes(x.id)) x.letta = 1; }); this.unread = this.items.filter(x => !x.letta).length; } this.paint(); return; }
+    const n = m.item; if (!n || this.items.some(x => x.id === n.id)) return;
+    this.items.unshift(n); this.unread++; this.paint();
+    if (location.hash.startsWith('#/notifiche')) vNotifiche();
+    const k = NKIND[n.kind];
+    if (document.visibilityState === 'visible') return toast(`${n.title}${n.body ? ' · ' + n.body : ''}`, 5000);
+    if (!P.notifOn || (k && P[k] === false)) return;
+    this.system(n);
+  },
+  // avviso di sistema: notifica del telefono nell'app, del browser sul web (solo con la pagina nascosta)
+  system(n) {
+    const F = NATIVE && window.Capacitor?.Plugins?.ArmonyFiles;
+    if (F) { F.notify({ id: n.id, title: n.title, body: n.body || '', link: n.link || '' }).catch(() => {}); return; }
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const w = new Notification(n.title, { body: n.body || '', icon: 'icon.svg', tag: 'armony-' + n.id });
+    w.onclick = () => { window.focus(); if (n.link) location.hash = n.link; w.close(); };
+  },
+  async permission() {
+    const F = NATIVE && window.Capacitor?.Plugins?.ArmonyFiles;
+    if (F) { try { return (await F.notifyPermission()).granted; } catch { return false; } }
+    if (!('Notification' in window)) return false;
+    if (Notification.permission === 'granted') return true;
+    return (await Notification.requestPermission()) === 'granted';
+  },
+  async read(ids) {
+    if (!this.on()) return;
+    try { await srvApi(srv(), '/api/notifiche/lette', { method: 'POST', body: JSON.stringify(ids ? { ids } : {}) }); } catch {}
+    this.items.forEach(x => { if (!ids || ids.includes(x.id)) x.letta = 1; }); this.unread = this.items.filter(x => !x.letta).length; this.paint();
+  }
+};
+async function vNotifiche() {
+  if (!Notif.on()) { view.innerHTML = '<h1>Notifiche</h1><div class="empty"><h3>Notifiche non disponibili</h3><p>Il server va aggiornato ad Armony 0.25 o successiva.</p></div>'; return; }
+  if (!Notif.items.length) await Notif.load();
+  const KI = { import: 'down', download: 'down', jam: 'jam', dispositivi: 'shield', sistema: 'bell' };
+  const day = ts => { const d = new Date(ts * 1000), t = new Date(); const y = new Date(t - 864e5); return d.toDateString() === t.toDateString() ? 'Oggi' : d.toDateString() === y.toDateString() ? 'Ieri' : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }); };
+  let last = '';
+  view.innerHTML = `<div class="lhead"><h1>Notifiche</h1>${Notif.unread ? '<button class="btn sm" id="nAll">Segna tutte come lette</button>' : ''}</div>
+    ${!P.notifOn ? `<div class="panel nhint"><span class="grow">Ricevi gli avvisi anche quando ${NATIVE ? 'l\'app è in sottofondo' : 'Armony non è in primo piano'}.</span><a class="btn sm primary" href="#/impostazioni/notifiche">Attiva</a></div>` : ''}
+    ${Notif.items.length ? `<div class="nlist">${Notif.items.map(n => { const d = day(n.ts), h = d !== last ? `<h2 class="qhead">${d}</h2>` : ''; last = d;
+      return `${h}<${n.link ? `a href="${esc(n.link)}"` : 'div'} class="nrow${n.letta ? '' : ' new'}" data-nid="${n.id}"><span class="nic">${ic(KI[n.kind] || 'bell')}</span><span class="grow"><b>${esc(n.title)}</b>${n.body ? `<small>${esc(n.body)}</small>` : ''}</span><time>${new Date(n.ts * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</time></${n.link ? 'a' : 'div'}>`; }).join('')}</div>`
+    : '<div class="empty"><h3>Niente di nuovo</h3><p>Qui arrivano importazioni e download finiti, le Jam degli amici e i dispositivi da approvare.</p></div>'}`;
+  $('#nAll')?.addEventListener('click', () => Notif.read().then(vNotifiche));
+  // aprire la pagina le segna come lette dopo un attimo (restano evidenziate finché la si guarda)
+  const ids = Notif.items.filter(x => !x.letta).map(x => x.id); if (ids.length) setTimeout(() => Notif.read(ids), 1500);
+}
 // coda come Spotify: "Riproduci dopo" va subito dopo il brano attuale, "Aggiungi alla coda" dopo gli altri brani aggiunti a
 // mano (segnati _q) e prima del resto della playlist o dell'album (prima andava in fondo, dopo centinaia di brani).
 // Da telecomando i brani vanno al dispositivo che suona (comandi "playnext"/"enqueue", capacità "liveq")
@@ -3449,7 +3538,7 @@ function songMenu(t, ctx = {}) {
     !phoneT && can('condividi') ? ['share', 'Condividi', () => shareItem(t.id, `${t.title} - ${t.artist}`, t.serverId)] : null,
     phoneT && !Offline.has(t) ? null : Offline.has(t) ? ['trash', 'Togli dall\'offline', async () => { await Offline.remove(offKey(t)); toast('Rimosso dall\'offline.'); if (location.hash.startsWith('#/offline')) route(); }]
       : ['offline', 'Salva per l\'offline', () => Offline.save([t])],
-    phoneT ? null : ['down', 'Scarica il file originale', () => { const a = document.createElement('a'); a.href = apiUrl(srv(t.serverId), 'download', { id: t.id }); a.download = ''; a.click(); }],
+    phoneT ? null : ['down', 'Scarica il file originale', () => downloadOriginal(t)],
     ['lyrics', 'Testo', () => { if (key(currentTrack() || {}) !== key(t)) return toast('Il testo si apre per il brano in riproduzione.'); sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; }],
     ctx.pl != null && can('playlist') ? ['trash', 'Togli dalla playlist', async () => {
       // per id sul server (capacità "pltogli"): la posizione vista qui può essere cambiata nel frattempo
@@ -3600,6 +3689,11 @@ function vSettings(id = location.hash.split('/')[2]) {
     ${Presence.on() ? `<label class="check"><input type="checkbox" id="pShare" ${Presence.share ? 'checked' : ''}><span>Mostra agli altri cosa ascolto e cosa faccio<small>Gli utenti di questo server vedono il brano che ascolti e le tue attività (download, caricamenti, playlist pubbliche, Jam). Spento, non compari; tu vedi comunque gli altri.</small></span></label>` : ''}
     <label class="f">Nome di questo dispositivo<input type="text" id="pDev" value="${esc(P.deviceName)}" placeholder="${esc(Live.name())}" maxlength="30"></label></div>`],
 
+  srv()?.me?.caps?.includes('notifiche') ? ['dev', 'notifiche', 'Notifiche', 'bell', 'notifiche avvisi campanella importazioni download jam dispositivi', `<div class="panel stack">
+    <label class="check"><input type="checkbox" id="pNotif" ${P.notifOn ? 'checked' : ''}><span>Avvisi su questo dispositivo<small>Quando ${NATIVE ? 'l\'app è in sottofondo' : 'Armony non è la scheda in primo piano'}, le notifiche arrivano come avvisi del ${NATIVE ? 'telefono' : 'sistema'}. Tutte restano comunque nella campanella.</small></span></label>
+    ${[['nImport', 'Importazioni e album finiti', 'Quanti brani sono arrivati e quanti non si trovano'], ['nDownload', 'Download singoli', 'Scaricati o non riusciti'], ['nJam', 'Jam degli amici', 'Quando qualcuno apre una Jam visibile'], ['nDev', 'Dispositivi da approvare', 'Un tuo dispositivo nuovo aspetta l\'approvazione']].map(([k, l, h]) => `<label class="check"><input type="checkbox" data-pb="${k}" ${P[k] !== false ? 'checked' : ''}><span>${l}<small>${h}</small></span></label>`).join('')}
+    <p class="small" style="color:var(--muted);margin:0">${NATIVE ? 'Con l\'app chiusa del tutto gli avvisi non arrivano: li ritrovi nella campanella quando la riapri.' : 'Con il browser chiuso gli avvisi non arrivano: li ritrovi nella campanella.'}</p></div>`] : null,
+
   ['dev', 'ascolto', 'Ascolto', 'headphones', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
     <div class="grid2">
       <label class="f">Qualità<select data-p="quality">${opt(qOpts, P.quality)}</select></label>
@@ -3689,6 +3783,10 @@ function vSettings(id = location.hash.split('/')[2]) {
   view.querySelectorAll('.stab-back').forEach(b => b.onclick = () => navStack.at(-2) === '#/impostazioni' ? history.back() : location.hash = '#/impostazioni');
   $('#pNick').onchange = e => { P.nick = e.target.value.trim(); savePrefs(); };
   $('#pDev').onchange = e => { P.deviceName = e.target.value.trim(); savePrefs(); Live.connect(); };
+  if ($('#pNotif')) $('#pNotif').onchange = async e => {
+    if (e.target.checked && !(await Notif.permission())) { e.target.checked = false; toast(NATIVE ? 'Consenti le notifiche ad Armony nelle impostazioni del telefono.' : 'Il browser non ha consentito le notifiche: abilitale dal lucchetto accanto all\'indirizzo.', 7000); return; }
+    P.notifOn = e.target.checked; savePrefs(); toast(P.notifOn ? 'Avvisi attivi su questo dispositivo.' : 'Avvisi spenti: le notifiche restano nella campanella.');
+  };
   if ($('#pShare')) $('#pShare').onchange = async e => {
     try { Presence.share = (await srvApi(srv(), '/api/live/privacy', { method: 'PUT', body: JSON.stringify({ share: e.target.checked }) })).share; toast(Presence.share ? 'Gli altri vedono cosa ascolti.' : 'Non compari più agli altri.'); }
     catch { e.target.checked = Presence.share; toast('Non riesco a salvare: riprova.'); }
@@ -4883,6 +4981,7 @@ const Live = {
     if (m.type === 'dispositivi') return Disp.changed();
     if (m.type === 'presence' || m.type === 'activity') return Presence.recv(m);  // gli altri utenti del server
     if (m.type === 'radio') return Radio.recv(m);  // stazioni e ascoltatori della Jam Radio
+    if (m.type === 'notifica') return Notif.recv(m);
     if (m.type === 'libreria') { emitSoon('libreria'); if (m.playlists) emitSoon('playlists'); return; }  // brani nuovi, playlist completate dal server
     if (m.type === 'hello') {
       this.helloAt = now; Presence.hello(m); Radio.hello(m);
@@ -5276,6 +5375,7 @@ function wirePlayer() {
   $('#bDev').innerHTML = ic('speaker'); $('#bDev').onclick = () => Live.sheet();
   $('#bQueueM').innerHTML = ic('queue'); $('#bQueueM').onclick = () => location.hash = '#/coda';
   $('#hMe').onclick = drawer;
+  $('#hBell').onclick = () => { location.hash = '#/notifiche'; };
   miniGestures();
   $('#sleepPill').onclick = sleepDialog; $('#jamPill').onclick = () => location.hash = '#/jam';
   $('#bShuf').onclick = () => {
@@ -5374,5 +5474,7 @@ async function boot() {
   paintTheme();  // sul computer: due finestre visibili, il canale va a quella che si usa
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
-  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); HistSync.repair(); Scrob.flush(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
+  syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); HistSync.repair(); Scrob.flush(); Notif.load();
+    window.Capacitor?.Plugins?.ArmonyFiles?.pending?.().then(r => { if (r?.link) location.hash = r.link; }).catch(() => {});
+    if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });
 }

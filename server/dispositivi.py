@@ -486,6 +486,9 @@ def login():
                          by="invito" if granted else "primo dispositivo, da casa" if first else None)
         event("nuovo" if state == "fidato" else "attesa", u, dev["id"], name)
         if state == "attesa":
+            A.notifiche.notifica(u, "dispositivi", "Un dispositivo aspetta la tua approvazione", f"{name}: confronta il codice e approvalo",
+                                 "#/impostazioni/dispositivi", only_once="attesa:" + dev["id"])
+        if state == "attesa":
             notify(u)
     db.run("UPDATE devices SET admin = ?, salt = ?, cid = ? WHERE id = ?", int(admin), s, cid, dev["id"])
     dev = db.one("SELECT * FROM devices WHERE id = ?", dev["id"])
