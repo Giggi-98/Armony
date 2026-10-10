@@ -23,11 +23,16 @@ Armony - server di supporto.
                         /api/live/beat è il battito dei client con hb=1 (capacità "livehb").
                         Sullo stesso canale arrivano a tutti gli utenti "presence" (chi ascolta cosa sul server) e
                         "activity" (download, caricamenti, playlist pubbliche, Jam); /api/live/privacy li spegne
-                        per il proprio utente (capacità "presenza")
+                        per il proprio utente (capacità "presenza"). E "libreria": brani nuovi visti da Navidrome
+                        (a tutti) e playlist completate dal server (a chi le possiede)
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download");
-                        /api/jobs?grouped=1 riunisce i brani di un'importazione in un gruppo con l'avanzamento
+                        /api/jobs?grouped=1 riunisce i brani di un'importazione in un gruppo con l'avanzamento,
+                        /api/jobs?ids=a,b solo lo stato di quei lavori (le barre di avanzamento delle pagine)
   /api/discografia      tutta la discografia di un artista e un suo album, da Deezer (permesso "download")
-  /api/import           brani da Spotify (Exportify): metadati completati, ricerca per durata, tag e cartelle per album
+  /api/import           brani da Spotify (Exportify): metadati completati, ricerca per durata, tag e cartelle per album.
+                        Con "pids" per brano (capacità "plserver") il server li aggiunge da sé alle playlist quando entrano
+                        in libreria. Ogni file nuovo (download, caricamento) arriva a tutti sul canale /api/live
+                        ({"type": "libreria"}) appena Navidrome lo vede; se serve la scansione la chiede il server
   /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
   /api/spazio           disco del server: totale, occupato, libero, peso di musica e video
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
@@ -156,7 +161,7 @@ failed = {}  # ip -> [istanti dei tentativi falliti]
 
 @app.get("/api/info")
 def info():
-    return jsonify(name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS, armony=True, public=public_url() or None)
+    return jsonify(name=NAME, version=VERSION, api=API_LEVEL, caps=caps(), armony=True, public=public_url() or None)
 
 
 @app.post("/api/login")
@@ -194,7 +199,12 @@ def public_url():
 
 def me_payload():
     return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"], delete=g.who["delete"],
-                name=NAME, version=VERSION, api=API_LEVEL, caps=CAPS, public=public_url())
+                name=NAME, version=VERSION, api=API_LEVEL, caps=caps(), public=public_url())
+
+
+def caps():
+    # "plserver": le playlist dei brani importati le completa il server (serve l'amministratore di Navidrome e il suo DB)
+    return CAPS + (["plserver"] if nd_admin() and os.path.exists(NAVIDROME_DB) else [])
 
 
 @app.put("/api/indirizzo")
@@ -1015,8 +1025,11 @@ def jupdate(jid, **kw):
 def resume_jobs():
     # dopo un riavvio (anche un aggiornamento dal tasto) i download a metà ripartono:
     # yt-dlp riprende i file .part già scritti
-    for r in db.all_("SELECT data FROM jobs ORDER BY created DESC LIMIT 200"):
+    # più quelli che aspettano ancora di entrare in una playlist, anche se più vecchi
+    for r in db.all_("SELECT data FROM jobs ORDER BY created DESC LIMIT 200") + db.all_("SELECT data FROM jobs WHERE json_extract(data, '$.plwait') = 1"):
         j = json.loads(r["data"])
+        if j["id"] in jobs:
+            continue
         jobs[j["id"]] = j
         if j["status"] not in DONE:
             j.update(status="in coda", progress=0)
@@ -1096,6 +1109,8 @@ def run_job(jid, j):
         with yt_dlp.YoutubeDL(opts) as y:
             code = y.download([j["url"]])
         jupdate(jid, status="completato" if code == 0 else "completato con errori", progress=100, finished=time.time())
+        if audio:
+            lib_arrivo(None, meta.get("album"), meta.get("artist"), jid)
         t = jobs[jid].get("title") or "un brano"
         attivita(jobs[jid].get("by"), "download", f"ha scaricato «{t}»" if audio else f"ha scaricato il video «{t}»",
                  {"album": meta["album"], "artist": meta.get("artist")} if audio and meta.get("album") else None,
@@ -1195,6 +1210,7 @@ def run_brano(jid, j):
         dest = metadati.sistema(got, base, m)
         jupdate(jid, status="completato", progress=100, finished=time.time(), path=os.path.relpath(dest, MUSIC_DIR),
                 album=m.get("album"), track_no=m.get("track"))
+        lib_arrivo(jobs[jid]["path"], m.get("album"), m.get("albumartist") or (artists or [None])[0], jid)
         label = jobs[jid].get("label")
         attivita(jobs[jid].get("by"), "download", f"ha scaricato «{title}»" + (f" di {artists[0]}" if artists else ""),
                  {"album": m["album"], "artist": m.get("albumartist") or (artists or [None])[0]} if m.get("album") else None,
@@ -1343,6 +1359,7 @@ def upload():
             title, album, artist = ((tg.get(k) or [None])[0] for k in ("title", "album", "artist"))
         except Exception:  # noqa: BLE001 — senza tag basta il nome del file
             title = album = artist = None
+        lib_arrivo(os.path.relpath(dest, MUSIC_DIR), album, artist)
         attivita(g.who["user"], "upload", f"ha caricato «{title or name.rsplit('.', 1)[0]}»", {"album": album, "artist": artist} if album else None,
                  merge="up", many="ha caricato {n} brani")
     return jsonify(status="caricato", path=os.path.relpath(dest, MUSIC_DIR), size=size), 201
@@ -1434,6 +1451,158 @@ def tracks_delete():
     for d in sorted(dirs, key=len, reverse=True):
         prune(d, root)
     return jsonify(deleted=len(done), ids=done, errors=errors)
+
+
+# ------------------------------------------------------------------ dopo un download: libreria e playlist aggiornate da sole
+# ─── PERCHÉ sul server e non sul dispositivo che ha importato ───
+# Prima i brani da mettere nelle playlist stavano nel localStorage di chi importava e si aggiungevano solo con la
+# pagina Scarica aperta: a telefono chiuso la playlist restava com'era. Ora le playlist (pids) stanno nel lavoro e
+# questo thread le completa come amministratore di Navidrome. Il brano si riconosce dal percorso del file
+# (media_file.path, lo stesso scritto dal lavoro), non da titolo e artista: niente da indovinare, niente doppioni.
+# Ogni file nuovo, appena Navidrome lo vede, arriva a tutti sul canale /api/live: {"type": "libreria"}.
+SCAN_GAP = 120   # secondi minimi fra due scansioni chieste da qui
+LIB_WAIT = 20    # prima di chiedere una scansione: di solito il watcher di Navidrome il file lo vede da sé
+PL_GIVEUP = 6 * 3600  # un brano che non compare in Navidrome (cancellato, spostato) non si aspetta più
+lnew = []        # file arrivati e non ancora visti da Navidrome
+lscan = {"at": 0.0}
+
+
+def lib_arrivo(path, album=None, artist=None, jid=None):
+    """Un file nuovo nella cartella della musica (percorso relativo a MUSIC_DIR, None se non si conosce)."""
+    x = {"path": path, "album": album, "artist": artist, "job": jid, "at": time.time(), "scan": nd_last_scan()}
+    with jlock:
+        lnew.append(x)
+
+
+def nd_last_scan():
+    try:
+        nd = sqlite3.connect(f"file:{NAVIDROME_DB}?mode=ro", uri=True, timeout=10)
+        try:
+            return nd.execute("SELECT max(last_scan_at) FROM library").fetchone()[0]
+        finally:
+            nd.close()
+    except sqlite3.Error:
+        return None
+
+
+def nd_files(paths):
+    """percorso → brano in Navidrome (solo la libreria della musica, non i mancanti), dal suo DB in sola lettura."""
+    paths, out = list(paths), {}
+    nd = sqlite3.connect(f"file:{NAVIDROME_DB}?mode=ro", uri=True, timeout=10)
+    try:
+        for i in range(0, len(paths), 400):
+            part = paths[i:i + 400]
+            for r in nd.execute("SELECT m.path, m.id, m.album_id, m.album, m.album_artist FROM media_file m JOIN library l ON l.id = m.library_id "
+                                f"WHERE m.missing = 0 AND rtrim(l.path, '/') = ? AND m.path IN ({','.join('?' * len(part))})", [NAVIDROME_MUSIC, *part]):
+                out[r[0]] = {"id": r[1], "albumId": r[2], "album": r[3], "artist": r[4]}
+    finally:
+        nd.close()
+    return out
+
+
+def nd_scan():
+    """Scansione di Navidrome come amministratore; torna quando è finita (al più 15 minuti)."""
+    lscan["at"] = time.time()
+    federazione.nd_get("startScan")
+    for _ in range(450):
+        time.sleep(2)
+        if not federazione.nd_get("getScanStatus").get("scanStatus", {}).get("scanning"):
+            break
+    lscan["at"] = time.time()
+
+
+def pl_add(ready, found):
+    """Brani arrivati → playlist in cui vanno, nell'ordine dell'importazione e solo se non ci sono già.
+    Restituisce {proprietario: [{id, name, added}]} per avvisare chi le possiede."""
+    per_pl = {}
+    for j in sorted(ready, key=lambda x: x["created"]):
+        for pid in j["pids"]:
+            if pid not in (j.get("pldone") or []):
+                per_pl.setdefault(pid, []).append(j)
+    out = {}
+    for pid, js in per_pl.items():
+        try:
+            pl = federazione.nd_get("getPlaylist", id=pid)["playlist"]
+        except federazione.FedError as e:
+            if "not found" not in str(e).lower():
+                continue  # Navidrome non risponde: si riprova al giro dopo
+            pl = None  # la playlist non c'è più
+        have, add = {x["id"] for x in (pl or {}).get("entry") or []}, []
+        for j in js:
+            sid = found[j["path"]]["id"]
+            # l'amministratore può toccare ogni playlist: si scrive solo in quelle di chi ha chiesto il download
+            if pl and (not j.get("by") or pl.get("owner") == j["by"]) and sid not in have and sid not in add:
+                add.append(sid)
+        try:
+            for i in range(0, len(add), 200):
+                federazione.nd_get("updatePlaylist", playlistId=pid, songIdToAdd=add[i:i + 200])
+        except federazione.FedError:
+            continue
+        with jlock:
+            for j in js:
+                j["pldone"] = (j.get("pldone") or []) + [pid]
+        if add:
+            out.setdefault(pl.get("owner"), []).append({"id": pid, "name": pl.get("name"), "added": len(add)})
+    return out
+
+
+def lib_giro():
+    with jlock:
+        wait = [j for j in jobs.values() if j.get("plwait") and j["status"] in DONE]
+        new = list(lnew)
+    if not wait and not new:
+        return
+    found = nd_files({x["path"] for x in new if x["path"]} | {j["path"] for j in wait if j.get("path")})
+    last = nd_last_scan() if any(not x["path"] for x in new) else None
+    # un file senza percorso noto (download da link) si dà per visto alla prima scansione finita dopo il suo arrivo
+    seen = [x for x in new if (x["path"] in found if x["path"] else last and last != x["scan"])]
+    now = time.time()
+    ready, done = [], []
+    for j in wait:
+        if j.get("path") in found:
+            ready.append(j)
+        elif j["status"] == "errore" or not j.get("path") or j.get("scans", 0) >= 3 or now - (j.get("finished") or now) > PL_GIVEUP:
+            done.append(j)
+    pls = pl_add(ready, found) if ready and nd_admin() else {}
+    with jlock:
+        for x in seen:
+            lnew.remove(x)
+            if x["job"] in jobs:
+                jobs[x["job"]]["inlib"] = True
+        lnew[:] = [x for x in lnew if now - x["at"] < 3600 and x.get("scans", 0) < 3]
+        for j in ready:
+            j["inlib"] = True
+        for j in ready + done:
+            if j in done or set(j["pids"]) <= set(j.get("pldone") or []):
+                j["plwait"] = False
+                if j["id"] in jobs:
+                    jsave(j["id"])
+    if seen:
+        albums = {}
+        for x in seen:
+            f = found.get(x["path"]) or {}
+            k = f.get("albumId") or f"{x['artist']}|{x['album']}"
+            if f or x["album"]:
+                albums[k] = {"id": f.get("albumId"), "name": f.get("album") or x["album"], "artist": f.get("artist") or x["artist"]}
+        pres_put({"type": "libreria", "n": len(seen), "albums": list(albums.values())[:50]})
+    for owner, lst in pls.items():
+        live_put(owner, {"type": "libreria", "playlists": lst})
+    # chi manca ancora: si chiede una scansione, se c'è l'amministratore e non se n'è chiesta una da poco
+    late = [x for x in new if x not in seen and now - x["at"] > LIB_WAIT] + \
+        [j for j in wait if j not in ready and j not in done and now - (j.get("finished") or 0) > LIB_WAIT]
+    if late and nd_admin() and now - lscan["at"] > SCAN_GAP:
+        nd_scan()
+        for x in late:  # tre scansioni senza trovarlo: il file non c'è più, non lo si aspetta
+            x["scans"] = x.get("scans", 0) + 1
+
+
+def lib_loop():
+    while True:
+        time.sleep(5)
+        try:
+            lib_giro()
+        except Exception as e:  # noqa: BLE001 — DB di Navidrome illeggibile, rete: si riprova al giro dopo
+            print("libreria:", e, flush=True)
 
 
 # ------------------------------------------------------------------ modifica dei brani e copertine
@@ -1652,36 +1821,51 @@ def clean_track(t):
 @app.post("/api/import")
 def import_tracks():
     """I brani mancanti di un'importazione, tutti insieme. Un brano già in coda o già scaricato
-    (stesso ISRC, o stessi titolo e artista) non viene ripreso."""
+    (stesso ISRC, o stessi titolo e artista) non viene ripreso: prende solo le playlist nuove (pids).
+    Risponde con l'id del lavoro di ogni brano, nell'ordine ricevuto, per seguirne l'avanzamento."""
     d = request.get_json(silent=True) or {}
     fmt = d.get("format") if d.get("format") in AUDIO_FORMATS else "m4a"
-    tracks = [t for t in map(clean_track, (d.get("tracks") or [])[:5000]) if t]
+    raw = [r for r in (d.get("tracks") or [])[:5000] if isinstance(r, dict)]
+    pl_ok = "plserver" in caps()
+    tracks = [(t, [str(p) for p in (r.get("pids") or [])[:50] if ID_RE.match(str(p))] if pl_ok else [])
+              for t, r in ((clean_track(r), r) for r in raw) if t]
     key = lambda t: t["isrc"] or metadati.norm(" ".join(t["artists"][:1]) + " " + t["title"])
     with jlock:
-        seen = {key(x["track"]) for x in jobs.values() if x.get("track") and x["status"] != "errore"}
-    added = []
+        seen = {key(x["track"]): x for x in jobs.values() if x.get("track") and x["status"] != "errore"}
+    added, ids = [], []
     # più brani insieme sono un gruppo: la coda li mostra come una riga con l'avanzamento complessivo
     batch = uuid.uuid4().hex[:10] if len(tracks) > 1 else None
     label = str(d.get("label") or "Importazione")[:120]
-    for t in tracks:
+    for t, pids in tracks:
         k = key(t)
         if k in seen:
+            x = seen[k]
+            with jlock:
+                new = [p for p in pids if p not in (x.get("pids") or [])]
+                if new:  # già in coda o già scaricato, ma da mettere anche in queste playlist
+                    x.update(pids=(x.get("pids") or []) + new, plwait=True)
+                    jsave(x["id"])
+            ids.append(x["id"])
             continue
-        seen.add(k)
         jid = uuid.uuid4().hex[:10]
         j = dict(url="", mode="audio", format=fmt, quality="best", playlist=False, folder=d.get("folder") or "Scaricati",
                  sponsorblock=False, meta={}, track=t, **({"batch": batch, "label": label} if batch else {}))
         with jlock:
-            jobs[jid] = dict(j, id=jid, status="in coda", progress=0, title=f"{', '.join(t['artists'])} - {t['title']}",
-                             created=time.time(), updated=time.time(), by=g.who["user"])
+            jobs[jid] = seen[k] = dict(j, id=jid, status="in coda", progress=0, title=f"{', '.join(t['artists'])} - {t['title']}",
+                                       created=time.time(), updated=time.time(), by=g.who["user"], **({"pids": pids, "plwait": True} if pids else {}))
             jsave(jid)
         jq.put((jid, j))
         added.append(jid)
-    return jsonify(added=len(added), skipped=len(tracks) - len(added)), 201
+        ids.append(jid)
+    return jsonify(added=len(added), skipped=len(tracks) - len(added), jobs=ids), 201
 
 
 @app.get("/api/jobs")
 def list_jobs():
+    want = [i for i in (request.args.get("ids") or "").split(",") if i][:300]
+    if want:  # solo lo stato, per le barre di avanzamento; inlib = Navidrome ha già il brano
+        with jlock:
+            return jsonify([{k: jobs[i].get(k) for k in ("id", "status", "progress", "error", "inlib")} for i in want if i in jobs])
     with jlock:
         all_ = sorted(jobs.values(), key=lambda x: x["created"], reverse=True)
     if request.args.get("grouped") != "1":
@@ -1717,7 +1901,7 @@ def list_jobs():
 @app.delete("/api/jobs")
 def clear_jobs():
     with jlock:
-        for k in [k for k, x in jobs.items() if x["status"] in DONE]:
+        for k in [k for k, x in jobs.items() if x["status"] in DONE and not x.get("plwait")]:  # resta chi aspetta una playlist
             del jobs[k]
             db.run("DELETE FROM jobs WHERE id = ?", k)
     return jsonify(ok=True)
@@ -1801,6 +1985,7 @@ if __name__ == "__main__":
     for _ in range(2):
         threading.Thread(target=worker, daemon=True).start()
     resume_jobs()
+    threading.Thread(target=lib_loop, daemon=True).start()
     threading.Thread(target=gc_rooms, daemon=True).start()
     federazione.start()
     radio.start()

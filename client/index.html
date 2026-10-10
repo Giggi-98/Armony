@@ -187,6 +187,13 @@ label.check small{display:block;color:var(--muted)}
 .song.ghost{cursor:default}
 .song.ghost .n,.song.ghost .t,.song.ghost .d{opacity:.5}
 .song.ghost .acts{display:flex;align-items:center}
+/* download avviato da una pagina: barretta sottile con la percentuale al posto del tasto "Scarica" */
+.jbar{display:inline-flex;flex-direction:column;align-items:stretch;gap:5px;width:84px;flex:none}
+.jbar-t{height:3px;border-radius:99px;background:var(--surface2);overflow:hidden}
+.jbar-t i{display:block;height:100%;background:var(--accent);border-radius:inherit;transition:width .5s var(--ease-out)}
+.jbar em{font-style:normal;font-size:.76rem;font-weight:600;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1}
+.jbar.ok i{background:var(--sage)}.jbar.ok em{color:var(--sage)}
+.jbar.err .jbar-t{opacity:0}.jbar.err em{color:var(--danger)}
 .gaps-note{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s2) var(--s3);margin:0 0 var(--s3);color:var(--muted);font-size:.92rem}
 /* rete: brani dei server collegati (Cerca) e mappa delle librerie (Rete) */
 .song .t small.netsrc,.list-item small.netsrc{display:block;font-size:.8rem;color:var(--accent-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
