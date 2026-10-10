@@ -8,7 +8,7 @@
 #
 # "network_mode: host" serve al multicast LAN e funziona su Linux (Raspberry, NAS, VPS).
 # Su Docker Desktop per Mac/Windows: togli network_mode, aggiungi  ports: ["8080:8080"],
-# metti NAVIDROME_URL: "http://navidrome:4533" e ARMONY_MULTICAST: "0".
+# metti NAVIDROME_URL: "http://navidrome:4533", ARMONY_POT_URL: "http://pot:4416" e ARMONY_MULTICAST: "0".
 
 services:
   navidrome:
@@ -43,6 +43,7 @@ services:
       NAVIDROME_ADMIN_USER: "${NAVIDROME_ADMIN_USER:-}"
       NAVIDROME_ADMIN_PASS: "${NAVIDROME_ADMIN_PASS:-}"
       ARMONY_PORT: "8080"
+      ARMONY_POT_URL: "http://127.0.0.1:4416"
       ARMONY_MULTICAST: "1"
       NAVIDROME_URL: "http://127.0.0.1:4533"
       MUSIC_DIR: "/music"
@@ -58,6 +59,19 @@ services:
       - ./data/navidrome:/navidrome:ro
     depends_on:
       - navidrome
+      - pot
+    restart: unless-stopped
+
+  # PO Token per i download da YouTube (bgutil-ytdlp-pot-provider): senza, YouTube tratta il server da robot molto
+  # prima. Nessun segreto, nessun dato; raggiungibile solo da questa macchina. "daily": a ogni "up" (tasto Aggiorna)
+  # scarica l'immagine nuova se l'ultima ha più di un giorno, come yt-dlp che si aggiorna a ogni avvio
+  pot:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: armony-pot
+    pull_policy: daily
+    init: true
+    ports:
+      - "127.0.0.1:4416:4416"
     restart: unless-stopped
 
   turn:

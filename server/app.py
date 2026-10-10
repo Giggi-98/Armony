@@ -26,6 +26,9 @@ Armony - server di supporto.
                         per il proprio utente (capacità "presenza")
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download");
                         /api/jobs?grouped=1 riunisce i brani di un'importazione in un gruppo con l'avanzamento
+  /api/youtube          stato di YouTube per i download (solo amministratori): cookie di un account secondario
+                        (PUT/DELETE /api/youtube/cookies, in data/armony/youtube-cookies.txt), servizio PO Token,
+                        pausa dopo un blocco; POST /api/youtube/prova scarica un video di 19 secondi come prova
   /api/discografia      tutta la discografia di un artista e un suo album, da Deezer (permesso "download")
   /api/import           brani da Spotify (Exportify): metadati completati, ricerca per durata, tag e cartelle per album
   /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
@@ -92,9 +95,9 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
-RULES = (("/api/update", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -994,6 +997,33 @@ jlock = threading.Lock()
 # una coda e due esecutori fissi: con un'importazione da migliaia di brani un thread per lavoro non regge
 jq = queue.Queue()
 COOKIES = os.path.join(os.path.dirname(db.PATH), "youtube-cookies.txt")
+# PO Token di YouTube: il plugin bgutil di yt-dlp li chiede al servizio "pot" del compose (armony-pot)
+POT_URL = os.environ.get("ARMONY_POT_URL", "http://127.0.0.1:4416").rstrip("/")
+YT_BLOCCO = "YouTube ha bloccato il server (chiede di confermare che non è un robot): aggiungi i cookie di un account secondario in Impostazioni → YouTube"
+# ─── PERCHÉ una pausa e un ritmo ───
+# Senza account YouTube regge circa 300 video l'ora per indirizzo; un'importazione da migliaia di brani li supera,
+# e da lì ogni richiesta riceve "not a bot". Insistere allunga il blocco: i brani importati aspettano la fine della
+# pausa invece di finire tutti in errore, e fra un video e l'altro passa sempre qualche secondo, fra tutti gli esecutori
+yt = {"pausa": 0, "ultimo": 0, "attesa": []}
+ytlock = threading.Lock()
+
+
+def yt_opts(**kw):
+    """Opzioni comuni a ogni uso di yt-dlp: cookie dell'account secondario, se ci sono, e PO Token."""
+    return {"quiet": True, "no_warnings": True, "cookiefile": COOKIES if os.path.exists(COOKIES) else None,
+            "extractor_args": {"youtubepot-bgutilhttp": {"base_url": [POT_URL]}}, **kw}
+
+
+def yt_bloccato(err):
+    return any(k in str(err) for k in ("not a bot", "rate-limited", "rate limited"))
+
+
+def yt_turno():
+    # un video ogni 12 s, fra tutti gli esecutori: 300 l'ora. Con un account il limite è circa 2000 l'ora
+    gap = 4 if os.path.exists(COOKIES) else 12
+    with ytlock:
+        time.sleep(max(0, yt["ultimo"] + gap - time.time()))
+        yt["ultimo"] = time.time()
 
 
 JOB_KEYS = ("url", "mode", "format", "quality", "playlist", "folder", "sponsorblock", "meta", "track", "fed")
@@ -1025,7 +1055,15 @@ def resume_jobs():
 
 def worker():
     while True:
-        jid, j = jq.get()
+        with jlock:  # finita la pausa di YouTube (o arrivati i cookie) i brani in attesa tornano in coda
+            if yt["attesa"] and time.time() >= yt["pausa"]:
+                for x in yt["attesa"]:
+                    jq.put(x)
+                yt["attesa"].clear()
+        try:
+            jid, j = jq.get(timeout=30)
+        except queue.Empty:
+            continue
         try:
             (run_brano if j.get("track") else federazione.run_copy if j.get("fed") else run_job)(jid, j)
         except Exception as e:  # noqa: BLE001 — un lavoro rotto non deve fermare la coda
@@ -1071,13 +1109,14 @@ def run_job(jid, j):
         sponsor = [{"key": "SponsorBlock", "categories": ["music_offtopic", "intro", "outro", "selfpromo", "sponsor"], "when": "after_filter"},
                    {"key": "ModifyChapters", "remove_sponsor_segments": ["music_offtopic", "intro", "outro", "selfpromo", "sponsor"]}]
 
-    opts = {
-        "cookiefile": COOKIES if os.path.exists(COOKIES) else None,
-        "outtmpl": os.path.join(base, dir_tpl, name_tpl),
-        "noplaylist": not j["playlist"], "ignoreerrors": j["playlist"],
-        "windowsfilenames": True, "quiet": True, "no_warnings": True, "retries": 5,
-        "progress_hooks": [progress], "writethumbnail": True,
-    }
+    opts = yt_opts(
+        outtmpl=os.path.join(base, dir_tpl, name_tpl),
+        noplaylist=not j["playlist"], ignoreerrors=j["playlist"],
+        windowsfilenames=True, retries=5,
+        progress_hooks=[progress], writethumbnail=True,
+    )
+    if j["playlist"]:  # fra un video e l'altro della playlist, come consiglia yt-dlp per non farsi bloccare
+        opts.update(sleep_interval=5, max_sleep_interval=10)
     if audio:
         opts["format"] = "bestaudio/best"
         opts["postprocessors"] = pre + sponsor + [
@@ -1101,7 +1140,7 @@ def run_job(jid, j):
                  {"album": meta["album"], "artist": meta.get("artist")} if audio and meta.get("album") else None,
                  merge="dl" if audio else "video", many="ha scaricato {n} brani" if audio else "ha scaricato {n} video")
     except Exception as e:  # noqa: BLE001
-        jupdate(jid, status="errore", error=str(e)[:400], finished=time.time())
+        jupdate(jid, status="errore", error=YT_BLOCCO if yt_bloccato(e) else str(e)[:400], finished=time.time())
 
 
 # brani importati: da evitare se il titolo originale non li nomina
@@ -1151,44 +1190,77 @@ def run_brano(jid, j):
 
     q = f"{(artists or [''])[0]} - {title}"
     fmt = j.get("format") or "m4a"
-    got, last_err = None, ""
-    cookies = COOKIES if os.path.exists(COOKIES) else None
+    got, last_err, bloccato = None, "", False
+    attese = jobs[jid].get("attese", 0)
+
+    def aspetta():
+        # YouTube in pausa: il brano torna in coda alla fine della pausa (al massimo 8 volte, circa 4 ore)
+        shutil.rmtree(tmp, ignore_errors=True)
+        jupdate(jid, status="in attesa di YouTube", attese=attese + 1, progress=0)
+        with jlock:
+            yt["attesa"].append((jid, j))
+
+    def ferma():
+        # YouTube si ferma per mezz'ora per tutti; il brano aspetta invece di accontentarsi di SoundCloud
+        yt["pausa"] = max(yt["pausa"], time.time() + 1800)
+        return attese < 8
+
+    if time.time() < yt["pausa"] and attese < 8:
+        return aspetta()
     for src in (f"ytsearch8:{q}", f"scsearch8:{q}"):
+        su_yt = src.startswith("yt")
         try:
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "cookiefile": cookies}) as y:
+            with yt_dlp.YoutubeDL(yt_opts(extract_flat="in_playlist")) as y:
                 found = [e for e in (y.extract_info(src, download=False) or {}).get("entries") or [] if e and e.get("url")]
         except Exception as e:  # noqa: BLE001
             last_err, found = str(e)[:300], []
+            if su_yt and yt_bloccato(e):
+                bloccato = True
+                if ferma():
+                    return aspetta()
         if not found:
             continue
         found.sort(key=punteggio, reverse=True)
-        opts = {"outtmpl": os.path.join(tmp, "%(id)s.%(ext)s"), "quiet": True, "no_warnings": True, "retries": 3,
-                "ignoreerrors": False, "progress_hooks": [progress], "cookiefile": cookies,
-                # M4A e Opus arrivano già così da YouTube: si estrae senza ricodificare
-                "format": f"bestaudio[ext={'webm' if fmt == 'opus' else fmt}]/bestaudio/best",
-                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": fmt, "preferredquality": AUDIO_QUALITIES.get(j.get("quality") or "best", "0")}]}
+        opts = yt_opts(outtmpl=os.path.join(tmp, "%(id)s.%(ext)s"), retries=3, ignoreerrors=False, progress_hooks=[progress],
+                       # M4A e Opus arrivano già così da YouTube: si estrae senza ricodificare
+                       format=f"bestaudio[ext={'webm' if fmt == 'opus' else fmt}]/bestaudio/best",
+                       postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": fmt, "preferredquality": AUDIO_QUALITIES.get(j.get("quality") or "best", "0")}])
         if not m.get("cover"):  # senza copertina vera si tiene almeno quella del video
             opts["writethumbnail"] = True
             opts["postprocessors"] += [{"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"}, {"key": "EmbedThumbnail"}]
-        # il migliore; se il download fallisce (video bloccato, rimosso) si prova il successivo
-        for e in found[:3]:
-            jupdate(jid, status="in corso", source="YouTube" if src.startswith("yt") else "SoundCloud",
+        # il migliore; se il download fallisce (video bloccato, rimosso) si prova il successivo. I brani protetti da
+        # DRM (frequenti su SoundCloud) si saltano senza contarli: falliscono subito, prima di scaricare
+        tentati = 0
+        for e in found:
+            if tentati >= 3:
+                break
+            jupdate(jid, status="in corso", source="YouTube" if su_yt else "SoundCloud",
                     scelto=f"{e.get('title')} ({e.get('channel') or e.get('uploader') or '?'}, {round(e['duration']) if e.get('duration') else '?'} s)")
             try:
+                if su_yt:
+                    yt_turno()
                 with yt_dlp.YoutubeDL(opts) as y:
                     y.download([e["url"]])
             except Exception as ex:  # noqa: BLE001
                 last_err = str(ex)[:300]
+                if "DRM" in last_err:
+                    continue
+                if su_yt and yt_bloccato(ex):
+                    bloccato = True
+                    break
+            tentati += 1
             files = [f for f in os.listdir(tmp) if f.rsplit(".", 1)[-1].lower() in UPLOAD_AUDIO]
             if files:
                 got = os.path.join(tmp, files[0])
                 break
         if got:
             break
+        if bloccato and ferma():
+            return aspetta()
     if not got:
         shutil.rmtree(tmp, ignore_errors=True)
         return jupdate(jid, status="errore", finished=time.time(),
-                       error="Non trovato né su YouTube né su SoundCloud" + (f" ({last_err})" if last_err else ""))
+                       error=YT_BLOCCO if bloccato else "Non trovato né su YouTube né su SoundCloud" + (f" ({last_err})" if last_err else ""))
     try:
         metadati.tagga(got, m, pulisci=bool(m.get("cover")))
         base = os.path.join(MUSIC_DIR, clean_segment(j.get("folder"), "Scaricati"))
@@ -1731,7 +1803,7 @@ def search():
     if not q:
         return jsonify([])
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "skip_download": True}) as y:
+        with yt_dlp.YoutubeDL(yt_opts(extract_flat="in_playlist", skip_download=True)) as y:
             info = y.extract_info(f"{src}{n}:{q}", download=False)
     except Exception as e:  # noqa: BLE001
         return jsonify(error=str(e)[:300]), 502
@@ -1746,6 +1818,88 @@ def search():
         out.append(dict(title=e.get("title"), channel=e.get("channel") or e.get("uploader"), duration=e.get("duration"),
                         url=url, thumb=(thumbs[-1].get("url") if thumbs else None), views=e.get("view_count")))
     return jsonify(out)
+
+
+# ------------------------------------------------------------------ YouTube: cookie e prova (solo amministratori)
+YT_AUTH = ("SID", "__Secure-1PSID", "__Secure-3PSID", "SAPISID", "LOGIN_INFO")
+YT_PROVA = "https://www.youtube.com/watch?v=jNQXAC9IVRw"  # "Me at the zoo": 19 secondi, sempre online
+
+
+def cookie_righe(testo):
+    """Le righe di un cookies.txt (formato Netscape) che riguardano YouTube e Google: il resto non serve e non si tiene."""
+    out = []
+    for r in testo.splitlines():
+        c = r.removeprefix("#HttpOnly_").split("\t")
+        if len(c) == 7 and not r.startswith("# ") and c[0].lstrip(".").endswith(("youtube.com", "google.com")):
+            out.append(r)
+    return out
+
+
+def cookie_stato():
+    try:
+        righe, quando = cookie_righe(open(COOKIES, encoding="utf-8", errors="replace").read()), os.path.getmtime(COOKIES)
+    except OSError:
+        return {"present": False}
+    # scadenza dei cookie di accesso; 0 = cookie di sessione, che yt-dlp tiene finché il file esiste
+    scad = [int(c[4]) for c in (r.removeprefix("#HttpOnly_").split("\t") for r in righe)
+            if c[5] in YT_AUTH and c[0].lstrip(".").endswith("youtube.com") and c[4].isdigit()]
+    fine = min((x for x in scad if x), default=None)
+    return {"present": True, "count": len(righe), "login": bool(scad), "expires": fine,
+            "expired": bool(scad) and fine is not None and fine < time.time(), "saved": quando}
+
+
+def pot_ok():
+    try:
+        return http.get(POT_URL + "/ping", timeout=3).ok
+    except requests.RequestException:
+        return False
+
+
+@app.get("/api/youtube")
+def youtube_stato():
+    return jsonify(cookies=cookie_stato(), pot=pot_ok(), pausa=max(0, round(yt["pausa"] - time.time())),
+                   ytdlp=yt_dlp.version.__version__)
+
+
+@app.put("/api/youtube/cookies")
+def youtube_cookie_salva():
+    testo = request.get_data(cache=False, as_text=True)[:2_000_000]
+    righe = cookie_righe(testo)
+    if not righe:
+        return jsonify(error="Non è un file cookies.txt di YouTube (formato Netscape): esportalo da youtube.com con l'estensione «Get cookies.txt LOCALLY»."), 400
+    tmp = COOKIES + ".tmp"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
+        f.write("# Netscape HTTP Cookie File\n" + "\n".join(righe) + "\n")
+    os.replace(tmp, COOKIES)
+    yt["pausa"] = 0  # con l'account il blocco dell'indirizzo non conta più: i brani in attesa ripartono
+    return jsonify(cookies=cookie_stato())
+
+
+@app.delete("/api/youtube/cookies")
+def youtube_cookie_togli():
+    try:
+        os.remove(COOKIES)
+    except FileNotFoundError:
+        pass
+    return jsonify(cookies=cookie_stato())
+
+
+@app.post("/api/youtube/prova")
+def youtube_prova():
+    """Scarica davvero l'audio di un video di 19 secondi: dice se oggi il server riesce a scaricare da YouTube."""
+    tmp = os.path.join("/tmp/armony-dl", "prova-" + uuid.uuid4().hex[:6])
+    t0 = time.time()
+    try:
+        with yt_dlp.YoutubeDL(yt_opts(outtmpl=os.path.join(tmp, "%(id)s.%(ext)s"), format="bestaudio/best", retries=1)) as y:
+            y.download([YT_PROVA])
+        ok, err = any(os.scandir(tmp)), None
+    except Exception as e:  # noqa: BLE001
+        ok, err = False, (YT_BLOCCO if yt_bloccato(e) else re.sub(r"\x1b\[[0-9;]*m", "", str(e))[:300])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if ok:
+        yt["pausa"] = 0  # funziona di nuovo: i brani in attesa ripartono
+    return jsonify(ok=ok, error=err, secondi=round(time.time() - t0, 1), pot=pot_ok(), ytdlp=yt_dlp.version.__version__)
 
 
 @app.get("/api/videos")
@@ -1798,6 +1952,8 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(MUSIC_DIR, "Scaricati"), exist_ok=True)
     os.makedirs(VIDEO_DIR, exist_ok=True)
     db.migrate()
+    # i plugin di yt-dlp (PO Token) si caricano alla prima istanza: qui, prima che due esecutori li carichino insieme
+    yt_dlp.YoutubeDL(yt_opts()).close()
     for _ in range(2):
         threading.Thread(target=worker, daemon=True).start()
     resume_jobs()
