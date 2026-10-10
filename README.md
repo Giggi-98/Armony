@@ -17,6 +17,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - Qualità fino all'originale (FLAC), dissolvenza fra i brani, normalizzazione del volume, equalizzatore a 10 bande con modalità **automatica** che si regola su ogni brano, protezione dai gracchi, volume notte, timer.
 - Testi sincronizzati in stile karaoke, visualizzatore, radio da un brano o da un artista, mix pronti e **mix del giorno** sui tuoi artisti preferiti.
 - **Cache dei brani** come Spotify: i prossimi della coda arrivano prima che servano e partono subito, anche senza rete. L'app si apre all'istante anche in 5G.
+- Sul telefono si usa come Spotify: mini lettore da scorrere, lettore a tutto schermo, menu del profilo, tieni premuto per il menu di un brano, coda con «Prossimi in coda» e brani simili quando finisce.
 - Menu, ordinamenti e «Cerca qui» come su Spotify in ogni playlist e album; sul computer, **tasto destro** su brani, album, artisti e playlist per tutte le azioni.
 
 **Più dispositivi, una sola musica**

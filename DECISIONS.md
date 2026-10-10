@@ -27,6 +27,22 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Telefono riorganizzato come Spotify (ribalta le voci sul lettore a due righe e su «Altro»)
+
+**Contesto:** l'utente chiede di riorganizzare l'app sul telefono «prendendo super spunto da Spotify moderno»: voci, disposizione e interazioni col lettore. Ribalta tre scelte: «Telefono: navigazione in basso, attaccata al lettore» (2026-10-08, che aveva scartato «lettore a una riga con i comandi solo in In riproduzione»), «Telefono: … lettore che si riduce» (2026-10-09) e «Radio sezione a sé, barra in basso scelta dall'utente» (2026-10-10) per la parte «"Altro" sempre ultimo».
+**Scelta:** sul telefono (≤860 px): intestazione con l'iniziale dell'utente che apre un **menu del profilo** da sinistra (sezioni fuori dalla barra, server e qualità, tema, barra in basso); la barra in basso ha solo le sezioni scelte, senza «Altro». **Mini lettore** a una riga: scheda col colore della copertina (`--mini` da `Glow`), copertina quadrata, titolo e artista (o il dispositivo che suona), «Dove suona», cuore, ▶, linea d'avanzamento; scorrere a sinistra/destra cambia brano, in su apre il lettore. **Lettore a tutto schermo** su `#/ora`: niente intestazione né sezioni (`data-r="ora"`), il lettore in basso diventa il pannello comandi grande (stessi elementi, altra griglia CSS, niente doppioni di logica), in alto «In riproduzione da …» (`S.ctx`, salvato con la coda) e ⋯ con timer, velocità, equalizzatore, qualità. Tenere premuto un brano apre il suo menu dal basso. Libreria a elenco con «+». Computer invariato.
+**Alternative scartate:** un secondo lettore a tutto schermo con i suoi comandi (doppia logica di posizione, onda, stati); togliere la scelta della barra (l'utente l'aveva voluta); copertina quadrata al posto del disco anche nel lettore grande (il disco è il segno di Armony: Spotify è il modello per disposizione e gesti, non per l'aspetto).
+**Conseguenze:** prev/next, casuale e ripeti non sono più nel mini lettore: si cambiano brani scorrendo o dal lettore grande. Le pillole Jam/radio/timer restano in una riga sotto la scheda solo quando servono.
+**Da rivedere se:** il telefono si usa in orizzontale o su tablet sopra gli 860 px.
+
+## 2026-10-11 — Coda come Spotify, coda da telecomando, brani simili a fine coda
+
+**Contesto:** «Aggiungi alla coda» finiva dopo tutta la playlist e da telecomando modificava una coda nascosta che non suonava (il «Da rivedere se» della voce sui dispositivi agganciati del 2026-10-09).
+**Scelta:** `Q` in `armony.js`: i brani aggiunti a mano sono segnati `_q` e vanno dopo gli altri aggiunti a mano («Riproduci dopo»: subito dopo il brano in corso); da telecomando i comandi `enqueue`/`playnext` (capacità `liveq`) li mettono nella coda del dispositivo che suona. Il casuale ricorda l'ordine originale (`_o`) e lo ripristina. Il passaggio fra dispositivi porta casuale e ripeti. A fine coda `autoContinue` accoda 25 brani simili (`similar`, la stessa ricerca della radio del brano), segnati `_s`; preferenza `autoplay`.
+**Alternative scartate:** una coda separata per i brani aggiunti a mano (due strutture da tenere allineate in Live, QSync e Jam); brani simili calcolati sul server (il client ha già la ricerca della radio).
+**Conseguenze:** i segni `_q`/`_s`/`_o` non viaggiano nel passaggio fra dispositivi (wire): l'altro dispositivo vede una coda normale.
+**Da rivedere se:** serve modificare la coda dell'altro dispositivo anche in altri modi (spostare, togliere).
+
 ## 2026-10-10 — Armony 0.23: decisioni del piano 2 prese dall'agente su mandato dell'utente
 
 **Contesto:** l'utente ha chiesto di procedere con la 0.23 del piano (`docs/PIANO-2.md`) lasciando all'agente le sei decisioni aperte.

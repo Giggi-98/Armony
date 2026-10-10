@@ -603,8 +603,11 @@ dialog.bio .biotxt{color:var(--ink);opacity:.9;line-height:1.65;font-size:1rem;w
 .lcards.list .lcover svg{width:24px;height:24px}
 .lcards.list .lcard b{align-self:end}
 .lcards.list .lcard small{align-self:start;-webkit-line-clamp:1}
+.qhead{font-size:1rem;margin:var(--s5) 0 var(--s2)}
+.qhead:first-child{margin-top:0}
 .lhead{display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
 .lhead h1{margin-bottom:0}
+@media (min-width:861px){body:has(#themeBtn:not([hidden])) .lhead{padding-right:52px}}
 .lhead .icon-btn svg{width:26px;height:26px}
 .lcard.special svg{width:34%;height:34%}
 /* lettera dell'indice degli artisti: una riga intera, compatta */

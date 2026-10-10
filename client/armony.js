@@ -143,7 +143,7 @@ const QUALITIES = {
 const DEFAULT_PREFS = {
   quality: '192', qualityMobile: 'same', offlineQ: '192', crossfade: 0, rg: 'track', rgPre: 0, night: false, speed: 1,
   eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqOn: true, eqAuto: false, compat: false, lyricsOnline: true, syncQueue: true,
-  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true, live: true, deviceName: '', solo: false, cacheMB: 1024
+  nick: '', stun: true, turn: { url: '', user: '', pass: '' }, theme: 'auto', volume: 1, visualizer: true, sync: true, live: true, deviceName: '', solo: false, cacheMB: 1024, autoplay: true
 };
 const P = Object.assign({}, DEFAULT_PREFS, store.get('prefs', {}));
 // restano su questo dispositivo anche con la sincronizzazione attiva
@@ -1366,6 +1366,11 @@ function vQueue() {
       <button class="btn" data-act="dedupe">Togli doppioni</button>
       <button class="btn danger" data-act="clearqueue">Svuota</button>
     </div>${songList(S.queue, { queue: true, empty: 'La coda è vuota.' })}`;
+  // come Spotify: "In riproduzione", "Prossimi in coda" (aggiunti a mano) e "Prossimi da …" (il resto della playlist o dell'album)
+  const row = i => view.querySelector(`.songs .song[data-i="${i}"]`), head = (i, txt) => row(i)?.insertAdjacentHTML('beforebegin', `<h2 class="qhead">${txt}</h2>`);
+  if (S.index >= 0) head(S.index, 'In riproduzione');
+  let i = S.index + 1; if (S.queue[i]?._q) { head(i, 'Prossimi in coda'); while (S.queue[i]?._q) i++; }
+  if (S.queue[i]) head(i, S.ctx?.name ? `Prossimi da: ${esc(S.ctx.name)}` : 'Prossimi');
   $('.song.now')?.scrollIntoView?.({ block: 'center' });
 }
 function vKeys() {
@@ -1958,7 +1963,9 @@ const Engine = {
     const n = this.nextIndex(); if (n == null || S.repeat === 'one' || Sleep.eot) return;
     const nt = S.queue[n];
     if (rem < 30 && this.idle.dataset.key !== key(nt) && !this.fading) this.load(nt, 1 - this.cur, { autoplay: false });
-    if (P.crossfade > 0 && this.ctx && !this.fading && rem <= P.crossfade && rem > .3) this.crossfade(n, rem);
+    // niente dissolvenza fra brani consecutivi dello stesso album (live, mix, concept: sono fatti per legarsi)
+    const seq = t.albumId && t.albumId === nt.albumId && nt.track === (t.track || 0) + 1;
+    if (P.crossfade > 0 && this.ctx && !this.fading && !seq && rem <= P.crossfade && rem > .3) this.crossfade(n, rem);
   },
   async crossfade(n, rem) {
     this.fading = true;
@@ -1977,7 +1984,7 @@ const Engine = {
     if (Sleep.eot) { Sleep.clear(); toast('Fine brano: buonanotte.'); paintButtons(); return; }
     if (S.repeat === 'one') { this.el.currentTime = 0; this.el.play(); return; }
     const n = this.nextIndex();
-    if (n == null) { paintButtons(); emit('pause'); return; }
+    if (n == null) { if (P.autoplay !== false) return autoContinue(currentTrack()); paintButtons(); emit('pause'); return; }
     playIndex(n);
   },
   time() { return this.el.currentTime || 0; },
@@ -2001,7 +2008,10 @@ const CTX_KIND = { playlist: 'Playlist', album: 'Album', 'album-dz': 'Album', ar
   cerca: 'Ricerca', home: 'Home', genere: 'Genere', decennio: 'Decennio', offline: 'Offline', libreria: 'Libreria', statistiche: 'Statistiche', amici: 'Amici' };
 function setCtx() {
   const r = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
-  S.ctx = r === 'ora' || r === 'coda' ? S.ctx : { kind: CTX_KIND[r] || '', name: ($('#view h1')?.textContent || '').trim().slice(0, 80), hash: location.hash };
+  // pagine senza un nome proprio (la Home ha il saluto come titolo): basta il nome della sezione
+  const own = ['playlist', 'album', 'album-dz', 'artista', 'artista-dz', 'genere', 'decennio'].includes(r);
+  S.ctx = r === 'ora' || r === 'coda' ? S.ctx : own ? { kind: CTX_KIND[r] || '', name: ($('#view h1')?.textContent || '').trim().slice(0, 80), hash: location.hash }
+    : { kind: '', name: CTX_KIND[r] || '', hash: location.hash };
   store.set('qctx', S.ctx);
 }
 function setQueue(tracks, start = 0, shuffle = false) {
@@ -2046,7 +2056,7 @@ function ctlNext(auto) {
   if (Radio.st) return auto ? undefined : radioNo();
   if (Live.remote()) return auto ? undefined : Live.cmd('next');
   const n = S.index < S.queue.length - 1 ? S.index + 1 : (S.repeat === 'all' ? 0 : null);
-  if (n != null) playIndex(n); else if (auto) Engine.el.pause();
+  if (n != null) playIndex(n); else if (auto) Engine.el.pause(); else if (P.autoplay !== false) autoContinue(currentTrack());
 }
 function ctlPrev() {
   if (Jam.role === 'guest') return Jam.guestControl('prev');
@@ -2061,9 +2071,13 @@ function ctlSeek(sec) {
   try { Engine.el.currentTime = Math.max(0, sec); } catch {}
   emit('seek');
 }
+// casuale come Spotify: i brani aggiunti a mano restano primi; spegnendolo torna l'ordine della playlist o dell'album (_o)
 function ctlShuffle() {
   S.shuffle = !S.shuffle; store.set('shuffle', S.shuffle);
-  if (S.shuffle && S.queue.length > S.index + 2) { S.queue = [...S.queue.slice(0, S.index + 1), ...shuffleArr(S.queue.slice(S.index + 1))]; persistQueue(); emit('queue'); if (location.hash.startsWith('#/coda')) vQueue(); }
+  const head = S.queue.slice(0, S.index + 1), rest = S.queue.slice(S.index + 1), mine = rest.filter(t => t._q), ctx = rest.filter(t => !t._q);
+  if (S.shuffle) { S.queue.forEach((t, i) => { if (t._o == null) t._o = i; }); S.queue = [...head, ...mine, ...shuffleArr(ctx)]; }
+  else S.queue = [...head, ...mine, ...ctx.sort((a, b) => (a._o ?? 1e9) - (b._o ?? 1e9))];
+  if (rest.length > 1) { persistQueue(); emit('queue'); if (location.hash.startsWith('#/coda')) vQueue(); }
   paintButtons();
 }
 function ctlRepeat() { S.repeat = { off: 'all', all: 'one', one: 'off' }[S.repeat]; store.set('repeat', S.repeat); paintButtons(); }
@@ -3233,15 +3247,51 @@ async function artistRadio(id) {
   if (!songs.length) { const a = (await api('getArtist', { id })).artist; const albums = await Promise.all(arr(a.album).map(al => api('getAlbum', { id: al.id }))); songs = albums.flatMap(r => arr(r.album.song)); }
   return songs;
 }
-async function radioFrom(t) {
-  toast('Preparo la radio…');
+// coda come Spotify: "Riproduci dopo" va subito dopo il brano attuale, "Aggiungi alla coda" dopo gli altri brani aggiunti a
+// mano (segnati _q) e prima del resto della playlist o dell'album (prima andava in fondo, dopo centinaia di brani).
+// Da telecomando i brani vanno al dispositivo che suona (comandi "playnext"/"enqueue", capacità "liveq")
+const Q = {
+  local(tracks, next) {
+    const l = tracks.map(t => ({ ...t, _q: 1 }));
+    let p = S.index + 1; if (!next) while (S.queue[p]?._q) p++;
+    S.queue.splice(p, 0, ...l); persistQueue(); emit('queue');
+    if (location.hash.startsWith('#/coda')) vQueue();
+  },
+  add(tracks, next) {
+    if (!tracks.length) return toast('Non ci sono brani.');
+    if (Jam.role === 'guest') { tracks.slice(0, 10).forEach(t => Jam.suggest(t)); return; }
+    if (Live.remote()) {
+      if (!srv()?.me?.caps?.includes('liveq')) return toast('Da qui non posso aggiungere brani alla coda del dispositivo che suona: aggiorna Armony sul server.');
+      Live.cmd(next ? 'playnext' : 'enqueue', { tracks: tracks.slice(0, 300).map(wire) });
+    } else this.local(tracks, next);
+    const n = tracks.length, where = Live.remote() ? ` su ${Live.devices.get(Live.target) || 'l\'altro dispositivo'}` : '';
+    toast(next ? (n === 1 ? `Verrà riprodotto dopo il brano attuale${where}.` : `${n} brani dopo quello attuale${where}.`) : (n === 1 ? `Aggiunto alla coda${where}.` : `${n} brani aggiunti alla coda${where}.`));
+  }
+};
+// a fine coda, come l'Autoplay di Spotify: brani simili all'ultimo, segnati "suggeriti" (_s), in fondo alla coda
+async function autoContinue(t) {
+  if (!t || Jam.role || Radio.st || !srv(t.serverId) || t.fed) { paintButtons(); emit('pause'); return; }
+  let l = [];
+  try { l = await similar(t); } catch {}
+  const have = new Set(S.queue.map(key));
+  l = l.filter(x => !have.has(key(x))).slice(0, 25).map(x => ({ ...x, _s: 1 }));
+  if (!l.length || !sameTrack(currentTrack(), t)) { paintButtons(); emit('pause'); return; }
+  S.queue.push(...l); persistQueue(); emit('queue');
+  toast('La coda è finita: continuo con brani simili.');
+  playIndex(S.index + 1);
+}
+async function similar(t) {
   const s = srv(t.serverId); let songs = [];
   try { songs = arr((await api('getSimilarSongs', { id: t.id, count: 60 }, s)).similarSongs?.song); } catch {}
   if (songs.length < 15) { try { songs = songs.concat(arr((await api('getTopSongs', { artist: t.artist, count: 15 }, s)).topSongs?.song)); } catch {} }
   if (songs.length < 25 && t.genre) { try { songs = songs.concat(arr((await api('getSongsByGenre', { genre: t.genre, count: 60 }, s)).songsByGenre?.song)); } catch {} }
   if (songs.length < 25) { try { songs = songs.concat(arr((await api('getRandomSongs', { size: 40 }, s)).randomSongs?.song)); } catch {} }
-  const seen = new Set([t.id]); const list = shuffleArr(songs.filter(x => !seen.has(x.id) && seen.add(x.id))).map(x => norm(x, t.serverId)).slice(0, 80);
-  setQueue([t, ...list], 0);
+  const seen = new Set([t.id]);
+  return shuffleArr(songs.filter(x => !seen.has(x.id) && seen.add(x.id))).map(x => norm(x, t.serverId)).slice(0, 80);
+}
+async function radioFrom(t) {
+  toast('Preparo la radio…');
+  setQueue([t, ...await similar(t)], 0);
 }
 
 /* ================= menu di un brano ================= */
@@ -3381,16 +3431,16 @@ function coverPicker(s, ids, album, q) {
 function songMenu(t, ctx = {}) {
   const d = $('#dlg'), phoneT = !!srv(t.serverId)?.local; d.className = 'sheet';
   const items = t.fed ? [
-    ['nextup', 'Riproduci dopo', () => { S.queue.splice(S.index + 1, 0, t); persistQueue(); toast('Verrà riprodotto dopo il brano attuale.'); }],
-    ['plus', 'Aggiungi alla coda', () => { S.queue.push(t); persistQueue(); toast('Aggiunto alla coda.'); }],
+    ['nextup', 'Riproduci dopo', () => Q.add([t], true)],
+    ['plus', 'Aggiungi alla coda', () => Q.add([t])],
     ['down', 'Copia nella mia libreria', () => netCopy([t])],
     ['offline', 'Salva per l\'offline', () => Offline.save([t])]
   ] : [
     // l'ordine di Spotify: preferiti, playlist, coda, radio, album, artista, crediti, condividi; poi offline e il resto
     ['heart', t.starred ? 'Togli dai Preferiti' : 'Aggiungi ai Preferiti', () => toggleStar(t)],
     can('playlist') ? ['addlist', 'Aggiungi a playlist', () => addToPlaylistDialog([t])] : null,
-    ['plus', 'Aggiungi alla coda', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.push(t); persistQueue(); toast('Aggiunto alla coda.'); }],
-    ['nextup', 'Riproduci dopo', () => { if (Jam.role === 'guest') return Jam.suggest(t); S.queue.splice(S.index + 1, 0, t); persistQueue(); toast('Verrà riprodotto dopo il brano attuale.'); }],
+    ['plus', 'Aggiungi alla coda', () => Q.add([t])],
+    ['nextup', 'Riproduci dopo', () => Q.add([t], true)],
     Jam.role ? ['jam', Jam.role === 'host' ? 'Aggiungi alla coda della Jam' : 'Proponi alla Jam', () => Jam.suggest(t)] : null,
     ['radio', 'Vai alla radio del brano', () => radioFrom(t)],
     t.albumId ? ['album', 'Vai all\'album', () => location.hash = '#/album/' + encodeURIComponent(t.albumId)] : null,
@@ -3462,8 +3512,8 @@ function groupItems(get, before = [], after = []) {
   return [...before,
     ['play', 'Riproduci', run(l => setQueue(l, 0))],
     ['shuffle', 'Riproduci in ordine casuale', run(l => setQueue(l, 0, true))],
-    ['nextup', 'Riproduci dopo', run(l => { if (guest(l)) return; S.queue.splice(S.index + 1, 0, ...l); persistQueue(); toast(l.length === 1 ? 'Verrà riprodotto dopo il brano attuale.' : `${l.length} brani dopo quello attuale.`); })],
-    ['plus', 'Aggiungi alla coda', run(l => { if (guest(l)) return; S.queue.push(...l); persistQueue(); toast(`${l.length} brani aggiunti alla coda.`); })],
+    ['nextup', 'Riproduci dopo', run(l => Q.add(l, true))],
+    ['plus', 'Aggiungi alla coda', run(l => Q.add(l))],
     can('playlist') ? ['addlist', 'Aggiungi a una playlist', run(l => addToPlaylistDialog(l))] : null,
     srv()?.local ? null : ['offline', 'Salva per l\'offline', run(l => Offline.save(l))], ...after].filter(Boolean);
 }
@@ -3561,6 +3611,7 @@ function vSettings(id = location.hash.split('/')[2]) {
     <div class="row between" style="flex-wrap:nowrap;margin-top:calc(-1 * var(--s2))"><small id="cacheUse" style="color:var(--muted)">${bytes(ACache.size())} usati</small><button class="btn sm" data-act="cacheclear">Svuota la cache</button></div>
     <p class="small" style="color:var(--muted);margin:0">Mentre ascolti, i prossimi brani della coda si scaricano prima: partono subito e senza rete. Col Wi-Fi due, in rete mobile uno, con «risparmio dati» nessuno.</p>
     <label class="f">Dissolvenza tra i brani: <span id="cfv">${P.crossfade ? P.crossfade + ' secondi' : 'spenta'}</span><input type="range" min="0" max="12" step="1" value="${P.crossfade}" id="cf"></label>
+    <label class="check"><input type="checkbox" data-pb="autoplay" ${P.autoplay !== false ? 'checked' : ''}><span>Continua con brani simili<small>Quando la coda finisce, la musica prosegue con brani simili all'ultimo, come su Spotify.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="night" ${P.night ? 'checked' : ''}><span>Volume notte<small>Comprime la dinamica: i passaggi forti si abbassano, quelli piano si sentono. Utile di sera o in auto.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="visualizer" ${P.visualizer ? 'checked' : ''}><span>Visualizzatore nella schermata In riproduzione</span></label>
     <label class="check"><input type="checkbox" data-pb="compat" ${P.compat ? 'checked' : ''}><span>Modalità compatibile<small>Disattiva equalizzatore, dissolvenza e trasmissione nelle Jam. Attivala se su iPhone la musica si ferma a schermo bloccato. Richiede di ricaricare la pagina.</small></span></label>
@@ -4311,11 +4362,11 @@ view.addEventListener('click', async e => {
       case 'qplayoff': playIndex(S.index + 1 + i); break;
       case 'playall': setQueue(list, 0, S.shuffle); break;
       case 'shuffleall': setQueue(list, 0, true); break;
-      case 'enqueueall': if (Jam.role === 'guest') { list.slice(0, 10).forEach(t => Jam.suggest(t)); break; } S.queue.push(...list); persistQueue(); flyToQueue(el); toast(`${list.length} brani aggiunti alla coda.`); break;
+      case 'enqueueall': Q.add(list); if (Jam.role !== 'guest') flyToQueue(el); break;
       case 'offlineall': Offline.save(list); break;
       case 'offpin': { const name = id === 'preferiti' ? 'Preferiti' : JSON.parse(view.dataset.plMeta || '{}').name || 'Playlist'; await OffPin.toggle(id, name, list); el.outerHTML = pinBtn(id); break; }
       case 'addalltopl': addToPlaylistDialog(list); break;
-      case 'enqueue': if (Jam.role === 'guest') { Jam.suggest(list[i]); break; } S.queue.push(list[i]); persistQueue(); flyToQueue(el); toast('Aggiunto alla coda.'); break;
+      case 'enqueue': Q.add([list[i]]); if (Jam.role !== 'guest') flyToQueue(el); break;
       case 'more': songMenu(list[i], { pl: view.dataset.pl ? (list[i]._pi ?? i) : null }); break;
       case 'star': {
         const t = list[i]; await api(t.starred ? 'unstar' : 'star', { id: t.id }, srv(t.serverId));
@@ -4865,10 +4916,15 @@ const Live = {
     const v = m.value;
     if (m.cmd === 'transfer' && v && Array.isArray(v.queue)) {
       this.target = null; this.pill(); S.queue = v.queue.map(w => this.loc(w)).filter(Boolean);
+      // casuale e ripeti passano insieme alla musica
+      if (typeof v.shuffle === 'boolean') { S.shuffle = v.shuffle; store.set('shuffle', S.shuffle); }
+      if (['off', 'all', 'one'].includes(v.repeat)) { S.repeat = v.repeat; store.set('repeat', S.repeat); }
+      paintButtons();
       if (S.queue.length) this.play(Math.min(v.index || 0, S.queue.length - 1), v.position || 0);
       return;
     }
     if (m.cmd === 'handoff') { if (v?.to && v.to !== S.device) this.give(v.to); return; }
+    if ((m.cmd === 'enqueue' || m.cmd === 'playnext') && Array.isArray(v?.tracks) && !this.remote()) { Q.local(v.tracks.map(w => this.loc(w)).filter(Boolean), m.cmd === 'playnext'); return; }
     if (Radio.st) return ({ play: () => Radio.resume(), pause: () => Radio.pause(), toggle: ctlToggle })[m.cmd]?.();  // radio: solo play e pausa
     if (this.remote() || !S.queue[S.index]) return;  // i comandi valgono solo per chi suona
     ({ play: () => Engine.el.paused && ctlToggle(), pause: () => !Engine.el.paused && ctlToggle(), toggle: ctlToggle,
@@ -4879,7 +4935,7 @@ const Live = {
     // il browser può bloccare l'audio partito senza un tocco su questa pagina; l'app no
     setTimeout(() => { if (Engine.el.paused && !this.target) toast('Il browser ha bloccato l\'avvio: premi play per ascoltare qui.', 6000); }, 1500);
   },
-  pack(q, i, pos) { const from = Math.max(0, i - 50); return { queue: q.slice(from, from + 1000).map(wire), index: i - from, position: pos }; },
+  pack(q, i, pos) { const from = Math.max(0, i - 50); return { queue: q.slice(from, from + 1000).map(wire), index: i - from, position: pos, shuffle: S.shuffle, repeat: S.repeat }; },
   // la coda di questo dispositivo va a un altro, che riparte dallo stesso punto; qui si diventa telecomando
   async give(to) {
     if (Radio.st) await Radio.leave(true);  // si passa la coda, non la radio

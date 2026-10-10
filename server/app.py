@@ -32,6 +32,7 @@ Armony - server di supporto.
                         /api/live/stato: dispositivi e stati in quel momento, per riallinearsi (capacità "livestato")
                         e i comandi in attesa (?device=), lo stato di un comando (?cmd=); /api/live/ack conferma,
                         DELETE /api/live/cmd/<id> annulla: i comandi restano 30 s finché non arrivano (capacità "livecmd")
+                        comandi "enqueue"/"playnext" con {"tracks": [...]}: in coda sul dispositivo che suona (capacità "liveq")
                         Sullo stesso canale arrivano a tutti gli utenti "presence" (chi ascolta cosa sul server) e
                         "activity" (download, caricamenti, playlist pubbliche, Jam); /api/live/privacy li spegne
                         per il proprio utente (capacità "presenza"). E "libreria": brani nuovi visti da Navidrome
@@ -136,7 +137,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
 RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
@@ -1097,7 +1098,8 @@ def live_cmd():
     u, d = user_or_400(), request.get_json(silent=True) or {}
     to, cmd = str(d.get("to") or ""), str(d.get("cmd") or "")
     # transfer: "suona questa coda da qui"; handoff: "passa la tua coda a quel dispositivo"; skipto: "suona l'n-esimo dei prossimi"
-    if cmd not in ("play", "pause", "toggle", "next", "prev", "seek", "shuffle", "repeat", "transfer", "handoff", "skipto"):
+    # enqueue/playnext: brani in coda da un telecomando (capacità "liveq"), value = {"tracks": [...]}
+    if cmd not in ("play", "pause", "toggle", "next", "prev", "seek", "shuffle", "repeat", "transfer", "handoff", "skipto", "enqueue", "playnext"):
         return jsonify(error="Comando non valido"), 400
     with llock:
         present = any(c["device"] == to for c in lconns.get(u, {}).values())
