@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Proposte per «Da controllare» cercate in sottofondo, una alla volta
+
+**Contesto:** con oltre cento brani da controllare, aprire «Scegli» per ognuno era troppo lento: l'utente vuole vedere subito la versione giusta quando c'è e farle partire tutte insieme.
+**Scelta:** un thread del server (`scelta.proposte`) cerca un brano alla volta, con 2 secondi di pausa e rispettando la pausa di YouTube dopo un blocco; la proposta è il primo candidato sicuro, senza parole sospette, diverso dal file attuale e (se si conosce da Spotify) con la durata entro 4 s o il 3%. Le proposte restano in memoria; `POST /api/scelta/proposte` accoda le sostituzioni scelte. Una sostituzione finita segna il brano come controllato.
+**Alternative scartate:** cercare dal client riga per riga quando la lista si apre (raffiche di ricerche a YouTube e lavoro perso chiudendo la pagina); sostituire da solo senza chiedere (una proposta può essere sbagliata e il file è di tutti).
+**Conseguenze:** al primo avvio servono alcuni minuti per proporre cento brani; dopo un riavvio del server le proposte si ricercano.
+**Da rivedere se:** YouTube limita le ricerche anche a questo ritmo, o le proposte servono anche fuori da «Da controllare».
+
 ## 2026-10-10 — Scelta del brano da scaricare: punteggio su più fonti, controllo dopo, origine nel file
 
 **Contesto:** alcuni brani scaricati erano sbagliati: live con audio scarso, videoclip con intro parlata, versioni diverse. Chi ascolta non aveva modo di sapere da dove veniva un file né di correggerlo.

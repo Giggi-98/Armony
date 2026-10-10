@@ -7,6 +7,8 @@ Armony - quale versione scaricare: un pool di candidati con un punteggio, la ver
                                    (permesso "delete": il file è di tutti). Playlist, preferiti e ascolti restano
   GET  /api/scelta/sospetti        i brani scaricati che non hanno convinto la verifica (durata, qualità, live…)
   DELETE /api/scelta/sospetti/<j>  «va bene così»
+  POST /api/scelta/proposte        {ids}: sostituisce in blocco con la versione proposta (quella con la durata giusta,
+                                   cercata in sottofondo per ogni brano da controllare)
   GET  /api/origine?id=…           da dove viene il file e che conversione ha avuto (qualsiasi utente)
 
 ─── PERCHÉ YouTube Music per primo ───
@@ -21,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import threading
 import time
 import urllib.parse
 import uuid
@@ -34,6 +37,7 @@ import metadati
 
 bp = Blueprint("scelta", __name__)
 A = None
+PROP, PQ = {}, []  # proposte per i brani da controllare: id → candidato (None: niente di abbastanza vicino); coda da cercare
 MIN = 1.5      # sotto questo punteggio un candidato non si usa mai
 SICURO = 5     # da qui in su non serve guardare oltre
 NO = re.compile(r"\b(live|dal vivo|en vivo|in concerto|concert|concerto|session|sessions|unplugged|cover|karaoke|instrumental|"
@@ -130,11 +134,15 @@ def cerca(m, fonti=("ytmusic", "youtube", "soundcloud"), arricchisci=2, presto=F
             break
     seen, pool = set(), []
     for c in sorted(out, key=lambda x: -x["score"]):
-        key = re.sub(r"^https?://(www\.|music\.)?", "", c["url"]).split("&")[0]
+        key = chiave(c["url"])
         if key not in seen:
             seen.add(key)
             pool.append(c)
     return pool, bloccato, err
+
+
+def chiave(url):
+    return re.sub(r"^https?://(www\.|music\.)?", "", url or "").split("&")[0]
 
 
 def verifica(path, m):
@@ -233,15 +241,79 @@ def replace():
     path, m, err = brano(sid)
     if err:
         return jsonify(error=err), 404
+    return jsonify(accoda_sost(sid, m, {"url": url, "source": src, "title": str(d.get("title") or "")[:200], "score": d.get("score")})), 201
+
+
+def accoda_sost(sid, m, c):
     jid = uuid.uuid4().hex[:10]
     j = dict(url="", mode="audio", format="", quality="best", playlist=False, folder="", sponsorblock=False, meta={},
-             sost={"id": sid, "url": url, "source": src, "title": str(d.get("title") or "")[:200], "score": d.get("score")})
+             sost={"id": sid, "url": c["url"], "source": c["source"], "title": c.get("title") or "", "score": c.get("score")})
     with A.jlock:
         A.jobs[jid] = dict(j, id=jid, status="in coda", progress=0, title=f"Nuova versione: {', '.join(m['artists'])} - {m['title']}",
                            created=time.time(), updated=time.time(), by=g.who["user"])
         A.jsave(jid)
+        out = dict(A.jobs[jid])
     A.jq.put((jid, j))
-    return jsonify(A.jobs[jid]), 201
+    return out
+
+
+@bp.post("/api/scelta/proposte")
+def in_blocco():
+    """Le proposte già trovate, tutte insieme: un lavoro di sostituzione per ogni brano."""
+    if not (g.who["admin"] or g.who["delete"]):
+        return jsonify(error="Sostituire un brano cambia il file per tutti: serve «Modifica ed elimina brani»."), 403
+    out = {}
+    for sid in [str(i) for i in (request.get_json(silent=True) or {}).get("ids") or []][:300]:
+        c = PROP.get(sid)
+        if not c:
+            continue
+        _, m, err = brano(sid)
+        if not err:
+            out[sid] = accoda_sost(sid, m, c)
+    return jsonify(jobs=out)
+
+
+def proponi(sid):
+    """La versione da proporre: sicura, senza parole sospette, diversa dal file di adesso e, se si sa (Spotify), della
+    durata giusta. Altrimenti None: si sceglie a mano."""
+    path, m, err = brano(sid)
+    if err:
+        return None
+    cands, bloccato, _ = cerca(m, presto=True)
+    if bloccato:
+        raise RuntimeError("YouTube bloccato")
+    cur = chiave((metadati.leggi_origine(path) or {}).get("url"))
+    want = m.get("duration") if m.get("da") == "Spotify" else None
+    for c in cands:
+        if c["flags"] or c["score"] < SICURO or (cur and chiave(c["url"]) == cur):
+            continue
+        if want and (not c.get("duration") or abs(c["duration"] - want) > max(4, want * 0.03)):
+            continue
+        return {k: c.get(k) for k in ("url", "title", "channel", "duration", "source", "score")}
+    return None
+
+
+def proposte():
+    """In sottofondo, un brano alla volta: le ricerche non si accavallano ai download e YouTube non vede raffiche."""
+    while True:
+        sid = PQ.pop(0) if PQ else None
+        if not sid:
+            time.sleep(3)
+            continue
+        if time.time() < A.yt["pausa"]:
+            PQ.insert(0, sid)
+            time.sleep(60)
+            continue
+        try:
+            PROP[sid] = proponi(sid)
+        except Exception as e:  # noqa: BLE001
+            if A.yt_bloccato(e) or "bloccato" in str(e):
+                PQ.append(sid)
+                time.sleep(300)
+                continue
+            PROP[sid] = None
+            diagnosi.log("avviso", "scelta", f"proposta non trovata per {sid}: {str(e)[:200]}")
+        time.sleep(2)
 
 
 def run_sost(jid, j):
@@ -277,6 +349,7 @@ def run_sost(jid, j):
             A.federazione.nd_get("startScan")
         except Exception:  # noqa: BLE001 — la prossima scansione lo vedrà
             pass
+        segna_ok(s["id"])  # la versione l'ha scelta una persona: esce da "Da controllare"
         A.jupdate(jid, status="completato", progress=100, finished=time.time(), path=os.path.relpath(final, A.MUSIC_DIR))
         A.pres_put({"type": "libreria", "n": 1})  # pagine aperte e copertine si aggiornano
     except Exception as e:  # noqa: BLE001
@@ -289,6 +362,12 @@ def gia_ok():
     return set(json.loads(r["value"])) if r else set()
 
 
+def segna_ok(sid):
+    import db
+    PROP.pop(sid, None)
+    db.run("INSERT INTO settings VALUES ('scelta_ok', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", json.dumps(sorted(gia_ok() | {sid})))
+
+
 @bp.get("/api/scelta/sospetti")
 def sospetti():
     """Da controllare: i download che la verifica non ha convinto, più i brani delle playlist importate la cui durata è
@@ -297,6 +376,10 @@ def sospetti():
     ok = gia_ok()
     with A.jlock:
         js = [dict(x) for x in A.jobs.values() if x.get("sospetto") and x["status"] in A.DONE and x.get("path")]
+        # sostituzioni scelte e non ancora finite (o finite male): la riga mostra l'avanzamento o l'errore
+        sost = {}
+        for x in sorted((x for x in A.jobs.values() if x.get("sost")), key=lambda x: x.get("created") or 0):
+            sost[x["sost"]["id"]] = {k: x.get(k) for k in ("id", "status", "progress", "error")}
     found = A.nd_files({x["path"] for x in js}) if js else {}
     out, seen = [], set()
     for x in sorted(js, key=lambda x: -(x.get("finished") or 0)):
@@ -314,12 +397,22 @@ def sospetti():
             seen.add(mid)
             out.append({"key": "id:" + mid, "id": mid, "title": f"{', '.join(t.get('artists') or [])} - {t.get('title')}",
                         "motivi": [f"dura {round(d)} s, su Spotify {round(want)} s"]})
-    return jsonify(out[:300])
+    out = out[:300]
+    for x in out:
+        j = sost.get(x["id"])
+        if j and not j["status"].startswith("completato"):
+            x["sost"] = j
+        if x["id"] in PROP:
+            x["prop"] = PROP[x["id"]]
+        else:
+            x["cerco"] = True
+            if x["id"] not in PQ:
+                PQ.append(x["id"])
+    return jsonify(out)
 
 
 @bp.delete("/api/scelta/sospetti/<key>")
 def sospetto_ok(key):
-    import db
     kind, _, val = key.partition(":")
     if kind == "job":
         with A.jlock:
@@ -327,8 +420,7 @@ def sospetto_ok(key):
                 A.jobs[val].pop("sospetto", None)
                 A.jsave(val)
     elif kind == "id" and A.ID_RE.match(val):
-        ok = gia_ok() | {val}
-        db.run("INSERT INTO settings VALUES ('scelta_ok', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", json.dumps(sorted(ok)))
+        segna_ok(val)
     return jsonify(ok=True)
 
 
@@ -361,4 +453,5 @@ def init(flask_app, host):
     global A
     A = host
     flask_app.register_blueprint(bp)
+    threading.Thread(target=proposte, daemon=True, name="proposte").start()
 

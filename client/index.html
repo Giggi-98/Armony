@@ -388,6 +388,7 @@ dialog.qrscan{width:min(420px,94vw)}
   .card-play{transition:opacity 200ms linear;transform:none}
   .arrivato{animation:none}
   .phero{transition:none}
+  details.sosp .vcand{transition:none}
 }
 /* === fine F === */
 /* === H: home e cerca === */
@@ -1322,7 +1323,21 @@ dialog.sheet.usrsheet .head .pav{flex:none}
 details.sosp{padding:0;margin-bottom:var(--s4)}
 details.sosp summary{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4);cursor:pointer;min-height:var(--hit)}
 details.sosp summary small{flex-basis:100%;color:var(--muted);font-size:var(--fs-small)}
-details.sosp .vcand{padding:var(--s2) var(--s4)}
+details.sosp .vcand{padding:var(--s2) var(--s4);overflow:hidden;transition:background-color .3s var(--ease-out),height .35s var(--ease-out),opacity .25s var(--ease-out),padding .35s var(--ease-out)}
+details.sosp .vcand.busy{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+details.sosp .vcand.out{height:0!important;min-height:0;opacity:0;padding-top:0;padding-bottom:0;border-top-color:transparent}
+details.sosp .sosp-act{display:grid;grid-template-columns:repeat(2,minmax(84px,auto));gap:var(--s2);flex:none;justify-items:stretch;margin-left:auto}
+details.sosp .sosp-act .jbar{grid-column:1/-1;width:176px}
+details.sosp .scheck{width:22px;flex:none;display:flex;justify-content:center}
+details.sosp input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);margin:0;cursor:pointer}
+.sprop{display:flex;align-items:center;gap:var(--s2);margin-top:2px;min-width:0}
+.sprop .grow{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.sprop .orig-ic{width:20px;height:20px;flex:none}.sprop .orig-ic svg{width:12px;height:12px}
+.sprop.wait{opacity:.7}
+.sosp-bar{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4);border-top:1px solid var(--line);flex-wrap:wrap}
+.sosp-bar:empty{display:none}
+.sosp-bar small{color:var(--muted);font-size:var(--fs-small);flex:1}
+.sall{display:flex;align-items:center;gap:var(--s2);font-size:.88rem;font-weight:600;cursor:pointer;min-height:var(--hit)}
 @media (max-width:520px){.vcand{flex-wrap:wrap}.vcand .grow{flex-basis:calc(100% - 50px)}.vcand .vscore{order:-1}}
 /* ordina e cerca negli elenchi (Ord) */
 .ordbar{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);margin:0 0 var(--s2)}

@@ -2318,7 +2318,7 @@ async function origBox(s, t, any = false) {
   $('#pickVer')?.addEventListener('click', () => versionSheet(t));
 }
 // il pool: i candidati di YouTube Music, YouTube e SoundCloud con il punteggio; "Usa questa" sostituisce il file nello stesso posto
-async function versionSheet(t) {
+async function versionSheet(t, onPick) {
   const d = $('#dlg'); d.className = 'sheet vsheet';
   d.innerHTML = `<div class="head"><span class="grow" style="min-width:0"><b style="display:block">Scegli la versione</b><small style="color:var(--muted)">${esc([t.artist, t.title].filter(Boolean).join(' – '))}</small></span></div><div id="vpool"><p class="sub" style="padding:0 14px">Cerco su YouTube Music, YouTube e SoundCloud…</p></div>`;
   closeOutside(d); d.showModal();
@@ -2337,21 +2337,97 @@ async function versionSheet(t) {
   $('#vpool').querySelectorAll('[data-vi]').forEach(b => b.onclick = async () => {
     const c = r.candidates[+b.dataset.vi]; b.disabled = true;
     try {
-      await srvApi(srv(t.serverId), '/api/scelta', { method: 'POST', body: JSON.stringify({ id: t.id, url: c.url, source: c.source, title: c.title, score: c.score }) });
-      d.close(); toast('In arrivo: la versione nuova prende il posto del file fra poco (Scarica → Download).', 5000); emitSoon('libreria');
+      const j = await srvApi(srv(t.serverId), '/api/scelta', { method: 'POST', body: JSON.stringify({ id: t.id, url: c.url, source: c.source, title: c.title, score: c.score }) });
+      d.close(); if (onPick) onPick(j); else toast('In arrivo: la versione nuova prende il posto del file fra poco (Scarica → Download).', 5000); emitSoon('libreria');
     } catch (e) { b.disabled = false; toast(e.message); }
   });
 }
-// pagina Scarica: brani da controllare (verifica non convinta, o durata diversa da Spotify)
+// pagina Scarica: brani da controllare (verifica non convinta, o durata diversa da Spotify). Il server cerca in sottofondo
+// una versione da proporre per ognuno (durata giusta, audio ufficiale): quelle spuntate si sostituiscono in un colpo solo.
+// Scelta una versione, la riga mostra l'avanzamento e a lavoro finito esce dalla lista (il server la segna come controllata)
 async function refreshSosp() {
   const box = $('#sosp'); if (!box || !srv()?.me?.caps?.includes('scelta')) return;
   let list; try { list = await dlApi('/api/scelta/sospetti'); } catch { box.innerHTML = ''; return; }
   if ($('#sosp') !== box) return;
-  box.innerHTML = list.length ? `<details class="panel sosp"${list.length < 8 ? ' open' : ''}><summary><b>Da controllare</b> <span class="tag acc">${list.length}</span><small>Brani forse sbagliati: una live, un videoclip con l'introduzione, un'altra versione.</small></summary>
-    ${list.map((x, i) => `<div class="vcand"><span class="grow"><b>${esc(x.title || '')}</b><small>${esc(x.motivi.join(' · '))}</small></span>
-      ${canPick() ? `<button class="btn sm primary" data-sp="${i}">Scegli</button>` : ''}<button class="btn sm" data-ok="${i}">Va bene</button></div>`).join('')}</details>` : '';
-  box.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => { const x = list[+b.dataset.sp]; versionSheet({ id: x.id, serverId: dlSrv().id, title: x.title, artist: '' }); });
-  box.querySelectorAll('[data-ok]').forEach(b => b.onclick = async () => { await dlApi('/api/scelta/sospetti/' + encodeURIComponent(list[+b.dataset.ok].key), { method: 'DELETE' }).catch(() => {}); refreshSosp(); });
+  const pick = canPick(), busy = x => x.sost && x.sost.status !== 'errore';
+  let all = true;  // le proposte che arrivano dopo seguono «Tutte le proposte»
+  list.forEach(x => { x.sel = !!x.prop; });
+  const state = x => { const j = x.sost;
+    if (j?.status === 'errore') return `<span class="bad">Non riuscita: ${esc(j.error || 'errore')}</span>`;
+    if (j) return j.status.startsWith('completato') ? '<span class="good">Sistemato: la versione nuova è in libreria</span>' : 'Scelta registrata: ' + (j.status === 'in coda' ? 'in attesa del suo turno' : (j.progress || 0) >= 100 ? 'sistemo il file al suo posto' : 'scarico la versione nuova');
+    return esc(x.motivi.join(' · ')); };
+  const prop = x => { if (busy(x)) return '';
+    if (x.cerco) return '<small class="sprop wait">Cerco la versione giusta…</small>';
+    const c = x.prop; if (!c) return '<small class="sprop">Nessuna versione abbastanza vicina: scegli a mano</small>';
+    const [icn, lab] = SRC_UI[c.source] || ['down', c.source];
+    return `<small class="sprop"><span class="orig-ic src-${esc(c.source)}" title="${esc(lab)}">${ic(icn)}</span><span class="grow">${esc(c.title)}${c.channel ? ' · ' + esc(c.channel) : ''}${c.duration ? ' · ' + fmt(c.duration) : ''}</span></small>`; };
+  const act = (x, i) => { const j = x.sost;
+    if (busy(x)) { const fin = j.status.startsWith('completato'), p = fin ? 100 : j.status === 'in corso' ? j.progress || 0 : 0;
+      return `<span class="jbar${fin ? ' ok' : ''}" role="status"><span class="jbar-t"><i style="width:${p}%"></i></span><em>${fin ? 'fatto' : j.status === 'in coda' ? 'in coda' : p >= 100 ? 'sistemo' : Math.floor(p) + '%'}</em></span>`; }
+    return `${pick ? `<button class="btn sm" data-sp="${i}">${j ? 'Riprova' : 'Scegli'}</button>` : ''}<button class="btn sm" data-ok="${i}">Va bene</button>`; };
+  const row = (x, i) => `<div class="vcand${busy(x) ? ' busy' : ''}" data-row="${i}">
+    <span class="scheck">${pick && x.prop && !busy(x) ? `<input type="checkbox" data-sel="${i}" aria-label="Usa la versione proposta"${x.sel ? ' checked' : ''}>` : ''}</span>
+    <span class="grow"><b>${esc(x.title || '')}</b><small>${state(x)}</small>${prop(x)}</span><span class="sosp-act">${act(x, i)}</span></div>`;
+  const bar = () => { const live = list.filter((x, i) => box.querySelector(`[data-row="${i}"]`) && !busy(x)), n = live.filter(x => x.prop && x.sel).length, wait = live.filter(x => x.cerco).length;
+    return pick ? `<label class="sall"><input type="checkbox" id="sospAll"${n && n === live.filter(x => x.prop).length ? ' checked' : ''}> Tutte le proposte</label>
+      <small>${wait ? `Cerco ancora ${wait} ${wait === 1 ? 'proposta' : 'proposte'}…` : ''}</small>
+      <button class="btn sm primary" id="sospGo"${n ? '' : ' disabled'}>${ic('repeat')} Sostituisci${n ? n === 1 ? ' 1 brano' : ` ${n} brani` : ''}</button>` : ''; };
+  box.innerHTML = list.length ? `<details class="panel sosp"${list.length < 8 || list.some(x => x.sost) ? ' open' : ''}><summary><b>Da controllare</b> <span class="tag acc" data-n>${list.length}</span><small>Brani forse sbagliati: una live, un videoclip con l'introduzione, un'altra versione. Per ognuno cerco la versione con la durata giusta: spunta quelle che vanno bene e sostituiscile insieme.</small></summary>
+    <div class="sosp-bar"></div>${list.map(row).join('')}</details>` : '';
+  const paintBar = () => { const b = box.querySelector('.sosp-bar'); if (b) b.innerHTML = bar(); };
+  const paint = i => { const el = box.querySelector(`[data-row="${i}"]`); if (el) el.outerHTML = row(list[i], i); paintBar(); };
+  paintBar();
+  const gone = i => {
+    const el = box.querySelector(`[data-row="${i}"]`); if (!el || el.classList.contains('out')) return;
+    el.style.height = el.offsetHeight + 'px'; requestAnimationFrame(() => el.classList.add('out'));
+    setTimeout(() => { el.remove(); const n = box.querySelectorAll('[data-row]').length, tag = box.querySelector('[data-n]'); if (!n) box.innerHTML = ''; else { if (tag) tag.textContent = n; paintBar(); } }, 380);
+  };
+  // avanzamento delle sostituzioni e proposte che arrivano, finché la pagina è aperta
+  let t = null, last = 0;
+  const tick = async () => {
+    t = null; if (!box.isConnected || $('#sosp') !== box) return;
+    const open = list.map((x, i) => [x, i]).filter(([x]) => busy(x) && !x.sost.status.startsWith('completato'));
+    const wait = list.some((x, i) => x.cerco && box.querySelector(`[data-row="${i}"]`));
+    if (!open.length && !wait) return;
+    if (!document.hidden) try {
+      if (open.length) {
+        const js = new Map((await dlApi('/api/jobs?ids=' + open.map(([x]) => x.sost.id).join(','))).map(j => [j.id, j]));
+        for (const [x, i] of open) {
+          const j = js.get(x.sost.id); if (!j) continue;
+          x.sost = { ...x.sost, status: j.status, progress: j.progress, error: j.error }; paint(i);
+          if (j.status.startsWith('completato')) setTimeout(() => gone(i), 1400);
+        }
+      }
+      if (wait && Date.now() - last > 6000) {
+        last = Date.now();
+        const fresh = new Map((await dlApi('/api/scelta/sospetti')).map(y => [y.id, y]));
+        list.forEach((x, i) => { const y = fresh.get(x.id); if (x.cerco && y && !y.cerco) { x.cerco = false; x.prop = y.prop; x.sel = !!y.prop && all; paint(i); } });
+      }
+    } catch {}
+    t = setTimeout(tick, 1500);
+  };
+  const follow = () => { if (!t) t = setTimeout(tick, 800); };
+  const started = (i, j) => { list[i].sost = { id: j.id, status: j.status || 'in coda', progress: 0 }; list[i].sel = false; paint(i); follow(); };
+  box.onchange = e => {
+    if (e.target.id === 'sospAll') { all = e.target.checked; list.forEach((x, i) => { if (x.prop && !busy(x)) { x.sel = e.target.checked; const c = box.querySelector(`[data-sel="${i}"]`); if (c) c.checked = x.sel; } }); paintBar(); }
+    else if (e.target.dataset.sel != null) { list[+e.target.dataset.sel].sel = e.target.checked; paintBar(); }
+  };
+  box.onclick = async e => {
+    const go = e.target.closest('#sospGo');
+    if (go) {
+      const ids = list.filter((x, i) => x.sel && x.prop && !busy(x) && box.querySelector(`[data-row="${i}"]`)).map(x => x.id); if (!ids.length) return;
+      go.disabled = true;
+      try { const r = await dlApi('/api/scelta/proposte', { method: 'POST', body: JSON.stringify({ ids }) }); list.forEach((x, i) => { if (r.jobs[x.id]) started(i, r.jobs[x.id]); }); emitSoon('libreria'); }
+      catch (err) { toast(err.message); paintBar(); }
+      return;
+    }
+    const b = e.target.closest('[data-sp],[data-ok]'); if (!b) return;
+    const i = +(b.dataset.sp ?? b.dataset.ok), x = list[i];
+    if (b.dataset.sp != null) return versionSheet({ id: x.id, serverId: dlSrv().id, title: x.title, artist: '' }, j => started(i, j));
+    b.disabled = true;
+    try { await dlApi('/api/scelta/sospetti/' + encodeURIComponent(x.key), { method: 'DELETE' }); gone(i); } catch (err) { b.disabled = false; toast(err.message); }
+  };
+  follow();
 }
 
 /* ================= offline (vista) ================= */

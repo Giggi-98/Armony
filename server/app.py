@@ -56,7 +56,7 @@ Armony - server di supporto.
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
                         Navidrome, playlist completata e riordinata a ogni brano nuovo; capacità "importsrv"
   /api/scelta          candidati per un brano e sostituzione con un'altra versione (permesso "download", scelta.py);
-                        /api/scelta/sospetti i brani da controllare. /api/origine da dove viene un file (capacità "scelta")
+                        /api/scelta/sospetti i brani da controllare con la versione proposta, /api/scelta/proposte le usa in blocco. /api/origine da dove viene un file (capacità "scelta")
   /api/ascolti/*        ascolti contati dal server, per brano, per utente, gli ultimi (ascolti.py); capacità "ascolti"
   /api/log, /api/stato  registro eventi (POST da ogni client, lettura dell'amministratore) e risorse del server
                         (diagnosi.py); capacità "diagnosi". Le eccezioni non gestite delle rotte finiscono nel registro
