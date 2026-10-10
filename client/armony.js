@@ -425,7 +425,7 @@ const NAV = [
   ['statistiche', 'Statistiche', 'stats'], ['scarica', 'Scarica', 'down'], ['impostazioni', 'Impostazioni', 'gear']
 ];
 const view = $('#view');
-const ROUTE_PARENT = { album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria' };
+const ROUTE_PARENT = { mix: 'home', album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria' };
 // su telefono: fino a quattro sezioni nella barra in basso (scelte in Impostazioni → Aspetto, o tenendo premuta la barra),
 // le altre nel foglio "Altro". Si salvano su questo dispositivo; una sezione che non esiste più riporta al predefinito
 const TABS_DEF = ['home', 'cerca', 'libreria', 'jam'];
@@ -449,7 +449,7 @@ async function route() {
   const fn = Disp.gate(r) || {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
+    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, mix: vMix, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav;
   if (changed && Scene.hash) Scene.back = Scene.r === 'ora' ? Scene.back : Scene.hash;  // dove torna la freccia del lettore
@@ -2195,11 +2195,25 @@ function setCtx() {
     : { kind: '', name: CTX_KIND[r] || '', hash: location.hash };
   store.set('qctx', S.ctx);
 }
+const MixPage = { want: false, at: 0, tracks: [], name: '', sub: '', hue: '' };
+Bus.addEventListener('route', () => { if (Scene.r !== 'home') MixPage.want = false; });  // un mix non riuscito non cattura la riproduzione dopo
+function vMix() {
+  if (!MixPage.tracks.length) { location.hash = '#/home'; return; }
+  const t = MixPage.tracks, dur = t.reduce((n, x) => n + (x.duration || 0), 0);
+  view.innerHTML = lPhero({ kind: 'Mix', title: MixPage.name, tile: `linear-gradient(135deg,${MixPage.hue || '#4a2fbd'},#141626)`, art: ic('shuffle'),
+      meta: `${esc(MixPage.sub)}${MixPage.sub ? ' · ' : ''}${t.length} brani, ${fmtLong(dur)}` }) +
+    lActionBar({ play: { act: 'mixplay' }, shuffle: { act: 'mixshuf' }, offline: false, addpl: false, more: [
+      can('playlist') && !srv()?.local && { act: 'mixsave', label: 'Salva come playlist', icon: 'addlist' },
+      { act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' }] }) +
+    `<div id="lList">${songList(t)}</div>`;
+}
 function setQueue(tracks, start = 0, shuffle = false) {
   if (Jam.role === 'guest') { tracks[start] && Jam.suggest(tracks[start]); return; }
   if (!tracks.length) return toast('Non ci sono brani da riprodurre.');
   let q = tracks.slice();
   if (shuffle) { q = shuffleArr(q); start = 0; }
+  // un mix toccato in Home apre la sua pagina (come Spotify) invece di partire: elenco, Riproduci, Salva come playlist
+  if (MixPage.want && Date.now() - MixPage.at < 30000) { MixPage.want = false; MixPage.tracks = q; location.hash = '#/mix'; if (Scene.r === 'mix') route(); return; }
   if (Live.remote()) return Live.cmd('transfer', Live.pack(q, start, 0));  // l'uscita scelta è un altro dispositivo
   setCtx(); S.queue = q; playIndex(start);
 }
@@ -3809,6 +3823,7 @@ function songMenu(t, ctx = {}) {
     t.albumId ? ['album', 'Vai all\'album', () => location.hash = '#/album/' + encodeURIComponent(t.albumId)] : null,
     t.artistId ? ['artist', 'Vai all\'artista', () => location.hash = '#/artista/' + encodeURIComponent(t.artistId)] : null,
     phoneT ? null : ['sliders', 'Crediti e dettagli', () => songInfo(t)],
+    ctx.row ? ['check', 'Seleziona', () => { const l = ctx.row.closest('.songs[data-l]'); if (l) Sel.toggle(+l.dataset.l, +ctx.row.dataset.i); }] : null,
     Amici.on() && !t.fed && !phoneT ? ['send', 'Manda a un amico', () => Amici.manda({ kind: 'brano', id: t.id, title: t.title, sub: t.artist })] : null,
     !phoneT && can('condividi') ? ['share', 'Condividi', () => shareItem(t.id, `${t.title} - ${t.artist}`, t.serverId)] : null,
     phoneT && !Offline.has(t) ? null : Offline.has(t) ? ['trash', 'Togli dall\'offline', async () => { await Offline.remove(offKey(t)); toast('Rimosso dall\'offline.'); if (location.hash.startsWith('#/offline')) route(); }]
@@ -3909,7 +3924,7 @@ document.addEventListener('contextmenu', e => {
   if (song) {
     const lst = song.closest('.songs[data-l]'), t = (lst && Lists.get(+lst.dataset.l) || S.lastList)[+song.dataset.i]; if (!t) return;
     const q = song.dataset.act === 'qplay' ? +song.dataset.i : null, pl = view.dataset.pl && song.closest('#lList') ? (t._pi ?? +song.dataset.i) : null;
-    e.preventDefault(); navigator.vibrate?.(10); return songMenu(t, touch ? { pl, q } : { at, pl, q });
+    e.preventDefault(); navigator.vibrate?.(10); return songMenu(t, touch ? { pl, q, row: song } : { at, pl, q, row: song });
   }
   if (e.target.closest('#player .np, #player .meta, #disc') && currentTrack()) { e.preventDefault(); return songMenu(currentTrack(), touch ? {} : { at }); }
   const alb = e.target.closest('.card:not(.ghost), .qk, .hbest');
@@ -4711,12 +4726,57 @@ function speedDialog() {
 }
 
 /* ================= azioni (delegazione eventi) ================= */
+// selezione multipla: sul computer Ctrl/⌘ + clic e Maiusc + clic sulle righe dei brani; sul telefono «Seleziona» dal menu
+// di un brano (tenendolo premuto), poi ogni tocco aggiunge o toglie. Una barra in basso con le azioni del gruppo
+const Sel = {
+  l: null, set: new Set(), last: null,
+  on() { return this.set.size > 0; },
+  toggle(lid, i, range) {
+    if (this.l !== lid) { this.set.clear(); this.l = lid; this.last = null; }
+    if (range && this.last != null) { for (let k = Math.min(this.last, i); k <= Math.max(this.last, i); k++) this.set.add(k); }
+    else if (this.set.has(i)) this.set.delete(i); else this.set.add(i);
+    this.last = i; this.paint();
+  },
+  clear() { if (!this.set.size && this.l == null) return; this.set.clear(); this.l = null; this.last = null; this.paint(); },
+  tracks() { const L = Lists.get(this.l) || []; return [...this.set].sort((a, b) => a - b).map(i => L[i]).filter(Boolean); },
+  paint() {
+    $$('.song.sel').forEach(r => r.classList.remove('sel'));
+    if (this.l != null) this.set.forEach(i => view.querySelector(`.songs[data-l="${this.l}"] .song[data-i="${i}"]`)?.classList.add('sel'));
+    let bar = $('#selBar');
+    if (!this.on()) { bar?.remove(); return; }
+    if (!bar) { bar = document.createElement('div'); bar.id = 'selBar'; bar.className = 'selbar'; bar.setAttribute('role', 'toolbar'); document.body.append(bar); }
+    const n = this.set.size;
+    bar.innerHTML = `<b>${n} ${n === 1 ? 'brano' : 'brani'}</b><span class="grow"></span>
+      <button class="icon-btn" data-s="play" aria-label="Riproduci" title="Riproduci">${ic('play', true)}</button>
+      <button class="icon-btn" data-s="next" aria-label="Riproduci dopo" title="Riproduci dopo">${ic('nextup')}</button>
+      <button class="icon-btn" data-s="queue" aria-label="Aggiungi alla coda" title="Aggiungi alla coda">${ic('plus')}</button>
+      ${can('playlist') ? `<button class="icon-btn" data-s="pl" aria-label="Aggiungi a una playlist" title="Aggiungi a una playlist">${ic('addlist')}</button>` : ''}
+      ${srv()?.local ? '' : `<button class="icon-btn" data-s="off" aria-label="Salva per l'offline" title="Salva per l'offline">${ic('offline')}</button>`}
+      <button class="icon-btn" data-s="x" aria-label="Annulla la selezione" title="Annulla">${ic('close')}</button>`;
+    bar.onclick = e => {
+      const b = e.target.closest('[data-s]'); if (!b) return; const t = this.tracks();
+      ({ play: () => setQueue(t, 0), next: () => Q.add(t, true), queue: () => Q.add(t), pl: () => addToPlaylistDialog(t), off: () => Offline.save(t), x: () => {} })[b.dataset.s]();
+      this.clear();
+    };
+  }
+};
+view.addEventListener('click', e => {
+  const row = e.target.closest('.song[data-i]'); if (!row || !view.contains(row)) return;
+  const btn = e.target.closest('button, a, [data-act]'); if (btn && btn !== row) return;  // cuore, ⋯, link: le loro azioni
+  if (!(e.ctrlKey || e.metaKey || e.shiftKey || Sel.on())) return;
+  const lst = row.closest('.songs[data-l]'); if (!lst) return;
+  e.stopPropagation(); e.preventDefault();
+  Sel.toggle(+lst.dataset.l, +row.dataset.i, e.shiftKey);
+}, true);
+Bus.addEventListener('route', () => Sel.clear());
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && Sel.on()) { Sel.clear(); e.stopPropagation(); } }, true);
 view.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || !view.contains(el)) return;
   const act = el.dataset.act, i = +el.dataset.i, id = el.dataset.id;
   const lst = el.closest('.songs[data-l]') || view.querySelector('#lList .songs[data-l]') || view.querySelector('.songs[data-l]');
   const list = (lst && Lists.get(+lst.dataset.l)) || S.lastList;
   e.stopPropagation();
+  if (el.classList.contains('hmix')) Object.assign(MixPage, { want: true, at: Date.now(), name: el.querySelector('.hmix-t b')?.textContent || 'Mix', sub: el.querySelector('.hmix-t small')?.textContent || '', hue: el.style.getPropertyValue('--h1') });
   try {
     switch (act) {
       case 'album': location.hash = '#/album/' + encodeURIComponent(id); break;
@@ -4755,6 +4815,9 @@ view.addEventListener('click', async e => {
       case 'shareitem': shareItem(id, el.dataset.name); break;
       case 'sv': e.preventDefault(); sessionStorage.setItem('armony:sv', el.dataset.k); vStats(); break;
       case 'spall': sessionStorage.setItem('armony:sp', 'all'); vStats(); break;
+      case 'mixplay': S.ctx = { kind: 'Mix', name: MixPage.name }; store.set('qctx', S.ctx); S.queue = MixPage.tracks.slice(); playIndex(0); break;
+      case 'mixshuf': S.ctx = { kind: 'Mix', name: MixPage.name }; store.set('qctx', S.ctx); S.queue = shuffleArr(MixPage.tracks); playIndex(0); break;
+      case 'mixsave': { const name = await ask('Salva il mix come playlist', MixPage.name, 'Nome'); if (name) { await api('createPlaylist', { name, songId: MixPage.tracks.map(x => x.id) }); toast(`Playlist «${name}» creata.`); emitSoon('playlists'); } break; }
       case 'radio': { const r = await api('getRandomSongs', { size: 80 }); setQueue(arr(r.randomSongs.song).map(x => norm(x)), 0); break; }
       case 'mixfav': { const r = (await api('getStarred2')).starred2; const so = arr(r.song).map(x => norm(x)); if (!so.length) return toast('Non hai ancora brani preferiti.'); setQueue(so, 0, true); break; }
       case 'mixforgot': {
@@ -4950,6 +5013,7 @@ Deve essere uguale a quello che vede l'altro amministratore.`)) { await dlApi(`/
       default: if (typeof Jam.action === 'function') await Jam.action(act, el);
     }
   } catch (err) { console.error(err); toast(err.message); }
+  finally { MixPage.want = false; }  // un mix che non ha trovato brani non cattura la riproduzione dopo
 });
 
 /* ================= app Android: notifica, cuffie, tasto indietro, aggiornamenti dell'APK =================

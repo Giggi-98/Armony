@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Selezione multipla nella pagina, mix come pagine, download a mano riconosciuti su Deezer
+
+**Contesto:** voci 6.8, 6.10 e 5.6 del piano.
+**Scelta:** selezione con Ctrl/⌘ e Maiusc sul computer e «Seleziona» dal menu del brano sul telefono (tenere premuto apre già il menu), con una barra fissa di azioni; un ascoltatore in fase di cattura sulla vista intercetta i clic sulle righe solo con i tasti o a selezione aperta. I mix della Home aprono `#/mix`: `setQueue` riconosce che il clic veniva da una scheda del mix (`MixPage.want`, azzerato dopo l'azione) e mostra i brani invece di suonarli. Per i download a mano `metadati.riconosci_download` ricava artista e titolo (YouTube Music li dà, altrimenti «Artista - Titolo» o il canale ripulito) e cerca il brano su Deezer (titolo uguale, durata entro 8 s; se la ricerca strutturata è vuota, quella semplice), poi tag e copertina dell'album.
+**Alternative scartate:** modalità di selezione con caselle su ogni riga sempre visibili (riempie le righe sul telefono); riscrivere ogni mix perché restituisca un elenco (cinque funzioni da cambiare per la stessa cosa); spostare il file nella cartella dell'album dopo il riconoscimento (la coda dei download segue il percorso: resta dov'è, con i tag giusti).
+**Conseguenze:** un download a mano di una versione molto diversa (videoclip lungo) resta con artista e titolo puliti ma senza album.
+**Da rivedere se:** si vogliono i download a mano ordinati nelle cartelle degli album come le importazioni.
+
 ## 2026-10-11 — Foto profilo servite solo a chi è collegato; utenti ricontrollati ogni giorno
 
 **Contesto:** l'utente vuole personalizzare la propria utenza con una foto. Dal piano: utenti eliminati o declassati su Navidrome restavano attivi in Armony.

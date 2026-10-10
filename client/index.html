@@ -651,6 +651,11 @@ dialog.sheet.reord{display:flex;flex-direction:column;max-height:88vh;max-height
 .rorow b,.rorow small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rorow small{color:var(--muted);font-size:var(--fs-small)}
 .rohandle{touch-action:none;cursor:grab;color:var(--muted)}
+/* selezione multipla: righe evidenziate e barra delle azioni sopra il lettore */
+.song.sel{background:var(--accent-soft)!important}
+.tracklist .song{-webkit-user-select:none;user-select:none}  /* Maiusc + clic seleziona brani, non il testo */
+.selbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--player-h) + var(--sab) + var(--s3));z-index:25;display:flex;align-items:center;gap:var(--s1);width:min(560px,calc(100% - 2 * var(--s4)));padding:var(--s2) var(--s2) var(--s2) var(--s4);border-radius:var(--r-l);background:var(--surface2);box-shadow:var(--shadow-float);animation:pin .2s var(--ease-out)}
+.selbar .grow{flex:1}
 .lhead{display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
 .lhead h1{margin-bottom:0}
 @media (min-width:861px){body:has(#themeBtn:not([hidden])) .lhead,body:has(#hBell:not([hidden])) .lhead{padding-right:52px}body:has(#themeBtn:not([hidden])):has(#hBell:not([hidden])) .lhead{padding-right:100px}}

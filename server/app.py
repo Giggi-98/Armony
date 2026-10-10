@@ -1467,6 +1467,12 @@ def run_job(jid, j):
         path = i.get("filepath")
         if path and os.path.exists(path):
             ek = str(i.get("extractor_key") or "").lower()
+            if not j["playlist"]:
+                # artista e titolo veri (non il canale) e, se Deezer lo conosce, album, numero e copertina
+                try:
+                    metadati.riconosci_download(path, i, j.get("meta"))
+                except Exception as e:  # noqa: BLE001 — il file resta con i dati di YouTube
+                    diagnosi.avviso("download", f"metadati non trovati per {os.path.basename(path)}: {e}")
             scelta.finale(path, {"src": "youtube" if ek.startswith("youtube") else "soundcloud" if ek.startswith("soundcloud") else ek or "link",
                                  "url": i.get("webpage_url") or j["url"], "title": i.get("title") or "", "canale": i.get("channel") or i.get("uploader") or "",
                                  "da": {"codec": (i.get("acodec") or "?").split(".")[0], "kbps": round(i.get("abr") or 0) or None, "hz": i.get("asr")},

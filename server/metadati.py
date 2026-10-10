@@ -260,6 +260,60 @@ def tagga(path, m, pulisci=False):
     f.save()
 
 
+# ─── download fatti a mano (link, «Cerca online») ───
+# Arrivavano con i dati di YouTube: artista = canale («ArtistaVEVO», «X - Topic»), titolo = «… (Official Video)», senza
+# album né copertina giusta. Si ricavano artista e titolo e si cercano su Deezer; trovato il brano (titolo uguale, durata
+# entro 8 s), il file prende i tag e la copertina dell'album. Altrimenti almeno artista e titolo puliti
+RUMORE = re.compile(r"\s*[\(\[](official\s*(music\s*)?(video|audio|visualizer|lyric(s)?\s*video)|video\s*ufficiale|audio\s*ufficiale|lyrics?|testo|"
+                    r"visualizer|hd|4k|hq|audio|video)[\)\]]", re.I)
+
+
+def ricava(info, hint=None):
+    """(artista, titolo) da un risultato di yt-dlp (o dai campi scritti da chi scarica)."""
+    hint = hint or {}
+    if hint.get("artist") and hint.get("title"):
+        return hint["artist"], hint["title"]
+    if info.get("track") and (info.get("artist") or info.get("artists")):  # YouTube Music li dà già
+        art = info.get("artists") or [info.get("artist")]
+        return str(art[0]), str(info["track"])
+    title = RUMORE.sub("", str(info.get("title") or "")).strip()
+    canale = re.sub(r"\s*(- Topic|VEVO|Official)$", "", str(info.get("channel") or info.get("uploader") or ""), flags=re.I).strip()
+    if " - " in title:
+        a, t = title.split(" - ", 1)
+        return a.strip(), t.strip()
+    return canale, title
+
+
+def riconosci_download(path, info, hint=None):
+    """Tag veri per un download fatto a mano; True se il brano è stato riconosciuto su Deezer."""
+    artista, titolo = ricava(info, hint)
+    if not titolo:
+        return False
+    dur = qualita(path).get("dur") or info.get("duration")
+    q = urllib.parse.quote(f'artist:"{artista}" track:"{titolo}"' if artista else titolo)
+    found = (deezer(f"search/track?q={q}&limit=10") or {}).get("data") or []
+    if not found:  # la ricerca strutturata non trova nomi con "&" e simili: quella semplice sì
+        found = (deezer(f"search/track?q={urllib.parse.quote(f'{artista} {titolo}'.strip())}&limit=10") or {}).get("data") or []
+    hit = None
+    for t in found:
+        if norm(t.get("title")) == norm(titolo) and (not dur or not t.get("duration") or abs(t["duration"] - dur) <= 8):
+            hit = t
+            break
+    if hit:
+        m = arricchisci({"title": hit.get("title"), "artists": [(hit.get("artist") or {}).get("name") or artista],
+                         "album": (hit.get("album") or {}).get("title") or "", "duration": hit.get("duration"), "isrc": hit.get("isrc")})
+        tagga(path, m, pulisci=True)
+        img = _cover(m["cover"]) if m.get("cover") else None
+        if img:
+            try:
+                incorpora(path, img)
+            except Exception:  # noqa: BLE001
+                pass
+        return True
+    tagga(path, {"title": titolo, "artists": [artista] if artista else [], "albumartist": artista})
+    return False
+
+
 # ─── origine del file: da dove viene e che conversione ha avuto ───
 # Un tag nel file stesso (JSON), così resta anche se la coda dei download si svuota o il file si sposta:
 # MP4 "----:com.apple.iTunes:ARMONY_ORIGIN", MP3 "TXXX:ARMONY_ORIGIN", Vorbis/FLAC/Opus "ARMONY_ORIGIN"

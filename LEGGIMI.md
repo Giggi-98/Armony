@@ -122,6 +122,7 @@ L'host decide le regole: coda aperta o con approvazione, controllo della musica 
 Salva album, playlist o singoli brani sul telefono, nella qualità che preferisci. Senza rete l'app si apre comunque e suona da lì. In ogni lista un pallino verde segna i brani già salvati.
 
 ### Download
+- **Dati giusti anche per i download a mano**: da un link o da «Cerca online» Armony ricava artista e titolo veri (non il nome del canale né «Official Video») e, se Deezer conosce il brano, album, numero di traccia, data e copertina.
 - Da link (uno o tanti) o con la **ricerca integrata** su YouTube e SoundCloud. Su SoundCloud i brani protetti (DRM) si saltano: si prova il risultato successivo.
 - Quando premi «Scarica» su una traccia che manca, sull'album intero o su un risultato della ricerca, al posto del tasto compare una barretta con la percentuale. Appena il brano è in libreria la riga diventa il brano vero, su tutti i dispositivi collegati, senza ricaricare. Dopo un'importazione da Spotify i brani scaricati entrano da soli nelle playlist giuste, anche se hai chiuso l'app: ci pensa il server, senza doppioni (servono le credenziali di Navidrome in Impostazioni → Utenti → Registrazione).
 - Solo audio (MP3, M4A, Opus, FLAC) oppure video fino al 4K, anche intere playlist o canali.
@@ -164,6 +165,10 @@ Minuti di ascolto, artisti, brani, album e generi preferiti, giorni consecutivi 
 **Notifiche.** La campanella (in alto a destra) raccoglie importazioni e album finiti, download singoli finiti o non riusciti, le Jam aperte dagli amici e i tuoi dispositivi nuovi da approvare; il numero dice quante sono da leggere e aprirle le segna come lette su tutti i tuoi dispositivi. In Impostazioni → Notifiche le fai arrivare anche come avvisi del telefono o del computer quando Armony non è in primo piano, scegliendo quali. Con l'app o il browser chiusi del tutto gli avvisi non arrivano (niente servizi push esterni): li ritrovi nella campanella.
 
 **Aggiungere a una playlist** come su Spotify: le usate di recente in cima, una ricerca se sono tante, e se il brano c'è già Armony lo dice e ti lascia saltare i doppioni. Nei **Preferiti** «Aggiunti di recente» segue il momento in cui hai messo il cuore; la playlist importata «Brani che ti piacciono» resta allineata: i brani arrivati dopo l'importazione prendono il cuore da soli.
+
+**Più brani insieme.** Sul computer Ctrl (⌘ sul Mac) + clic seleziona un brano alla volta, Maiusc + clic un intervallo; sul telefono tieni premuto un brano e scegli «Seleziona», poi tocca gli altri. In basso compare una barra per riprodurli, metterli dopo o in coda, aggiungerli a una playlist o salvarli offline; Esc o la ✕ annullano.
+
+**I mix di «Fatti per te»** si aprono come una playlist: vedi i brani, li riproduci o li salvi come playlist.
 
 **Riordinare una playlist.** Nel menu ⋯ della playlist, «Riordina i brani»: trascini la maniglia di ogni brano (col dito o col mouse, oppure frecce su e giù dalla tastiera) e «Fatto». Se la playlist era importata da Spotify, da lì in poi vale il tuo ordine e i brani nuovi arrivano in fondo.
 
