@@ -1572,7 +1572,7 @@ const PrefSync = {
     if (r.data && r.updated > store.get('prefsAt', 0)) {
       for (const [k, v] of Object.entries(r.data)) if (!DEVICE_PREFS.includes(k) && k in DEFAULT_PREFS) P[k] = v;
       store.set('prefs', P); store.set('prefsAt', r.updated); this.last = JSON.stringify(this.shared());
-      if (P.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = P.theme;
+      applyTheme();
       Engine.applyEq(); Engine.applyNight(); Engine.decks.forEach(a => a.playbackRate = P.speed); fillSelectors();
     } else if (store.get('prefsAt', 0) > r.updated) this.push();
   }
@@ -2312,6 +2312,21 @@ async function vNow() {
     pane.innerHTML = `<div id="origBox"></div><div class="panel">${rows.map(([a, b]) => `<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:16px"><span style="color:var(--muted)">${a}</span><span style="text-align:right;word-break:break-word">${esc(b)}</span></div>`).join('')}</div>`;
     origBox(s, t);
   }
+}
+/* ================= tema: sul web un pulsante in alto a destra, nell'app in Impostazioni → Aspetto ================= */
+I.sun = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+I.themeauto = '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>';
+// stato → [nome, icona, il prossimo al tocco]
+const THEMES = { auto: ['Automatico', 'themeauto', 'light'], light: ['Chiaro', 'sun', 'dark'], dark: ['Scuro', 'moon', 'auto'] };
+function paintTheme() {
+  const b = $('#themeBtn'); if (!b) return;
+  const [name, icon, next] = THEMES[P.theme] || THEMES.auto;
+  b.hidden = NATIVE; b.innerHTML = ic(icon);
+  b.title = `Tema: ${name.toLowerCase()}. Tocca per ${THEMES[next][0].toLowerCase()}`; b.setAttribute('aria-label', b.title);
+}
+function applyTheme() {
+  if (P.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = P.theme;
+  paintTheme();
 }
 /* ================= origine del file e scelta della versione (capacità "scelta", server/scelta.py) ================= */
 I.yt = '<rect x="2" y="5" width="20" height="14" rx="4"/><path d="M10 9l5 3-5 3z" fill="currentColor"/>';
@@ -3411,7 +3426,7 @@ function vSettings(id = location.hash.split('/')[2]) {
     <label class="check"><input type="checkbox" data-pb="syncQueue" ${P.syncQueue ? 'checked' : ''}><span>Continua su altri dispositivi<small>Salva la coda sul server: apri Armony sul PC e riprendi da dove eri al telefono.</small></span></label>
   </div>`],
 
-  ['dev', 'aspetto', 'Aspetto', 'moon', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+  ['dev', 'aspetto', 'Aspetto', 'moon', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `${NATIVE ? `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>` : '<p class="sub">Il tema chiaro, scuro o automatico si cambia dal pulsante in alto a destra.</p>'}
     <div class="tbset"><span class="grow"><b>Barra in basso</b><small>${[...tabsOf().map(h => NAV.find(n => n[0] === h)[1]), 'Altro'].join(' · ')}</small></span><button class="btn sm" data-act="tabsedit">Personalizza</button></div>`],
 
   ['dev', 'jam', 'Jam', 'jam', 'stun turn 5g internet nat ascoltare insieme', `<div class="panel stack">
@@ -3501,7 +3516,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   if (adm) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); refreshYt(); }
   if (window.ARMONY_APP) { AppUpdate.paint(); NetDns.paint(); }
   Local.paint();
-  $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); if (r.value === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = r.value; });
+  $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); applyTheme(); });
   setTab(id); setRO(); setDots();
   // da casa a internet (o il contrario) cambia cosa si può fare sul server: lo si richiede subito
   if (adm && ds?.session) Disp.fresh(ds, true).then(() => { setRO(); setDots(); });
@@ -4595,6 +4610,25 @@ const Live = {
     if (hb) this.dog = setInterval(() => { if (Date.now() - this.last > 40000) this.connect(); else if (Date.now() - this.beatAt > 25000) this.beat(); }, 10000);
   },
   async relogin() { await syncSessions(); this.connect(); },
+  // prima di spostare la musica: il canale dev'essere vivo, altrimenti si riapre e si aspetta il "hello" (al più 4 s).
+  // È quello che faceva a mano "Risincronizza"
+  async ready() {
+    const alive = this.es?.readyState === EventSource.OPEN && (!this.hb() || Date.now() - this.last < 20000);
+    if (alive || !this.on()) return;
+    const t0 = Date.now(); this.connect();
+    while (!(this.helloAt > t0) && Date.now() - t0 < 4000) await new Promise(r => setTimeout(r, 100));
+  },
+  // dispositivi e stati come li vede il server adesso (capacità "livestato"): dopo un canale caduto in silenzio i
+  // messaggi persi non tornano, questo sì. Restituisce lo scarto fra l'orologio del server e il nostro (ms)
+  async resync() {
+    const s = srv(); if (!s?.session || !s.me?.caps?.includes('livestato')) return null;
+    let r; try { r = await srvApi(s, '/api/live/stato'); } catch { return null; }
+    const now = Date.now(), off = r.now * 1000 - now;
+    this.devices = new Map(arr(r.devices).filter(d => d.device !== S.device).map(d => [d.device, d.name]));
+    this.states = new Map(arr(r.states).filter(x => x.device !== S.device).map(x => [x.device, { ...x, recvAt: now }]));
+    if (this.target && !this.devices.has(this.target)) this.target = null;
+    this.paint(); return { off, states: this.states };
+  },
   // battito per il server; 404 = non ha più il nostro canale, 401 = sessione scaduta
   beat() {
     this.beatAt = Date.now();
@@ -4620,7 +4654,7 @@ const Live = {
     if (m.type === 'radio') return Radio.recv(m);  // stazioni e ascoltatori della Jam Radio
     if (m.type === 'libreria') { emitSoon('libreria'); if (m.playlists) emitSoon('playlists'); return; }  // brani nuovi, playlist completate dal server
     if (m.type === 'hello') {
-      Presence.hello(m); Radio.hello(m);
+      this.helloAt = now; Presence.hello(m); Radio.hello(m);
       this.devices = new Map(arr(m.devices).map(d => [d.device, d.name]));
       this.states = new Map(arr(m.states).map(s => [s.device, { ...s, recvAt: now }]));
       const p = arr(m.states).find(s => s.playing && !s.solo);
@@ -4688,14 +4722,30 @@ const Live = {
     }
     const sentAt = Date.now();
     try { await srvApi(s, '/api/live/cmd', { method: 'POST', body: JSON.stringify({ to, cmd, value, from: S.device }) }); }
-    catch { toast(`${this.devices.get(to) || 'Il dispositivo'} non risponde.`); return; }
+    catch {
+      // il server non lo vede (o non lo vediamo noi): elenco aggiornato, e la musica che stava per partire là riparte qui
+      toast(`${this.devices.get(to) || 'Il dispositivo'} non è collegato${cmd === 'transfer' ? ': suono qui' : ''}.`);
+      await this.resync(); this.ready();
+      if (cmd === 'transfer' && value) { this.target = null; this.exec({ cmd: 'transfer', value }); }
+      return;
+    }
     // un dispositivo chiuso male può sembrare ancora collegato per qualche secondo: se non risponde, la musica resta qui
     if (['transfer', 'play', 'toggle'].includes(cmd)) setTimeout(() => this.check(to, sentAt, cmd === 'transfer' ? value : null), 5000);
   },
-  check(to, sentAt, v) {
+  async check(to, sentAt, v) {
     // ha risposto, l'uscita è passata a un altro dispositivo, o qui suona già qualcosa
     if ((this.states.get(to)?.recvAt || 0) > sentAt || (this.target && this.target !== to) || !Engine.el.paused) return;
     if (!this.target && !v) return;  // sparito mentre lo comandavamo: lo dice già "si è scollegato"
+    // forse ha risposto e siamo noi a non averlo saputo (il nostro canale è caduto in silenzio): si chiede al server
+    // prima di suonare anche qui, che vorrebbe dire due dispositivi che suonano insieme
+    const r = await this.resync();
+    const st = r?.states.get(to);
+    if (st && st.at * 1000 - r.off > sentAt - 1000) {
+      if (v || st.playing) this.target = to;
+      this.paint(); this.connect();  // il canale che ha perso la risposta si rifà
+      return;
+    }
+    if (!Engine.el.paused || (this.target && this.target !== to)) return;
     const name = this.devices.get(to) || this.gone?.[to] || 'Il dispositivo';
     this.devices.delete(to); this.states.delete(to); this.target = null;
     toast(`${name} non risponde: suono qui.`); window.Diag?.report('avviso', 'live', `${name} non ha risposto al comando entro 5 s`, v ? 'transfer' : '');
@@ -4748,6 +4798,7 @@ const Live = {
       setTimeout(() => toast(this.es?.readyState === EventSource.OPEN ? 'Ricollegato.' : 'Il server non risponde: riprovo da solo.'), 2500);
     };
     d.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => { d.close(); this.choose(b.dataset.dev); });
+    this.ready();  // mentre si sceglie, il canale si controlla da solo
     $('#liveSolo').onchange = e => {
       P.solo = e.target.checked; savePrefs(); this.sent = null;
       if (P.solo) this.target = null;  // sganciato: niente più telecomando
@@ -4756,6 +4807,7 @@ const Live = {
     closeOutside(d); d.showModal();
   },
   async choose(id) {
+    await this.ready();
     if (id === S.device) {  // la musica torna qui: il dispositivo che suona ci passa la coda
       if (!this.remote()) return;
       const src = this.target; this.target = null; this.paint();
@@ -5048,6 +5100,9 @@ async function boot() {
   setTimeout(resolvePending, 8000);
   addEventListener('online', () => { HistSync.run(); Live.wake(true); });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());
+  addEventListener('focus', () => Live.wake());
+  $('#themeBtn').onclick = () => { P.theme = THEMES[P.theme]?.[2] || 'auto'; savePrefs(); applyTheme(); toast(`Tema ${THEMES[P.theme][0].toLowerCase()}.`); };
+  paintTheme();  // sul computer: due finestre visibili, il canale va a quella che si usa
   window.Capacitor?.Plugins?.App?.addListener('resume', () => Live.wake());
   $('#livePill').onclick = () => Live.sheet();
   syncSessions().then(async () => { Live.connect(); Disp.dot(); if (srv()?.pending || srv()?.revoked) route(); notifyUpdate(); Local.auto(); await PrefSync.pull(); await HistSync.run(); OffPin.soon(20000); HistSync.repair(); if (/^#\/(impostazioni|scarica|statistiche|album-dz|artista-dz|rete|radio)/.test(location.hash)) route(); });

@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — «Dove suona»: il client si riallinea da solo invece di chiedere «Risincronizza»
+
+**Contesto:** passando la musica fra web e telefono serviva spesso «Risincronizza». Il canale SSE può cadere in silenzio (Funnel instabile, schermo spento): chi manda la musica non riceve la risposta, dopo 5 s conclude «non risponde» e suona anche lui, e da lì i dispositivi restano disallineati.
+**Scelta:** prima di spostare la musica `Live.ready()` riapre il canale se non è sicuramente vivo e aspetta il "hello"; prima di suonare qui per mancata risposta `check()` chiede al server `GET /api/live/stato` (dispositivi e stati del momento, capacità "livestato") e, se l'altro ha risposto, diventa telecomando e rifà il proprio canale; un comando rifiutato perché il dispositivo non è collegato fa ripartire qui la coda che stava per andare là. Il canale si riprende anche quando la finestra torna in primo piano (`focus`).
+**Alternative scartate:** conferme esplicite di ogni comando sul canale (un secondo giro di messaggi da gestire e lo stesso problema se il canale è sordo); notifiche push native per svegliare l'app Android (servizi esterni e chiavi, fuori dallo scopo).
+**Conseguenze:** spostare la musica può aspettare fino a 4 s se il canale era morto; un dispositivo con l'app sospesa dal sistema continua a non rispondere finché non si riapre.
+**Da rivedere se:** l'app Android tiene viva la WebView anche in pausa, o si aggiunge un canale nativo.
+
 ## 2026-10-10 — Proposte di «Da controllare» salvate (precisa la voce «Proposte … cercate in sottofondo»)
 
 **Contesto:** le proposte vivevano solo in memoria: ogni riavvio del server rifaceva da capo un centinaio di ricerche su YouTube.

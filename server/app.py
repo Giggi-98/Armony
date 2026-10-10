@@ -29,6 +29,7 @@ Armony - server di supporto.
   /api/history, /api/prefs   storico d'ascolto e preferenze dell'utente, condivisi fra i suoi dispositivi
   /api/live             riproduzione condivisa fra i dispositivi di un utente: canale SSE, stato, comandi;
                         /api/live/beat è il battito dei client con hb=1 (capacità "livehb").
+                        /api/live/stato: dispositivi e stati in quel momento, per riallinearsi (capacità "livestato")
                         Sullo stesso canale arrivano a tutti gli utenti "presence" (chi ascolta cosa sul server) e
                         "activity" (download, caricamenti, playlist pubbliche, Jam); /api/live/privacy li spegne
                         per il proprio utente (capacità "presenza"). E "libreria": brani nuovi visti da Navidrome
@@ -127,7 +128,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
 RULES = (("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
@@ -942,6 +943,17 @@ def live_state():
     live_put(u, {"type": "state", "state": st}, skip=dev)
     pres_update(u, st)
     return jsonify(ok=True)
+
+
+@app.get("/api/live/stato")
+def live_stato():
+    """Dispositivi collegati e stati di questo utente, come nel "hello": per chi teme di aver perso dei messaggi
+    (canale caduto in silenzio) e deve decidere se un comando è arrivato prima di suonare in due (capacità "livestato")."""
+    u = user_or_400()
+    with llock:
+        devs = {c["device"]: c["name"] for c in lconns.get(u, {}).values() if not c.get("stop")}
+        states = list(lstates.get(u, {}).values())
+    return jsonify(devices=[{"device": d, "name": n} for d, n in devs.items()], states=states, now=time.time())
 
 
 @app.post("/api/live/cmd")
