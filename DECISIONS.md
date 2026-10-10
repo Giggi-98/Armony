@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-10 — Tempo massimo sulle chiamate del client
+
+**Contesto:** una pagina è rimasta per sempre sullo scheletro di caricamento: il tunnel del Funnel (indirizzo pubblico che cambia ogni 20–30 secondi) o un riavvio del server lasciavano una richiesta senza risposta, e `fetch` senza tempo massimo aspetta all'infinito.
+**Scelta:** `netFetch` in `armony.js`: 20 s per le chiamate Subsonic, 30 s per `dlApi`, 45 s per `srvApi` (la ricerca dei candidati su YouTube può essere lenta), il triplo per le scritture; le letture si riprovano una volta dopo un secondo. Scaduto il tempo la pagina mostra «non risponde» con Riprova.
+**Alternative scartate:** nessun tempo massimo (la pagina appesa); riprovare anche le scritture (un POST arrivato ma senza risposta si ripeterebbe); un tempo corto uguale per tutto (le ricerche di candidati e gli elenchi grandi lo superano).
+**Conseguenze:** un server davvero appeso si scopre dopo circa 40 s (20 + 1 + 20) invece che mai.
+**Da rivedere se:** una chiamata legittima supera questi tempi (il proxy chiude comunque a 30 s le chiamate JSON).
+
 ## 2026-10-10 — Proposte per «Da controllare» cercate in sottofondo, una alla volta
 
 **Contesto:** con oltre cento brani da controllare, aprire «Scegli» per ognuno era troppo lento: l'utente vuole vedere subito la versione giusta quando c'è e farle partire tutte insieme.

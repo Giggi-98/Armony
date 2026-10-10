@@ -195,6 +195,15 @@ function apiParams(s, params = {}) {
   }
   return p;
 }
+// una richiesta appesa (il tunnel che cade, il server che riparte) non deve lasciare la pagina in caricamento per sempre:
+// tempo massimo, e le letture si riprovano una volta dopo un secondo
+async function netFetch(url, opts = {}, ms = 20000) {
+  const get = !opts.method || opts.method === 'GET';
+  for (let i = 0; ; i++) {
+    try { return await fetch(url, { ...opts, signal: opts.signal || AbortSignal.timeout?.(get ? ms : ms * 3) }); }
+    catch (e) { if (!get || i || opts.signal) throw e; await new Promise(r => setTimeout(r, 1000)); }
+  }
+}
 const apiBase = (s, method) => absUrl(s.url) + '/rest/' + method;
 const apiUrl = (s, method, params) => apiBase(s, method) + '?' + apiParams(s, params);
 async function api(method, params, s = srv(), post = false, again = false) {
@@ -204,9 +213,13 @@ async function api(method, params, s = srv(), post = false, again = false) {
   await NetDns.need(s.url);
   let r;
   try {
-    r = post ? await fetch(apiBase(s, method), { method: 'POST', body: apiParams(s, params) })
-      : await fetch(apiUrl(s, method, params));
-  } catch { if (navigator.onLine) window.Diag?.report('avviso', 'rete', `${s.name} non raggiungibile (${method})`); throw new Error(`Non riesco a raggiungere ${s.name}. Controlla indirizzo e connessione.`); }
+    r = post ? await netFetch(apiBase(s, method), { method: 'POST', body: apiParams(s, params) })
+      : await netFetch(apiUrl(s, method, params));
+  } catch (e) {
+    const slow = e?.name === 'TimeoutError';
+    if (navigator.onLine) window.Diag?.report('avviso', 'rete', `${s.name} ${slow ? 'non risponde' : 'non raggiungibile'} (${method})`);
+    throw new Error(slow ? `${s.name} non risponde. Riprova fra poco.` : `Non riesco a raggiungere ${s.name}. Controlla indirizzo e connessione.`);
+  }
   if (r.status === 401 && s.armony && !again) {
     const j = await r.clone().json().catch(() => ({}));
     if (j.code === 'revocato') { Disp.revoke(s, true); throw new Error(j.error); }
@@ -244,7 +257,7 @@ const coverUrl = (coverArt, size = 300, sid) => {
 };
 const streamUrl = (t, q = activeQuality()) => srv(t.serverId)?.local ? Local.stream(t.id)
   : t.fed ? reteUrl(srv(t.serverId), 'stream', { r: t.fed.r, id: t.fed.id, ...QUALITIES[q].params })
-  : apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params });
+  : apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params, ...(Sost.bust[key(t)] ? { b: Sost.bust[key(t)] } : {}) });
 const imgTag = (coverArt, size, sid) => { const u = coverUrl(coverArt, size, sid); return u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : ''; };
 
 /* ================= accesso ad Armony (sessione per utente, permessi dal ruolo Navidrome) ================= */
@@ -1501,7 +1514,7 @@ const Stats = {
 /* ================= storico e preferenze condivisi fra i dispositivi (sul server, per utente) ================= */
 const syncable = s => P.sync && s?.session && s.me?.caps?.includes('history');
 async function srvApi(s, path, opts = {}) {
-  const r = await fetch(absUrl(s.url) + path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Token': s.session, ...(opts.headers || {}) } });
+  const r = await netFetch(absUrl(s.url) + path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Token': s.session, ...(opts.headers || {}) } }, 45000);
   if (!r.ok) throw new Error(`Errore ${r.status}`);
   return r.json();
 }
@@ -2338,10 +2351,58 @@ async function versionSheet(t, onPick) {
     const c = r.candidates[+b.dataset.vi]; b.disabled = true;
     try {
       const j = await srvApi(srv(t.serverId), '/api/scelta', { method: 'POST', body: JSON.stringify({ id: t.id, url: c.url, source: c.source, title: c.title, score: c.score }) });
-      d.close(); if (onPick) onPick(j); else toast('In arrivo: la versione nuova prende il posto del file fra poco (Scarica → Download).', 5000); emitSoon('libreria');
+      d.close(); Sost.follow(t, j, !!onPick); if (onPick) onPick(j); emitSoon('libreria');
     } catch (e) { b.disabled = false; toast(e.message); }
   });
 }
+// una sostituzione in corso: se il brano è quello che suona si ferma (il file sta per cambiare sotto i piedi),
+// e quando il file nuovo è al suo posto e Navidrome l'ha letto, i dati del brano si aggiornano e riparte da capo.
+// Vale per web e app (la riproduzione è la stessa); se questo dispositivo fa da telecomando o è ospite di una Jam non si tocca
+const Sost = {
+  bust: {},  // brano → numero da aggiungere all'indirizzo, così né il browser né la cache dei brani danno il file vecchio
+  async follow(t, j, quiet) {
+    const k = key(t), mine = () => { const c = currentTrack(); return !!c && key(c) === k && !Live.remote() && Jam.role !== 'guest' && !Radio.st; };
+    const was = mine();
+    if (was) Engine.el.pause();
+    if (!quiet || was) toast(was ? 'Fermo il brano: lo sostituisco e riparte da solo appena è pronto.' : 'Sostituisco il brano: fra poco trovi la versione nuova.', 5000);
+    const bar = st => { const b = $('#pickVer'); if (!b) return;
+      b.outerHTML = `<span class="jbar" id="pickVer" role="status" style="width:100%"><span class="jbar-t"><i style="width:${st.p}%"></i></span><em>${esc(st.t)}</em></span>`; };
+    let job = j;
+    for (let n = 0; n < 400; n++) {  // al più una decina di minuti
+      await new Promise(r => setTimeout(r, 1500));
+      try { job = (await srvApi(srv(t.serverId), '/api/jobs?ids=' + j.id))[0] || job; } catch { continue; }
+      const p = job.status === 'in corso' ? job.progress || 0 : 0;
+      if (job.status === 'errore' || job.status.startsWith('completato')) break;
+      bar({ p, t: job.status === 'in coda' ? 'in coda' : p >= 100 ? 'sistemo il file' : Math.floor(p) + '%' });
+    }
+    if (job.status === 'errore') {
+      toast('Sostituzione non riuscita: ' + (job.error || 'errore'), 6000);
+      if (was && mine()) Engine.el.play().catch(() => {});
+      const cur = currentTrack(); if ($('#origBox') && cur && key(cur) === k) origBox(srv(t.serverId), cur, true);  // torna "Scegli un'altra versione"
+      return;
+    }
+    if (!job.status.startsWith('completato')) return;
+    bar({ p: 100, t: 'aggiorno il brano' });
+    // Navidrome rilegge il file (il server gli ha chiesto una scansione): si aspetta che finisca, al più 30 secondi
+    const s = srv(t.serverId);
+    for (let n = 0; n < 20; n++) {
+      await new Promise(r => setTimeout(r, 1500));
+      try { if (!(await api('getScanStatus', {}, s)).scanStatus?.scanning) break; } catch { break; }
+    }
+    this.bust[k] = Date.now();
+    for (const q of Object.keys(QUALITIES)) { const ck = ACache.k(t, q); if (ACache.idx[ck]) { delete ACache.idx[ck]; DB.del('acache', ck).catch(() => {}); } }
+    if (Engine.idle.dataset.key === k) { Engine.idle.removeAttribute('src'); delete Engine.idle.dataset.key; }
+    try {
+      const nt = norm((await api('getSong', { id: t.id }, s)).song, s.id);
+      [...S.queue, ...(S.lastList || [])].forEach(x => { if (key(x) === k) Object.assign(x, { duration: nt.duration, title: nt.title, artist: nt.artist, album: nt.album, coverArt: nt.coverArt }); });
+    } catch {}
+    persistQueue(); updateNowPlaying();
+    if (was && mine()) { await playIndex(S.index); toast('Versione nuova: riparte da capo.'); }
+    else if (!quiet) toast('La versione nuova è pronta.');
+    const cur = currentTrack(); if ($('#origBox') && cur && key(cur) === k) origBox(s, cur, true);
+    emitSoon('libreria');
+  }
+};
 // pagina Scarica: brani da controllare (verifica non convinta, o durata diversa da Spotify). Il server cerca in sottofondo
 // una versione da proporre per ognuno (durata giusta, audio ufficiale): quelle spuntate si sostituiscono in un colpo solo.
 // Scelta una versione, la riga mostra l'avanzamento e a lavoro finito esce dalla lista (il server la segna come controllata)
@@ -2540,7 +2601,7 @@ async function makeWrapped() {
 /* ================= download ================= */
 async function dlApi(path, opts = {}, retry = true) {
   if (!S.dl.url) throw new Error(srv() ? 'Questo server non ha Armony: download, caricamenti e aggiornamenti non sono disponibili.' : 'Aggiungi un server in Impostazioni.');
-  const r = await fetch(S.dl.url.replace(/\/+$/, '') + path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Token': S.dl.token, ...(opts.headers || {}) } });
+  const r = await netFetch(S.dl.url.replace(/\/+$/, '') + path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Token': S.dl.token, ...(opts.headers || {}) } }, 30000);
   if (r.status === 401) {
     const s = srv(), j = await r.clone().json().catch(() => ({}));
     if (j.code === 'revocato' && s) { Disp.revoke(s, true); throw new Error(j.error); }
@@ -3716,6 +3777,7 @@ const fedBase = () => pubBase(srv());
 async function refreshFed() {
   const box = $('#fedBox'); if (!box) return;
   let f; try { f = await dlApi('/api/fed'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  if (!box.isConnected) return;  // nel frattempo si è cambiata pagina
   const st = x => x.state === 'attivo' ? (x.online ? ['in linea', 'ok'] : ['non raggiungibile', 'err']) : FED_STATE[x.state] || [x.state, ''];
   const hopsTxt = { 1: 'Solo i server collegati', 2: 'Anche gli amici degli amici', 3: 'Fino a tre passaggi' };
   box.innerHTML = `${f.ready ? '' : '<div class="panel" style="margin-bottom:var(--s3)"><p style="margin:0">Per mostrare la tua libreria agli altri server serve l\'amministratore di Navidrome: inseriscilo in Utenti → Registrazione.</p></div>'}
