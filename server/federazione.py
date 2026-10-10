@@ -247,13 +247,14 @@ def fed_guard():
     if n["state"] not in allowed.get(request.path, ("attivo",)):
         return jsonify(error="Collegamento non attivo" if n["state"] != "richiesta" else "Collegamento in attesa di conferma"), 403
     # verso "ricevo": prendo dalla sua libreria ma la mia non la mostro a lui (né catalogo, né ricerca, né audio)
-    if n.get("dir") == "ricevo" and request.path not in allowed and request.path != "/fed/v1/ora":
+    if n.get("dir") == "ricevo" and request.path not in allowed and request.path not in ("/fed/v1/ora", "/fed/v1/raggiungo") \
+            and not request.path.startswith("/fed/v1/canale"):
         return jsonify(error=f"{A.NAME} non condivide la sua libreria con questo server", code="verso"), 403
     w = int(time.time() // 60)
     rl = rate.setdefault(nid, [w, 0])
     if rl[0] != w:
         rl[:] = [w, 0]
-    rl[1] += not request.path.startswith("/fed/v1/canale")  # i pezzi di un brano nel canale non sono richieste nuove
+    rl[1] += not request.path.startswith("/fed/v1/canale/")  # i pezzi di un brano nel canale non sono richieste nuove
     if rl[1] > RATE:
         return jsonify(error="Troppe richieste da questo nodo"), 429
     g.fed_node, g.fed_sig = n, sig
@@ -588,10 +589,25 @@ def loop():
             for k in [k for k, ts in pair_failed.items() if all(now - t > 600 for t in ts)]:
                 pair_failed.pop(k, None)
             db.run("DELETE FROM fed_invites WHERE expires < ?", now - 86400)
-            if int(now // 60) % 10 == 0:
+            if now - last_probe[0] > 600:
+                last_probe[0] = now
                 probe()
+                # chi ha scelto "offro" non scarica il catalogo e non legge ti_raggiungo: glielo si chiede a parte
+                for n in nodes():
+                    if n.get("dir") == "offro":
+                        try:
+                            want = not fed_json(n, "GET", "/fed/v1/raggiungo", timeout=(5, 20)).get("ti_raggiungo", True)
+                        except FedError:
+                            continue
+                        chan_want[n["id"]] = want
+                        set_setting("canale:" + n["id"], int(want))
+                        if want:
+                            chan_start(n["id"])
+            for k in [k for k, p in list(pend.items()) if now - p.get("at", now) > 900]:
+                pend.pop(k, None)  # richieste del canale mai lette fino in fondo (chi ascoltava ha chiuso prima del primo byte)
             for sub in db.all_("SELECT * FROM fed_subs WHERE coalesce(last, 0) < ?", now - SUB_S):
-                sub_sync(dict(sub))
+                db.run("UPDATE fed_subs SET last = ? WHERE pid = ?", now, sub["pid"])  # niente doppioni col giro dopo
+                pool.submit(sub_sync, dict(sub))
         except Exception as e:  # noqa: BLE001 — il giro dopo riprova
             diagnosi.avviso("federazione", str(e))
         time.sleep(60)
@@ -613,19 +629,31 @@ pend = {}        # (vicino) richiesta nel canale -> {"nid", "meta": Event, "info
 direct_ok = {}   # nodo -> ultima richiesta diretta riuscita
 chan_want = {}   # (foglia) vicino -> mi ha detto che non mi raggiunge: tengo il canale
 chan_threads = {}
+last_probe = [0.0]
 chan_lock = threading.Lock()
 
 
 def probe():
-    """Chi parla dal canale si riprova direttamente ogni 10 minuti: se ora risponde (porta aperta, Tailscale) si torna
-    al collegamento diretto, e lui chiude il canale quando legge ti_raggiungo."""
+    """Ogni 10 minuti, chi non ha avuto traffico diretto di recente si riprova direttamente: se risponde (porta aperta,
+    Tailscale) si torna al collegamento diretto, e lui chiude il canale quando legge ti_raggiungo."""
     for n in nodes():
-        if chan_ok(n["id"]):
-            try:
-                if A.http.get(n["url"].rstrip("/") + "/fed/hello", timeout=5).json().get("nodo") == n["id"]:
-                    direct_ok[n["id"]] = time.time()
-            except (requests.RequestException, ValueError):
-                pass
+        if time.time() - direct_ok.get(n["id"], 0) > 900:
+            probe_one(n["id"])
+
+
+def probe_one(nid):
+    n = node(nid)
+    try:
+        if n and A.http.get(n["url"].rstrip("/") + "/fed/hello", timeout=5).json().get("nodo") == nid:
+            direct_ok[nid] = time.time()
+    except (requests.RequestException, ValueError):
+        pass
+
+
+@bp.get("/fed/v1/raggiungo")
+def reach_me():
+    # per chi non scarica il mio catalogo ("offro"): gli dice se lo raggiungo, così sa se tenere il canale
+    return jsonify(ti_raggiungo=time.time() - direct_ok.get(g.fed_node["id"], 0) < 1800)
 
 
 def chan_ok(nid):
@@ -637,7 +665,7 @@ class ChanResp:
     """Come una risposta di requests, ma arriva dal canale: quanto basta a fed_json e a passthrough."""
     def __init__(self, rq, p, read_to):
         self.rq, self.p, self.read_to, self._content = rq, p, read_to, None
-        info = p.get("info") or {}
+        info = p.get("info") if isinstance(p.get("info"), dict) else {}
         self.status_code = int(info.get("status") or 502)
         self.ok = 200 <= self.status_code < 400
         self.headers = requests.structures.CaseInsensitiveDict(info.get("headers") or {})
@@ -665,11 +693,17 @@ class ChanResp:
 
     def close(self):
         pend.pop(self.rq, None)  # la foglia riceve 410 al pezzo dopo e smette di mandare
+        self.p["closed"] = True
+        try:
+            while True:
+                self.p["chunks"].get_nowait()  # libera la memoria e sblocca chi sta mettendo un pezzo
+        except queue.Empty:
+            pass
 
 
 def via_chan(node, method, full, h, data, timeout):
     rq = uuid.uuid4().hex
-    p = {"nid": node["id"], "meta": threading.Event(), "chunks": queue.Queue(maxsize=16)}
+    p = {"nid": node["id"], "meta": threading.Event(), "chunks": queue.Queue(maxsize=16), "at": time.time()}
     pend[rq] = p
     chan[node["id"]]["q"].put({"rq": rq, "method": method, "path": full, "headers": h, "body": b64e(data) if data else ""})
     first, read = timeout if isinstance(timeout, tuple) else (timeout, timeout)
@@ -686,14 +720,28 @@ def chan_poll():
         c = chan.setdefault(nid, {"q": queue.Queue(), "at": 0, "gen": 0})
         c["gen"] += 1
         gen = c["gen"]
+        if gen > 1:
+            c["q"].put(None)  # sveglia l'attesa di prima: al più una per nodo tiene un thread
     c["at"] = time.time()
-    out = []
-    try:
-        out.append(c["q"].get(timeout=CHAN_POLL))
+    if nid not in direct_ok:
+        pool.submit(probe_one, nid)  # canale appena aperto: si prova subito se in realtà si raggiunge
+    out, end = [], time.time() + CHAN_POLL
+    while time.time() < end and gen == c["gen"]:
+        try:
+            x = c["q"].get(timeout=max(0.1, end - time.time()))
+        except queue.Empty:
+            break
+        if x is None:
+            continue  # la sveglia: se l'attesa è ancora quella giusta si ricontrolla gen e si continua
+        out.append(x)
         while len(out) < 20:
-            out.append(c["q"].get_nowait())
-    except queue.Empty:
-        pass
+            try:
+                x = c["q"].get_nowait()
+            except queue.Empty:
+                break
+            if x is not None:
+                out.append(x)
+        break
     if gen != c["gen"]:
         # nel frattempo la foglia ha riaperto il canale (riavvio, rete cambiata): questa attesa è di una connessione morta,
         # quello che ha preso torna in coda per quella nuova
@@ -715,13 +763,19 @@ def chan_reply(rq):
         except ValueError:
             p["info"] = {"status": 502, "headers": {}}
         p["meta"].set()
-    try:
-        p["chunks"].put(request.get_data(), timeout=120)  # chi ascolta va piano: la foglia aspetta (al più 8 MB in memoria)
-        if request.args.get("fine"):
-            p["chunks"].put(None, timeout=120)
-    except queue.Full:
-        pend.pop(rq, None)
-        return jsonify(error="Richiesta scaduta"), 410
+    # chi ascolta va piano: la foglia aspetta (al più 8 MB in memoria), a passi brevi per accorgersi se ha smesso
+    for item in [request.get_data()] + ([None] if request.args.get("fine") else []):
+        for _ in range(240):
+            if p.get("closed") or rq not in pend:
+                return jsonify(error="Richiesta scaduta"), 410
+            try:
+                p["chunks"].put(item, timeout=0.5)
+                break
+            except queue.Full:
+                continue
+        else:
+            pend.pop(rq, None)
+            return jsonify(error="Richiesta scaduta"), 410
     return jsonify(ok=True)
 
 
@@ -737,8 +791,8 @@ def chan_start(nid):
 def chan_run(nid):
     while chan_want.get(nid):
         n = node(nid)
-        if not n or n["state"] != "attivo" or n.get("dir") == "offro":
-            break
+        if not n or n["state"] != "attivo" or n.get("dir") == "ricevo":
+            break  # "ricevo": la mia libreria a lui non la do, il canale non serve
         try:
             j = fed_json(n, "POST", "/fed/v1/canale", body={}, timeout=(5, CHAN_POLL + 15))
         except FedError:
@@ -752,7 +806,7 @@ def chan_run(nid):
 def chan_exec(n, rq):
     """Una richiesta arrivata dal canale: eseguita qui come se fosse arrivata da fuori, la risposta torna a pezzi."""
     path = str(rq.get("path") or "")
-    if not path.startswith("/fed/v1/") or path.startswith("/fed/v1/canale"):
+    if not path.startswith("/fed/v1/") or path.startswith("/fed/v1/canale") or ".." in path or "%2e" in path.lower():
         return
     hdr = {k: str(v) for k, v in (rq.get("headers") or {}).items() if k.lower().startswith("x-fed-") or k.lower() in ("range", "content-type")}
     try:
@@ -1278,7 +1332,8 @@ SUB_S = 600
 @bp.get("/fed/v1/playlist")
 def fed_playlists():
     pls = (nd_get("getPlaylists").get("playlists") or {}).get("playlist") or []
-    return jsonify(playlists=[{"id": p["id"], "name": p.get("name") or "Playlist", "owner": p.get("owner") or "", "songs": p.get("songCount") or 0,
+    # pubblica in Navidrome vuol dire per gli utenti di questo server: agli altri server niente nome utente del proprietario
+    return jsonify(playlists=[{"id": p["id"], "name": p.get("name") or "Playlist", "songs": p.get("songCount") or 0,
                                "comment": (p.get("comment") or "")[:300]} for p in pls if p.get("public")])
 
 
@@ -1296,7 +1351,7 @@ def fed_playlist(pid):
     ids = [e["id"] for e in entries]
     offered = {r["id"] for i in range(0, len(ids), 400)
                for r in db.all_(f"SELECT id FROM fed_mine WHERE gone = 0 AND id IN ({','.join('?' * len(ids[i:i + 400]))})", *ids[i:i + 400])}
-    return jsonify(id=pid, name=pl.get("name"), owner=pl.get("owner") or "", songs=[song_row(e) for e in entries if e["id"] in offered])
+    return jsonify(id=pid, name=pl.get("name"), songs=[song_row(e) for e in entries if e["id"] in offered])
 
 
 def sub_sync(sub):
@@ -1314,7 +1369,8 @@ def sub_sync(sub):
                "ON CONFLICT(pid) DO UPDATE SET items = excluded.items, updated = excluded.updated", sub["pid"], sub["owner"], sub["name"], json.dumps(items), now, now)
         L = A.importa.lib()
         with A.jlock:
-            queued = {(x["fed"]["r"], x["fed"]["id"]) for x in A.jobs.values() if x.get("fed") and x["status"] != "errore"}
+            queued = {(x["fed"]["r"], x["fed"]["id"]) for x in A.jobs.values() if x.get("fed")
+                      and (x["status"] != "errore" or now - (x.get("finished") or now) < 86400)}  # un errore si riprova dopo un giorno
         todo = [it for it in items if not L.match(it) and (n["id"], it["fed"]) not in queued][:300]
         for it in todo:
             jid = uuid.uuid4().hex[:10]
@@ -1364,9 +1420,10 @@ def rete_subscribe():
 @bp.delete("/api/rete/abbonati/<pid>")
 def rete_unsubscribe(pid):
     # la playlist locale e i brani copiati restano: smette solo di seguire quella remota
-    db.run("DELETE FROM fed_subs WHERE pid = ? AND (owner = ? OR ?)", pid, g.who.get("user") or "", int(g.who["admin"]))
-    db.run("DELETE FROM imports WHERE pid = ? AND NOT EXISTS (SELECT 1 FROM fed_subs WHERE pid = ?)", pid, pid)
-    return jsonify(ok=True)
+    gone = db.conn().execute("DELETE FROM fed_subs WHERE pid = ? AND (owner = ? OR ?)", (pid, g.who.get("user") or "", int(g.who["admin"]))).rowcount
+    if gone:  # solo l'elenco dell'abbonamento appena tolto, mai un'importazione da file
+        db.run("DELETE FROM imports WHERE pid = ?", pid)
+    return jsonify(ok=True) if gone else (jsonify(error="Abbonamento non trovato"), 404)
 
 
 def ensure_library():

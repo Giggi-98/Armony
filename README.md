@@ -15,7 +15,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 **Ascoltare**
 - Web app (si installa come app sul telefono e sul PC) e app Android, con lo stesso aspetto: Home, Cerca, Libreria, playlist, artisti con la discografia completa.
 - Qualità fino all'originale (FLAC), dissolvenza fra i brani, normalizzazione del volume, equalizzatore a 10 bande con modalità **automatica** che si regola su ogni brano, protezione dai gracchi, volume notte, timer.
-- Testi sincronizzati in stile karaoke, visualizzatore, radio da un brano o da un artista, mix pronti.
+- Testi sincronizzati in stile karaoke, visualizzatore, radio da un brano o da un artista, mix pronti e **mix del giorno** sui tuoi artisti preferiti.
 - **Cache dei brani** come Spotify: i prossimi della coda arrivano prima che servano e partono subito, anche senza rete. L'app si apre all'istante anche in 5G.
 - Sul computer, **tasto destro** su brani, album, artisti e playlist per tutte le azioni.
 
@@ -40,7 +40,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - **Registro eventi**: errori e situazioni incerte del server e dei telefoni in un posto solo, da copiare e mandare a chi ripara.
 
 **Server collegati**
-- Colleghi il tuo server a quello di un amico (con un codice di sicurezza da confrontare): in Cerca compare "Nella rete" con i loro brani, anche degli amici dei vostri amici. Li ascolti subito o li copi nella tua libreria. La pagina **Rete** mostra la mappa. Per ogni collegamento scegli il verso: vi vedete a vicenda, solo tu offri o solo tu ricevi.
+- Colleghi il tuo server a quello di un amico (con un codice di sicurezza da confrontare): in Cerca compare "Nella rete" con i loro brani, anche degli amici dei vostri amici. Li ascolti subito o li copi nella tua libreria. La pagina **Rete** mostra la mappa. Per ogni collegamento scegli il verso: vi vedete a vicenda, solo tu offri o solo tu ricevi. Funziona anche per i server dietro NAT, senza porte aperte: si appoggiano a uno raggiungibile e la rete si forma da sola, a maglia o a stella. Ti puoi **abbonare** alle playlist pubbliche degli amici: ne hai una copia che resta uguale all'originale.
 
 **App Android**
 - Musica a schermo spento, comandi nella notifica, aggiornamenti dall'app stessa.

@@ -263,6 +263,9 @@ C e D sono indipendenti dopo A: l'ordine fra loro dipende da cosa serve prima.
 | §2.4 livello di API | Fatto: `/api/info` pubblica con `api` e `caps` |
 | §2.5 SQLite e coda download persistente | Fatto. **Da fare**: misurare il limite dei 48 thread di waitress con un test di carico |
 
+**0.20.0 (2026-10-10)**: canale inverso per i server dietro NAT (rete a maglia o a stella), abbonamenti alle
+playlist pubbliche dei server collegati, mix del giorno, cache di Navidrome più grande.
+
 **0.19.0 (2026-10-10)**: importazioni ricordate dal server e playlist riconciliate; cache dei brani e service
 worker «prima la cache», gzip; stato del server e registro eventi; ascolti contati dal server; menu col tasto destro;
 federazione con verso dei collegamenti, epoca del catalogo e aggiornamenti in parallelo. Piano e analisi in `docs/PIANO.md`.

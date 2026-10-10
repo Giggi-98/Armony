@@ -353,3 +353,40 @@ rete si aggiungono solo rotte: `proto` resta 1.
   si sentono solo i brani del catalogo (`musica/`): un brano copiato in
   `federati/` dentro una stazione non viene ricondiviso, e chi ascolta da un
   altro server ha silenzio fino al brano dopo.
+
+## 16. Canale inverso, verso dei collegamenti e abbonamenti (2026-10-10)
+
+Ribalta «Niente relay propri» del §6 (vedi `DECISIONS.md`, 2026-10-10): l'utente vuole che la rete si formi a maglia
+o a stella secondo come ogni server esce su internet, e un server dietro NAT o CGNAT restava invisibile.
+
+### Canale inverso
+- Chi riceve il catalogo di un vicino legge `ti_raggiungo`: il vicino dice se negli ultimi 30 minuti è riuscito a
+  chiamarlo direttamente. Se no, la foglia apre il **canale**: una `POST /fed/v1/canale` firmata che il vicino tiene
+  in attesa fino a 25 s e che restituisce le richieste destinate a lei, già firmate dal vicino come una richiesta
+  normale.
+- La foglia le esegue sul suo server (`test_client` di Flask, solo percorsi `/fed/v1/`): la verifica della firma è la
+  stessa di sempre, quindi non c'è niente di nuovo di cui fidarsi. La risposta torna a pezzi da 512 kB con
+  `POST /fed/v1/canale/<rq>` (stato e intestazioni nel primo pezzo, in `X-Canale-Meta`): passano JSON, copertine,
+  brani interi, transcodificati o con `Range`. Il vicino ne tiene al più 16 in memoria; chi ascolta piano rallenta la
+  foglia, non la memoria.
+- `fed_req` sceglie da sola: con il canale aperto e nessuna risposta diretta da 30 minuti si usa il canale; ogni 10
+  minuti `probe()` riprova il diretto in sottofondo (mai dentro una richiesta, che perderebbe secondi). Se il diretto
+  torna, il vicino lo dice in `ti_raggiungo` e la foglia chiude il canale.
+- La scelta si ricorda (`settings`, `fed_canale:<nodo>`): dopo un riavvio la foglia riapre subito il canale. Una
+  richiesta in attesa superata da una più nuova della stessa foglia rimette in coda quello che riceve (connessione
+  morta dopo un riavvio).
+- Costo: un thread di waitress del vicino per foglia, come un dispositivo collegato a `/api/live`.
+- Ne nasce una **stella** attorno ai server raggiungibili: le foglie si vedono fra loro passando dal centro, con le
+  regole di sempre (amici degli amici, salti).
+
+### Verso
+`fed_nodes.dir`: `entrambi`, `offro` (non chiedo niente a lui: niente aggiornamenti, ricerche, audio), `ricevo` (lui
+non vede la mia libreria: 403 `verso`, e lui toglie il mio catalogo dalla sua cache).
+
+### Abbonamenti (fa il §7 per le playlist)
+- `/fed/v1/playlist` elenca le playlist **pubbliche** del server (le private restano private), `/fed/v1/playlist/<id>`
+  i loro brani che stanno nel catalogo offerto.
+- Abbonandosi (`/api/rete/abbonati`, serve il permesso di download) il client crea una playlist sua; il server ricorda
+  l'abbonamento (`fed_subs`, migrazione 9) e ogni 10 minuti scrive l'elenco remoto come un'importazione (`imports`):
+  la riconciliazione di `importa.py` tiene la playlist locale uguale a quella remota, e i brani che mancano si copiano
+  in `federati/` con `run_copy`. Togliere l'abbonamento lascia playlist e copie.

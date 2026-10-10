@@ -60,9 +60,14 @@ realtà e avvio rapido anche in 5G.
   Deezer; gli stream di Spotify non sono pubblici).
 - Note di rilascio curate per ogni versione e README allineato. **Fatto** (`docs/rilasci/`, letto dalla Action).
 - Federazione: topologia a maglia o a stella secondo la rete del server. Analisi fatta; fatte le correzioni rapide e il
-  verso dei collegamenti. **Da decidere:** il canale inverso che permette a un server dietro NAT/CGNAT di partecipare
-  appoggiandosi a uno pubblico (stella). Ribalta la scelta «relay propri scartati» (DECISIONS, 2026-10-08) e costa un
-  thread per foglia sull'hub: proposta pronta, serve il sì dell'utente.
+  verso dei collegamenti. **Fatto (0.20.0)** su richiesta dell'utente: canale inverso per i server dietro NAT/CGNAT
+  (stella attorno ai server raggiungibili, maglia fra quelli raggiungibili), abbonamenti alle playlist pubbliche,
+  collegamento mostrato in mappa e impostazioni. Vedi `docs/FEDERAZIONE.md` §16.
+
+## Secondo giro (0.20.0)
+- Mix del giorno dallo storico (artisti ascoltati insieme, simili di Deezer, genere). **Fatto.**
+- Cache di Navidrome più grande (transcodifica 2 GB, copertine 500 MB). **Fatto.**
+- Testi tradotti: **non fatto**, servirebbe un servizio di traduzione esterno con chiave (da decidere).
 
 ## Dopo (proposte, non in questa notte)
 - Preferiti da «Liked Songs» di Spotify (stella su Navidrome invece di una playlist).

@@ -49,7 +49,9 @@ Armony - server di supporto.
                         aggiornamento la esegue l'host (deploy/armony-update.sh), non il container
   /fed/hello, /fed/v1/*  federazione fra server (federazione.py): richieste firmate Ed25519 dai nodi collegati
   /api/fed/*            collegamenti fra server, solo amministratori (federazione.py)
-  /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download"
+  /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download";
+                        /api/rete/playlist e /api/rete/abbonati: abbonamenti a playlist pubbliche (capacità "abbonamenti").
+                        Fra i server, /fed/v1/canale: canale inverso per chi è dietro NAT (federazione.py)
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
                         Navidrome, playlist completata e riordinata a ogni brano nuovo; capacità "importsrv"
   /api/ascolti/*        ascolti contati dal server, per brano, per utente, gli ultimi (ascolti.py); capacità "ascolti"
@@ -120,7 +122,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
 RULES = (("/api/chiave", None), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "user"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),

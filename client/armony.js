@@ -579,12 +579,17 @@ async function vHome() {
   if (!navigator.onLine && !s.local) { location.hash = '#/offline'; return; }
   if (s.local && (await Local.ready, !Local.songs.length)) return Local.emptyHome();
   const n = Scene.nav;
-  const [nw, rnd, freq, recent] = await Promise.all([
+  const [nw, rnd, freq, recent, hist] = await Promise.all([
     api('getAlbumList2', { type: 'newest', size: 18 }),
     api('getAlbumList2', { type: 'random', size: 18 }),
     api('getAlbumList2', { type: 'frequent', size: 18 }).catch(() => null),
-    api('getAlbumList2', { type: 'recent', size: 18 }).catch(() => null)
+    api('getAlbumList2', { type: 'recent', size: 18 }).catch(() => null),
+    Stats.all()
   ]);
+  // mix del giorno: i tre artisti che ascolti di più nell'ultimo mese (storico di tutti i tuoi dispositivi), ognuno con i simili
+  const top = new Map(); hist.filter(x => x.ts > Date.now() - 30 * 864e5 && x.artistId && x.serverId === s.id).forEach(x => { const e = top.get(x.artistId) || { n: 0, name: x.artist }; e.n++; top.set(x.artistId, e); });
+  const daily = [...top].sort((a, b) => b[1].n - a[1].n).slice(0, 3);
+  const DAILY_HUES = ['#2f7fd6', '#b8457f', '#386641'];
   if (stale(n)) return;
   const L = x => arr(x?.albumList2?.album);
   const hour = new Date().getHours();
@@ -603,6 +608,7 @@ async function vHome() {
       <button class="qk-play" data-act="playalb" data-id="${esc(a.id)}" aria-label="Riproduci ${esc(a.name)}">${ic('play', true)}</button></div>`).join('')}</div>` : ''}
     ${secHead('Fatti per te')}
     <div class="hgrid shelf">
+      ${daily.map(([id, e], i) => mix('dailymix', `Mix di ${esc(e.name)}`, `${esc(e.name)} e artisti simili, rimescolato ogni giorno`, 'artist', DAILY_HUES[i], `data-id="${esc(id)}" data-name="${esc(e.name)}"`)).join('')}
       ${mix('radio', 'Mix casuale', 'Ottanta brani a caso da tutta la libreria', 'shuffle', '#d1345b')}
       ${mix('mixfav', 'I tuoi preferiti', 'I brani col cuore, mescolati', 'heart', '#8d4fc2')}
       ${mix('mixforgot', 'Riscoperte', 'Quello che non senti da almeno due mesi', 'radio', '#16825d')}
@@ -1082,7 +1088,7 @@ async function vRete() {
   const dot = x => `<span class="netdot${x.online === false ? ' off' : ''}" role="img" aria-label="${x.online === false ? 'non raggiungibile' : 'in linea'}"></span>`;
   const name = id => m.nodes.find(x => x.id === id)?.name || m.far.find(x => x.id === id)?.name || '…';
   const nodeHtml = (x, via) => `<li><div class="netnode"><span class="netav" style="--th:${tileColor(x.name || '?')}">${esc((x.name || '?').trim().charAt(0).toUpperCase())}</span>
-      <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${num(x)}${via ? ` · via ${esc(via)}` : ''}${x.reach === 'canale' ? ' · tramite canale' : x.reach === 'uscita' ? ' · in uscita' : ''}</small></span>${!via && x.state === 'attivo' && access().download ? `<button class="btn sm" data-netpl="${esc(x.id)}" data-name="${esc(x.name)}">${ic('list')} Playlist</button>` : ''}${dot(x)}</div>${sub(x.path || [x.id])}</li>`;
+      <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${num(x)}${via ? ` · via ${esc(via)}` : ''}${x.reach === 'canale' ? ' · tramite canale' : x.reach === 'uscita' ? ' · in uscita' : ''}</small></span>${!via && x.state === 'attivo' && access().download && dlSrv()?.me?.caps?.includes('abbonamenti') ? `<button class="btn sm" data-netpl="${esc(x.id)}" data-name="${esc(x.name)}">${ic('list')} Playlist</button>` : ''}${dot(x)}</div>${sub(x.path || [x.id])}</li>`;
   const sub = path => { const k = m.far.filter(x => x.path.length === path.length + 1 && path.every((p, i) => x.path[i] === p)); return k.length ? `<ul>${k.map(x => nodeHtml(x, x.path.slice(0, -1).map(name).join(', '))).join('')}</ul>` : ''; };
   const tot = [m.me, ...m.nodes, ...m.far].reduce((a, x) => a + (x.songs || 0), 0);
   $('#netMap').innerHTML = `<ul class="nettree"><li><div class="netnode me"><span class="netav">${ic('home')}</span>
@@ -1100,7 +1106,7 @@ async function netPlaylists(nid, name) {
   const paint = async () => {
     let r; try { r = await dlApi('/api/rete/playlist?node=' + encodeURIComponent(nid)); } catch (e) { $('#npl').innerHTML = `<p class="sub" style="padding:0 14px">${esc(e.message)}</p>`; return; }
     if (!$('#npl')) return;
-    $('#npl').innerHTML = r.playlists.length ? r.playlists.map((p, i) => `<div class="mi" style="cursor:default">${ic('list')}<span class="grow"><b>${esc(p.name)}</b><small style="color:var(--muted)">${p.owner ? esc(p.owner) + ' · ' : ''}${p.songs} ${p.songs === 1 ? 'brano' : 'brani'}</small></span>
+    $('#npl').innerHTML = r.playlists.length ? r.playlists.map((p, i) => `<div class="mi" style="cursor:default">${ic('list')}<span class="grow"><b>${esc(p.name)}</b><small style="color:var(--muted)">${p.songs} ${p.songs === 1 ? 'brano' : 'brani'}</small></span>
       ${p.sub ? `<button class="btn sm" data-unsub="${esc(p.sub)}">${ic('check')} Abbonato</button>` : `<button class="btn sm primary" data-sub="${i}">Abbonati</button>`}</div>`).join('')
       : '<p class="sub" style="padding:0 14px">Nessuna playlist pubblica su questo server.</p>';
     $('#npl').querySelectorAll('[data-sub]').forEach(b => b.onclick = async () => {
@@ -3824,6 +3830,34 @@ view.addEventListener('click', async e => {
         setQueue(albums.flatMap(r => arr(r.album.song).map(x => norm(x))), 0, S.shuffle); break;
       }
       case 'artistradio': setQueue((await artistRadio(id)).map(x => norm(x)), 0, true); break;
+      case 'dailymix': {
+        // brani dell'artista e dei simili, mescolati con un seme del giorno: oggi lo stesso mix, domani un altro
+        // fonti, finché non bastano: simili di Navidrome (se ha Last.fm), brani dell'artista, artisti simili secondo Deezer
+        // che sono in libreria, lo stesso genere
+        let seed = [...new Date().toDateString() + id].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7);
+        const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32, mixup = a => { a = a.slice(); for (let k = a.length - 1; k > 0; k--) { const j = Math.floor(rnd() * (k + 1)); [a[k], a[j]] = [a[j], a[k]]; } return a; };
+        const seen = new Set(), all = [], add = (l, max = 99) => { for (const x of mixup(l)) { if (max <= 0) break; if (x?.id && !seen.has(x.id)) { seen.add(x.id); all.push(norm(x)); max--; } } };
+        add(arr((await api('getSimilarSongs2', { id, count: 60 }).catch(() => null))?.similarSongs2?.song), 40);
+        const songsOf = async (aid, albums = 3) => (await Promise.all(shuffleArr(arr((await api('getArtist', { id: aid }).catch(() => null))?.artist?.album)).slice(0, albums).map(al => api('getAlbum', { id: al.id }).catch(() => null)))).flatMap(r => arr(r?.album?.song));
+        const own = await songsOf(id, 8); add(own, 14);
+        if (all.length < 40 && discoOk()) {
+          const [dz, names] = await Promise.all([dlApi('/api/discografia?artist=' + encodeURIComponent(el.dataset.name)).catch(() => null), libNames()]);
+          const sims = (dz?.similar || []).map(x => names.get(cleanTxt(x.name))).filter(x => x && x !== id).slice(0, 6);
+          for (const sid of sims) { add(await songsOf(sid), 5); if (all.length >= 50) break; }
+        }
+        if (all.length < 40) {
+          // gli artisti che ascolti nelle stesse sessioni (entro due ore da questo): il gusto vero, anche senza metadati
+          // per ore: ogni ascolto guarda solo le ore vicine invece di tutti gli ascolti dell'artista
+          const h = await Stats.all(), hours = new Set(h.filter(x => x.artistId === id).map(x => Math.floor(x.ts / 3600e3))), co = new Map();
+          h.forEach(x => { const k = Math.floor(x.ts / 3600e3); if (x.artistId && x.artistId !== id && (hours.has(k) || hours.has(k - 1) || hours.has(k + 1))) co.set(x.artistId, (co.get(x.artistId) || 0) + 1); });
+          for (const [aid] of [...co].sort((p, q) => q[1] - p[1]).slice(0, 6)) { add(await songsOf(aid), 5); if (all.length >= 50) break; }
+        }
+        const genre = own.map(x => x.genre).find(Boolean);
+        if (all.length < 30 && genre) add(arr((await api('getSongsByGenre', { genre, count: 60 }).catch(() => null))?.songsByGenre?.song), 50 - all.length);
+        if (all.length < 5) return toast('Non trovo abbastanza brani per questo mix.');
+        const q = mixup(all).slice(0, 50);
+        setQueue(q, 0); toast(`Mix di ${el.dataset.name}: ${q.length} brani.`); break;
+      }
       case 'rnew': Radio.create(); break;
       case 'tabsedit': tabsEditor(); break;
       case 'qup': if (i > 0) { [S.queue[i - 1], S.queue[i]] = [S.queue[i], S.queue[i - 1]]; if (S.index === i) S.index--; else if (S.index === i - 1) S.index++; persistQueue(); vQueue(); } break;

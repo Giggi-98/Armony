@@ -22,6 +22,9 @@ services:
       ND_ENABLETRANSCODINGCONFIG: "true"
       ND_DEFAULTLANGUAGE: "it"
       ND_SESSIONTIMEOUT: "720h"
+      # brani già convertiti (MP3/Opus) e copertine restano pronti: un brano riascoltato riparte subito (predefiniti: 100 MB)
+      ND_TRANSCODINGCACHESIZE: "2GB"
+      ND_IMAGECACHESIZE: "500MB"
     volumes:
       - ./data/navidrome:/data
       - ./musica:/music:ro
