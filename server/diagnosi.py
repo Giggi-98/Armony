@@ -37,6 +37,10 @@ GROUP = 3600  # lo stesso messaggio entro un'ora si somma alla riga che c'è
 _last = {}    # firma → (id della riga, istante): niente letture del DB per i ripetuti
 _lock = threading.Lock()
 _client_rate = {}  # utente → istanti degli ultimi eventi mandati (al più 300 l'ora)
+# avvisi fuori dall'app (ntfy, Telegram o qualsiasi indirizzo che accetti un POST di testo): errori del server e nuove
+# versioni, al più 20 l'ora. L'indirizzo può contenere un segreto (il token del bot): sta in .env
+AVVISI = os.environ.get("ARMONY_AVVISI", "").strip()
+_fuori = collections.deque()
 
 
 def log(level, area, msg, detail="", user=None, dev=None, src="server"):
@@ -57,11 +61,39 @@ def log(level, area, msg, detail="", user=None, dev=None, src="server"):
             _last[sig] = (c.lastrowid, now)
             if len(_last) > 4000:
                 _last.clear()
+        if level == "errore" and src == "server":  # solo la prima volta in un'ora: i ripetuti si fermano sopra
+            fuori(f"Errore ({area})", msg)
         if c.lastrowid % 200 == 0:
             db.run("DELETE FROM log WHERE last < ? OR id <= ?", now - KEEP_DAYS * 86400, c.lastrowid - KEEP_ROWS)
         if level == "errore":
             print(f"[{area}] {msg}", file=sys.stderr, flush=True)
     except Exception:  # noqa: BLE001
+        pass
+
+
+def fuori(titolo, testo=""):
+    """Un avviso a ARMONY_AVVISI, in un thread: chi lo chiama non aspetta la rete."""
+    if not AVVISI:
+        return
+    now = time.time()
+    with _lock:
+        while _fuori and now - _fuori[0] > 3600:
+            _fuori.popleft()
+        if len(_fuori) >= 20:
+            return
+        _fuori.append(now)
+    threading.Thread(target=_manda, args=(f"Armony {getattr(A, 'NAME', '')}: {titolo}".strip(), str(testo)[:1000]), daemon=True).start()
+
+
+def _manda(titolo, testo):
+    import requests
+    try:
+        body = f"{titolo}\n{testo}".strip()
+        if "api.telegram.org" in AVVISI:  # https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>
+            requests.post(AVVISI, json={"text": body}, timeout=10)
+        else:  # ntfy (https://ntfy.sh/<argomento>) e simili: il testo è il corpo
+            requests.post(AVVISI, data=body.encode(), timeout=10)
+    except Exception:  # noqa: BLE001 — niente registro qui: un errore di rete ne genererebbe un altro
         pass
 
 

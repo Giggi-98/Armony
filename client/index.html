@@ -597,6 +597,10 @@ dialog.bio .biotxt{color:var(--ink);opacity:.9;line-height:1.65;font-size:1rem;w
 .lcard.round .lcover{border-radius:50%}
 .lcard.special .lcover{background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#c2410c));color:var(--on-accent);box-shadow:none}
 .lcard.special.alt .lcover{background:linear-gradient(135deg,#1e3264,#148a08);color:#fff}
+.lcard.dir .lcover{background:var(--surface2);color:var(--accent-text)}
+.plDirHead:not(:empty){display:flex;align-items:center;gap:var(--s2);margin:0 0 var(--s3);flex-wrap:wrap}
+.plDirHead>svg{width:22px;height:22px;color:var(--accent-text)}
+.plDirHead b{font-size:1.15rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Libreria a elenco (come Spotify sul telefono): copertina piccola, nome e sottotitolo a fianco */
 .lcards.list{display:flex;flex-direction:column;gap:2px}
 .lcards.list .lcard{display:grid;grid-template-columns:56px minmax(0,1fr);grid-template-rows:auto auto;column-gap:var(--s3);align-items:center;padding:var(--s1) var(--s2)}

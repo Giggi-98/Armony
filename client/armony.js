@@ -113,6 +113,7 @@ const I = {
   artist: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
   list: '<path d="M4 6h12M4 12h12M4 18h8"/><circle cx="19" cy="17" r="2"/><path d="M21 17V8"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   queue: '<path d="M4 6h16M4 12h16M4 18h10"/>',
   down: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
@@ -1391,32 +1392,73 @@ async function reorderPl(id) {
 function libPlus() {
   const d = $('#dlg'); d.className = 'sheet';
   d.innerHTML = `<button class="mi" id="lpNew">${ic('list')}<span class="grow">Playlist<small>Crea una playlist vuota</small></span></button>
+    <button class="mi" id="lpDir">${ic('folder')}<span class="grow">Cartella<small>Per raggruppare le playlist</small></span></button>
     <button class="mi" id="lpImp">${ic('down')}<span class="grow">Importa<small>Da Spotify (CSV di Exportify), M3U o JSON</small></span></button>`;
+  $('#lpDir').onclick = () => { d.close(); PlDir.create(); };
   $('#lpNew').onclick = async () => { d.close(); const name = await ask('Nuova playlist', '', 'Nome'); if (name) { await api('createPlaylist', { name }); route(); } };
   $('#lpImp').onclick = () => { d.close(); importPlaylist(); };
   closeOutside(d); d.showModal();
 }
+// cartelle di playlist, come Spotify: solo un raggruppamento nelle preferenze (P.plDir, le stesse su tutti i tuoi
+// dispositivi). Navidrome non le conosce: per le altre app le playlist restano tutte allo stesso livello
+const PlDir = {
+  all() { return Array.isArray(P.plDir) ? P.plDir : []; },
+  save(l) { P.plDir = l; savePrefs(); emit('playlists'); },
+  of(id) { return this.all().find(d => d.ids.includes(id)); },
+  async create(first) {
+    const n = (await ask('Nuova cartella', '', 'Nome'))?.trim().slice(0, 80); if (!n) return;
+    if (this.all().some(d => d.n === n)) return toast('C\'è già una cartella con questo nome.');
+    this.save([...this.all().map(d => ({ ...d, ids: d.ids.filter(x => x !== first) })), { n, ids: first ? [first] : [] }]);
+    toast(first ? `Spostata in «${n}».` : `Cartella «${n}» creata: sposta le playlist dal loro menu.`);
+  },
+  move(id, n) { this.save(this.all().map(d => ({ ...d, ids: d.n === n ? [...d.ids.filter(x => x !== id), id] : d.ids.filter(x => x !== id) }))); if (n) toast(`Spostata in «${n}».`); },
+  pick(id, at) {
+    const cur = this.of(id)?.n;
+    ctxMenuOrPick(at, [...this.all().map(d => [d.n === cur ? 'check' : 'folder', d.n, () => this.move(id, d.n)]), ['plus', 'Nuova cartella…', () => this.create(id)],
+      cur ? ['close', 'Fuori dalle cartelle', () => this.move(id, null)] : null].filter(Boolean), 'Sposta in una cartella');
+  },
+  async rename(n) {
+    const m = (await ask('Rinomina la cartella', n, 'Nome'))?.trim().slice(0, 80); if (!m || m === n) return m || n;
+    if (this.all().some(d => d.n === m)) { toast('C\'è già una cartella con questo nome.'); return n; }
+    if (sessionStorage.getItem('armony:pldir') === n) sessionStorage.setItem('armony:pldir', m);  // la pagina si ridisegna nella cartella rinominata
+    this.save(this.all().map(d => d.n === n ? { ...d, n: m } : d)); return m;
+  },
+  remove(n) { this.save(this.all().filter(d => d.n !== n)); toast('Cartella tolta: le playlist restano.'); }
+};
 async function playlistsInto(box, n) {
   const [pr, st] = await Promise.all([api('getPlaylists'), api('getStarred2').catch(() => null)]);
   if (stale(n) || !box.isConnected) return;
   const pls = arr(pr.playlists.playlist), favs = arr(st?.starred2?.song).length, o = { by: 'recent', ...store.get('plOrd', {}) }, me = srv().user;
   const sortL = [['recent', 'Recenti'], ['alpha', 'Alfabetico'], ['owner', 'Creatore']];
   // elenco (come Spotify sul telefono) o griglia di copertine; si ricorda su questo dispositivo
-  let mode = store.get('plView', matchMedia('(max-width:860px)').matches ? 'list' : 'grid');
+  let mode = store.get('plView', matchMedia('(max-width:860px)').matches ? 'list' : 'grid'), dir = sessionStorage.getItem('armony:pldir');  // resta aperta quando la pagina si ridisegna
   const paint = q => {
     const Q = cleanTxt(q || ''), cmp = (a, b) => String(a || '').localeCompare(String(b || ''), 'it', { sensitivity: 'base' });
-    const l = pls.filter(p => !Q || cleanTxt(`${p.name} ${p.owner || ''}`).includes(Q))
+    const ids = new Set(pls.map(p => p.id)), dirs = PlDir.all().map(d => ({ ...d, ids: d.ids.filter(x => ids.has(x)) })), inDir = new Set(dirs.flatMap(d => d.ids));
+    const open = !Q && dir != null ? dirs.find(d => d.n === dir) : null; if (!open && !Q) dir = null;
+    if (dir == null) sessionStorage.removeItem('armony:pldir'); else sessionStorage.setItem('armony:pldir', dir);
+    const l = pls.filter(p => Q ? cleanTxt(`${p.name} ${p.owner || ''}`).includes(Q) : open ? open.ids.includes(p.id) : !inDir.has(p.id))
       .sort({ recent: (a, b) => cmp(b.changed || b.created, a.changed || a.created), alpha: (a, b) => cmp(a.name, b.name), owner: (a, b) => (a.owner !== me) - (b.owner !== me) || cmp(a.owner, b.owner) || cmp(a.name, b.name) }[o.by]);
     const special = can('playlist') && !Q ? `<button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
         <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>` : '';
     $('#plCards').className = 'lcards ' + mode;
+    $('#plDirHead').innerHTML = open ? `<button class="icon-btn" data-dir="" aria-label="Tutte le playlist">${ic('chevl')}</button>${ic('folder')}<b>${esc(open.n)}</b>
+      <button class="icon-btn" data-dirx="ren" aria-label="Rinomina la cartella" title="Rinomina">${ic('pen')}</button><button class="icon-btn" data-dirx="del" aria-label="Togli la cartella (le playlist restano)" title="Togli la cartella">${ic('trash')}</button>` : '';
+    if (open) { $('#plCards').innerHTML = l.map(lPlCard).join('') || '<p class="sub">Cartella vuota: sposta qui una playlist dal suo menu («Sposta in una cartella»).</p>'; return; }
+    const dirCards = Q ? '' : dirs.map(d => `<button class="lcard dir" data-dir="${esc(d.n)}"><div class="lcover">${ic('folder')}</div><b>${esc(d.n)}</b><small>Cartella · ${d.ids.length} ${d.ids.length === 1 ? 'playlist' : 'playlist'}</small></button>`).join('');
     $('#plCards').innerHTML = (!Q || cleanTxt('preferiti').includes(Q) ? `<a class="lcard favs" href="#/preferiti"><div class="lcover">${ic('heart', true)}</div><b>Preferiti</b><small>Playlist · ${favs} ${favs === 1 ? 'brano' : 'brani'}</small></a>` : '')
-      + (mode === 'grid' ? special : '') + l.map(lPlCard).join('') + (mode === 'list' ? special : '') + (Q && !l.length ? `<p class="sub">Nessuna playlist con «${esc(q)}».</p>` : '');
+      + (mode === 'grid' ? special : '') + dirCards + l.map(lPlCard).join('') + (mode === 'list' ? special : '') + (Q && !l.length ? `<p class="sub">Nessuna playlist con «${esc(q)}».</p>` : '');
   };
   box.innerHTML = `<div class="ordbar"><label class="ordq">${ic('search')}<input type="search" id="plQ" placeholder="Cerca nelle playlist" aria-label="Cerca nelle playlist" autocomplete="off"></label>
     <button class="ordby" id="plOrd"><span>${esc(sortL.find(x => x[0] === o.by)[1])}</span>${ic('sliders')}</button>
-    <button class="icon-btn" id="plView" aria-label="${mode === 'list' ? 'Mostra a griglia' : 'Mostra a elenco'}">${ic(mode === 'list' ? 'grid' : 'list')}</button></div><div class="lcards" id="plCards"></div>`;
+    <button class="icon-btn" id="plView" aria-label="${mode === 'list' ? 'Mostra a griglia' : 'Mostra a elenco'}">${ic(mode === 'list' ? 'grid' : 'list')}</button></div><div class="plDirHead" id="plDirHead"></div><div class="lcards" id="plCards"></div>`;
   paint('');
+  box.onclick = async e => {
+    const d = e.target.closest('[data-dir]'), x = e.target.closest('[data-dirx]');
+    if (d) { dir = d.dataset.dir || null; $('#plQ').value = ''; paint(''); scrollTo(0, 0); }
+    else if (x?.dataset.dirx === 'ren') { dir = await PlDir.rename(dir); }
+    else if (x?.dataset.dirx === 'del' && confirm(`Togliere la cartella «${dir}»? Le playlist restano.`)) { PlDir.remove(dir); dir = null; }
+  };
   $('#plView').onclick = e => { mode = mode === 'list' ? 'grid' : 'list'; store.set('plView', mode); e.currentTarget.innerHTML = ic(mode === 'list' ? 'grid' : 'list'); e.currentTarget.setAttribute('aria-label', mode === 'list' ? 'Mostra a griglia' : 'Mostra a elenco'); paint($('#plQ').value); };
   $('#plQ').oninput = e => paint(e.target.value);
   $('#plOrd').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); ctxMenuOrPick([r.left, r.bottom + 4], sortL.map(([v, l]) => [v === o.by ? 'check' : 'more', l, () => { o.by = v; store.set('plOrd', o); $('#plOrd span').textContent = l; paint($('#plQ').value); }]), 'Ordina per'); };
@@ -1445,6 +1487,7 @@ async function vPlaylist(id) {
       owner && !srv().local && Amici.on() && { act: 'collabpl', label: 'Collaboratori', icon: 'friends', data: { id } },
       Amici.on() && !srv().local && { act: 'sendpl', label: 'Manda a un amico', icon: 'send', data: { id, name: p.name } },
       mine && !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
+      { act: 'dirpl', label: PlDir.of(id) ? `Nella cartella «${PlDir.of(id).n}»` : 'Sposta in una cartella', icon: 'folder', data: { id } },
       mine && { act: 'delpl', label: 'Elimina playlist', icon: 'trash', danger: true, data: { id } }] }) +
     `<div id="impSt"></div>${songs.length > 1 ? Ord.bar(ok) : ''}<div id="lList">${songList(Ord.apply(songs, Ord.get(ok)), popts)}</div>`;
   Ord.wire(ok, () => songs, l => { $('#lList').innerHTML = songList(l, popts); });
@@ -3189,7 +3232,7 @@ async function upRun() {
     u.status = 'in corso'; upRender();
     try {
       const r = await upSend(u);
-      u.status = r.status; if (r.status === 'caricato') added++;
+      u.status = r.status; u.dup = r.existing; if (r.status === 'caricato') added++;
     } catch (e) { u.status = 'errore'; u.error = e.message; }
     upRender();
   }
@@ -3199,7 +3242,7 @@ async function upRun() {
 function upSend(u) {
   return new Promise((res, rej) => {
     const x = new XMLHttpRequest();  // fetch non dà l'avanzamento dell'invio
-    x.open('PUT', `${S.dl.url.replace(/\/+$/, '')}/api/upload?folder=${encodeURIComponent(u.folder)}&path=${encodeURIComponent(u.path)}`);
+    x.open('PUT', `${S.dl.url.replace(/\/+$/, '')}/api/upload?folder=${encodeURIComponent(u.folder)}&path=${encodeURIComponent(u.path)}${u.force ? '&doppio=1' : ''}`);
     x.setRequestHeader('X-Token', S.dl.token);
     x.upload.onprogress = e => { if (e.lengthComputable) { u.progress = Math.round(e.loaded * 100 / e.total); upRender(u); } };
     x.onload = () => {
@@ -3222,6 +3265,7 @@ function upRender(only) {
       <div class="row between" style="flex-wrap:nowrap"><b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.path)}</b>
       <span class="tag ${u.status === 'caricato' || u.status === 'già presente' ? 'ok' : u.status === 'errore' ? 'err' : ''}">${esc(u.status)}</span></div>
       <small style="color:var(--muted)">${bytes(u.file.size)}</small>
+      ${u.status === 'già in libreria' ? `<div class="row between" style="margin-top:6px;flex-wrap:nowrap"><small style="min-width:0">C'è già: ${esc(u.dup || '')}</small><button class="btn sm" data-act="upforce" data-i="${i}">Carica lo stesso</button></div>` : ''}
       ${u.status === 'errore' ? `<p style="color:var(--danger);margin:6px 0 0;font-size:.88rem">${esc(u.error)}</p>` : u.status === 'in corso' ? `<div class="bar"><i style="width:${u.progress}%"></i></div>` : ''}
     </div>`).join('') : '<div class="empty">Nessun caricamento.</div>';
 }
@@ -3977,7 +4021,8 @@ document.addEventListener('contextmenu', e => {
     const id = pl.dataset.id || pl.dataset.pl, name = pl.querySelector('b')?.textContent || 'Playlist';
     return menu(groupItems(() => plTracks(id), [['list', 'Apri la playlist', go('#/playlist/' + encodeURIComponent(id))]],
       [['down', 'Esporta (M3U, JSON, CSV)', async () => { try { exportTracks(name, await plTracks(id)); } catch (er) { toast(er.message); } }],
-       srv()?.local || !can('condividi') ? null : ['share', 'Condividi un link', () => shareItem(id, name)]].filter(Boolean)), `<b>${esc(name)}</b><small>Playlist</small>`);
+       srv()?.local || !can('condividi') ? null : ['share', 'Condividi un link', () => shareItem(id, name)],
+       ['folder', 'Sposta in una cartella', () => PlDir.pick(id, at || [innerWidth / 2, innerHeight / 3])]].filter(Boolean)), `<b>${esc(name)}</b><small>Playlist</small>`);
   }
   const ghost = e.target.closest('.card.ghost [data-act="dzalbum"], .card.ghost')?.closest('.card');
   if (ghost) { const id = ghost.querySelector('[data-act="dzalbum"]')?.dataset.id; if (id) return menu([['album', 'Apri (non in libreria)', go('#/album-dz/' + encodeURIComponent(id))]]); }
@@ -4947,7 +4992,9 @@ view.addEventListener('click', async e => {
         if (ids.length > 200) await addSongsToPlaylist(id, ids.slice(200), S.active);
         toast(`Fatto: ${keep.length} brani.`); emit('playlists'); route(); break;
       }
+      case 'dirpl': { const r = $('[data-act="lmore"]')?.getBoundingClientRect(); PlDir.pick(id, r ? [r.left, r.bottom + 4] : [innerWidth / 2, innerHeight / 3]); break; }  // dal menu ⋯: vicino al suo tasto
       case 'delpl': if (confirm('Eliminare questa playlist? I brani restano in libreria.')) { await api('deletePlaylist', { id }); location.hash = '#/playlist'; } break;
+      case 'upforce': { const u = Up.list[+el.dataset.i]; if (u) { u.force = true; u.status = 'in coda'; upRun(); } break; }
       case 'upclear': Up.list = Up.list.filter(u => ['in coda', 'in corso'].includes(u.status)); upRender(); break;
       case 'clearjobs': await dlApi('/api/jobs', { method: 'DELETE' }); refreshJobs(); break;
       case 'playvideo': {

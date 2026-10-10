@@ -51,7 +51,8 @@ Armony - server di supporto.
                         Con "pids" per brano (capacità "plserver") il server li aggiunge da sé alle playlist quando entrano
                         in libreria. Ogni file nuovo (download, caricamento) arriva a tutti sul canale /api/live
                         ({"type": "libreria"}) appena Navidrome lo vede; se serve la scansione la chiede il server
-  /api/upload           caricamento di file audio dal client nella libreria (permesso "upload")
+  /api/upload           caricamento di file audio dal client nella libreria (permesso "upload"); un brano che c'è
+                        già (titolo, artista, durata) non entra, salvo ?doppio=1; senza album lo completa Deezer
   /api/spazio           disco del server: totale, occupato, libero, peso di musica e video
   /api/update           versione installata contro l'ultimo tag su GitHub; la richiesta di
                         aggiornamento la esegue l'host (deploy/armony-update.sh), non il container
@@ -1842,6 +1843,20 @@ def file_hash(path):
     return h.hexdigest()
 
 
+def completa_caricato(path, name):
+    """Un file caricato senza album o senza artista: titolo e artista dai tag o dal nome («Artista - Titolo.mp3»), il
+    resto (album, traccia, data, copertina) da Deezer come per i download a mano. I file con tag completi non si toccano."""
+    try:
+        tg = mutagen.File(path, easy=True) or {}
+        title, artist, album = ((tg.get(k) or [None])[0] for k in ("title", "artist", "album"))
+        if title and artist and album:
+            return
+        info = {"title": title or name.rsplit(".", 1)[0], "duration": tg.info.length if getattr(tg, "info", None) else None}
+        metadati.riconosci_download(path, info, {"artist": artist, "title": title} if title and artist else None)
+    except Exception as e:  # noqa: BLE001 — resta com'è
+        diagnosi.avviso("upload", f"dati del caricamento non completati: {e}")
+
+
 @app.put("/api/upload")
 def upload():
     # un file per richiesta, corpo grezzo: niente multipart da tenere in memoria,
@@ -1870,6 +1885,24 @@ def upload():
         if os.path.exists(tmp):
             os.remove(tmp)
         return jsonify(error=str(e)[:200]), 415 if isinstance(e, (ValueError, mutagen.MutagenError)) else 500
+    # lo stesso brano già in libreria, con un altro nome o da un'altra cartella: non entra due volte
+    if ext in UPLOAD_AUDIO and request.args.get("doppio") != "1":
+        try:
+            tg = mutagen.File(tmp, easy=True)
+            a, ti = metadati.ricava({"title": name.rsplit(".", 1)[0]})  # senza tag: «Artista - Titolo.mp3»
+            t = {"title": (tg.get("title") or [ti])[0], "artists": [x for x in tg.get("artist") or [a] if x][:1],
+                 "duration": round(tg.info.length) if tg.info else None}
+            mid = t["title"] and importa.lib().match(t)
+        except Exception:  # noqa: BLE001 — senza tag leggibili si carica e basta
+            mid = None
+        if mid:
+            os.remove(tmp)
+            c = importa.nd()
+            try:
+                r = c.execute("SELECT title, artist, album FROM media_file WHERE id = ?", (mid,)).fetchone()
+            finally:
+                c.close()
+            return jsonify(status="già in libreria", id=mid, existing=" · ".join(x for x in (r or ()) if x))
     digest, stem, n = h.hexdigest(), dest, 2
     while os.path.exists(dest):
         if os.path.getsize(dest) == size and file_hash(dest) == digest:
@@ -1879,6 +1912,7 @@ def upload():
         dest, n = f"{base} ({n}).{e}", n + 1
     os.replace(tmp, dest)
     if ext in UPLOAD_AUDIO:
+        completa_caricato(dest, name)
         try:
             tg = mutagen.File(dest, easy=True) or {}
             title, album, artist = ((tg.get(k) or [None])[0] for k in ("title", "album", "artist"))
@@ -2282,6 +2316,9 @@ def avvisa_versione():
     check_latest()
     cur, new = semver(VERSION), latest["tag"] and semver(latest["tag"])
     if cur and new and new > cur:
+        if latest["tag"] != latest.get("detto") and not db.one("SELECT 1 FROM notifiche WHERE once = ?", "versione:" + latest["tag"]):
+            latest["detto"] = latest["tag"]
+            diagnosi.fuori(f"versione {latest['tag'].lstrip('v')} disponibile", "Aggiorna da Impostazioni → Server")
         for r in db.all_("SELECT DISTINCT user FROM devices WHERE admin = 1 AND state = 'fidato'"):
             notifiche.notifica(r["user"], "sistema", f"Armony {latest['tag'].lstrip('v')} disponibile", "Aggiorna da Impostazioni → Server",
                                "#/impostazioni", only_once="versione:" + latest["tag"])

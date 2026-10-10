@@ -33,12 +33,13 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - **Playlist collaborative**, «Manda a un amico», il mix di due amici con la vostra affinità.
 
 **La libreria**
-- Download da YouTube, SoundCloud e centinaia di siti (yt-dlp), con copertina e metadati; caricamento di file dal dispositivo. La coda va a turno fra gli utenti.
+- Download da YouTube, SoundCloud e centinaia di siti (yt-dlp), con copertina e metadati; caricamento di file dal dispositivo. La coda va a turno fra gli utenti; un brano già in libreria non entra due volte.
 - **Importazione da Spotify** (CSV di Exportify): la fa il server in pochi secondi anche con migliaia di brani, scarica i mancanti e tiene le playlist complete e nell'ordine di Spotify mentre arrivano, anche ad app chiusa. «Brani che ti piacciono» diventano anche i tuoi Preferiti.
 - **Scelta della versione giusta**: il server confronta più candidati e scarta live, cover e audio scadente; nelle informazioni del brano vedi da dove arriva il file e in che formato, e se è sbagliato ne scegli un'altra versione con un tocco.
 - **Cerca anche fuori dalla libreria** (con anteprima di 30 secondi), **nuove uscite** dei tuoi artisti, volume uniforme sui brani scaricati, playlist da riordinare trascinando, cronologia degli ascolti.
 - **Notifiche**: campanella con importazioni e download finiti, Jam degli amici e dispositivi da approvare, anche come avvisi del telefono o del computer.
 - Album completi: le tracce che mancano compaiono al loro posto e si scaricano con un tocco.
+- Cartelle di playlist, come su Spotify.
 - Modifica di titoli, artisti e copertine; eliminazione dei brani; statistiche d'ascolto, tue e di tutto il server (quante volte è stato ascoltato ogni brano e da chi), con l'immagine da condividere tua e del gruppo.
 
 **Per chi gestisce il server**

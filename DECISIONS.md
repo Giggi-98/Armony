@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Cartelle di playlist nelle preferenze; doppioni dei caricamenti per brano; avvisi esterni con un indirizzo
+
+**Contesto:** cartelle di playlist (voce 6.10), voci 5.10 e 4.7 del piano.
+**Scelta:** le cartelle sono `P.plDir` (nome e id delle playlist) nelle preferenze dell'utente, già sincronizzate fra i dispositivi; Navidrome non le vede. Un caricamento si confronta con l'indice della libreria usato dalle importazioni (`importa.lib().match`: titolo, artista, durata; dai tag o dal nome «Artista - Titolo»): se c'è già, il file si scarta e il client offre «Carica lo stesso» (`?doppio=1`); ai file senza album o artista si applica `metadati.riconosci_download`. Gli avvisi esterni sono un solo indirizzo in `.env` (`ARMONY_AVVISI`): POST del testo (ntfy) o JSON (`api.telegram.org`), per gli errori del server nuovi nell'ora e le versioni nuove, al più 20 l'ora.
+**Alternative scartate:** cartelle come prefisso nel nome della playlist («Allenamento / Corsa»: si vedrebbe nelle altre app e nei link) o in una tabella del server (una rotta in più per un dato che le preferenze già portano); doppioni per impronta del contenuto (hash di tutta la libreria da calcolare e tenere aggiornato, e due codifiche dello stesso brano sono file diversi); avvisi su servizi push con chiavi e account (già scartati, vedi notifiche); avvisi esterni anche per gli errori dei client (troppi, e non li risolve chi gestisce il server).
+**Conseguenze:** una playlist eliminata resta nella cartella finché qualcuno non la sposta (non si vede: si filtrano gli id che non ci sono). Un caricamento scartato come doppione è stato comunque inviato tutto: il confronto si fa sui tag, che stanno nel file.
+**Da rivedere se:** si caricano spesso molti doppioni grandi (servirebbe un controllo prima dell'invio, leggendo i tag nel browser).
+
 ## 2026-10-11 — Cache dei brani con l'indice a parte, coda copiata in IndexedDB
 
 **Contesto:** voce 8.5 del piano. All'avvio `ACache.init` leggeva tutti i file della cache (fino a 5 GB) per conoscerne la dimensione, e ogni ascolto da cache riscriveva il file intero per aggiornarne la data. La coda stava solo in localStorage: oltre i 5 MB la scrittura falliva in silenzio e al riavvio tornava una coda vecchia.
