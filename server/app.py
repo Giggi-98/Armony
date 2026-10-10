@@ -812,7 +812,7 @@ def live_state():
         return jsonify(error="Dispositivo non valido"), 400
     st = {k: d[k] for k in LIVE_FIELDS if k in d}
     st.update(device=dev, name=str(d.get("name") or "Dispositivo")[:40], at=time.time())
-    if len(json.dumps(st)) > 48000:  # con i prossimi 20 brani della coda
+    if len(json.dumps(st)) > 48000:  # con i prossimi 50 brani della coda
         return jsonify(error="Stato troppo grande"), 400
     with llock:
         lstates.setdefault(u, {})[dev] = st

@@ -1050,9 +1050,10 @@ async function vStarred() {
 
 function vQueue() {
   if (Live.remote()) {
-    const st = Live.st() || {}, up = arr(st.next).map(localize).filter(Boolean), cur = Live.track();
+    const st = Live.st() || {}, up = arr(st.next).map(w => Live.loc(w)).filter(Boolean), cur = Live.track();
     view.innerHTML = `<h1>Coda</h1><p class="sub">Su ${esc(Live.devices.get(Live.target) || 'un altro dispositivo')}: ${st.left || 0} brani dopo questo. Tocca un brano per suonarlo lì.</p>
-      ${cur ? songList([cur], { empty: '' }) : ''}<h2>Prossimi</h2>${songList(up, { empty: 'Non c\'è altro in coda.' })}`;
+      ${cur ? songList([cur], { empty: '' }) : ''}<h2>Prossimi</h2>${songList(up, { empty: 'Non c\'è altro in coda.' })}
+      ${(st.left || 0) > up.length ? `<p class="sub" style="margin-top:var(--s3)">…e altri ${(st.left - up.length).toLocaleString('it-IT')} brani in coda su ${esc(Live.devices.get(Live.target) || 'quel dispositivo')}.</p>` : ''}`;
     const lists = view.querySelectorAll('.songs');
     if (cur) lists[0]?.querySelectorAll('.song').forEach(el => el.removeAttribute('data-act'));  // il brano in corso è già lì
     lists[cur ? 1 : 0]?.querySelectorAll('.song').forEach(el => el.dataset.act = 'qremote');
@@ -1902,7 +1903,7 @@ async function vNow() {
     }
   } else if (tab === 'next') {
     const remote = Live.remote();
-    const up = Jam.role === 'guest' ? Jam.queue.slice(0, 25) : Radio.st ? Radio.next() : remote ? arr(Live.st()?.next).map(localize).filter(Boolean) : S.queue.slice(S.index + 1, S.index + 26);
+    const up = Jam.role === 'guest' ? Jam.queue.slice(0, 25) : Radio.st ? Radio.next() : remote ? arr(Live.st()?.next).map(w => Live.loc(w)).filter(Boolean) : S.queue.slice(S.index + 1, S.index + 26);
     pane.innerHTML = up.length ? songList(up) : '<div class="empty">Non c\'è altro in coda.</div>';
     if (Jam.role !== 'guest' && !Radio.st) S.lastList = up, pane.querySelectorAll('.song').forEach(el => el.dataset.act = remote ? 'qremote' : 'qplayoff');
   } else {
@@ -3504,7 +3505,9 @@ const Live = {
   st() { return this.target ? this.states.get(this.target) || null : null; },
   // telecomando: c'è un dispositivo di destinazione collegato e qui non sta suonando niente
   remote() { return !Jam.role && !Radio.st && !!this.target && this.devices.has(this.target) && Engine.el.paused; },
-  track() { const s = this.st(); return s?.track ? localize(s.track) : null; },
+  // i brani degli altri miei dispositivi sono dello stesso server del canale (anche se lo raggiungono con un altro indirizzo)
+  loc(w) { return localize(w, srv()?.local ? null : S.active); },
+  track() { const s = this.st(); return s?.track ? this.loc(s.track) : null; },
   playing() { return !!this.st()?.playing; },
   pos() { const s = this.st(); if (!s) return 0; const p = (s.position || 0) + (s.playing ? (Date.now() - s.recvAt) / 1000 * (s.rate || 1) : 0); return s.duration ? Math.min(p, s.duration) : p; },
   dur() { return this.st()?.duration || 0; },
@@ -3576,7 +3579,7 @@ const Live = {
   exec(m) {
     const v = m.value;
     if (m.cmd === 'transfer' && v && Array.isArray(v.queue)) {
-      this.target = null; this.pill(); S.queue = v.queue.map(localize).filter(Boolean);
+      this.target = null; this.pill(); S.queue = v.queue.map(w => this.loc(w)).filter(Boolean);
       if (S.queue.length) this.play(Math.min(v.index || 0, S.queue.length - 1), v.position || 0);
       return;
     }
@@ -3632,7 +3635,7 @@ const Live = {
     if (!this.es || !this.on() || Jam.role === 'guest') return;
     const t = Radio.st ? Radio.track : S.queue[S.index]; if (!t) return;
     if (this.remote() && !this.sent?.playing) return;  // telecomando: niente da dire, salvo la pausa appena fatta
-    const rd = Radio.st, up = rd ? Radio.next() : S.queue.slice(S.index + 1, S.index + 21);
+    const rd = Radio.st, up = rd ? Radio.next() : S.queue.slice(S.index + 1, S.index + 51);  // i prossimi 50: oltre, il telecomando vede quanti sono
     const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: rd ? Radio.pos() : Engine.time(), duration: playDur(), rate: rd ? 1 : P.speed, shuffle: S.shuffle, repeat: S.repeat, track: wire(t),
       next: up.map(wire), left: rd ? up.length : Math.max(0, S.queue.length - S.index - 1), radio: rd ? { id: rd.id, name: rd.name, r: Radio.path(rd) } : null };
     now.sig = up.map(x => x.id).join() + '|' + now.left;  // solo per accorgersi che la coda è cambiata
