@@ -1082,7 +1082,7 @@ async function vRete() {
   const dot = x => `<span class="netdot${x.online === false ? ' off' : ''}" role="img" aria-label="${x.online === false ? 'non raggiungibile' : 'in linea'}"></span>`;
   const name = id => m.nodes.find(x => x.id === id)?.name || m.far.find(x => x.id === id)?.name || '…';
   const nodeHtml = (x, via) => `<li><div class="netnode"><span class="netav" style="--th:${tileColor(x.name || '?')}">${esc((x.name || '?').trim().charAt(0).toUpperCase())}</span>
-      <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${num(x)}${via ? ` · via ${esc(via)}` : ''}</small></span>${dot(x)}</div>${sub(x.path || [x.id])}</li>`;
+      <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${num(x)}${via ? ` · via ${esc(via)}` : ''}${x.reach === 'canale' ? ' · tramite canale' : x.reach === 'uscita' ? ' · in uscita' : ''}</small></span>${!via && x.state === 'attivo' && access().download ? `<button class="btn sm" data-netpl="${esc(x.id)}" data-name="${esc(x.name)}">${ic('list')} Playlist</button>` : ''}${dot(x)}</div>${sub(x.path || [x.id])}</li>`;
   const sub = path => { const k = m.far.filter(x => x.path.length === path.length + 1 && path.every((p, i) => x.path[i] === p)); return k.length ? `<ul>${k.map(x => nodeHtml(x, x.path.slice(0, -1).map(name).join(', '))).join('')}</ul>` : ''; };
   const tot = [m.me, ...m.nodes, ...m.far].reduce((a, x) => a + (x.songs || 0), 0);
   $('#netMap').innerHTML = `<ul class="nettree"><li><div class="netnode me"><span class="netav">${ic('home')}</span>
@@ -1090,6 +1090,33 @@ async function vRete() {
     ${m.nodes.length ? `<ul>${m.nodes.map(x => nodeHtml(x)).join('')}</ul>` : ''}</li></ul>
     ${m.nodes.length ? `<p class="small" style="color:var(--muted);margin-top:var(--s4)">${m.nodes.length + m.far.length + 1} librerie, ${tot} brani in tutto. Si vedono fino a ${m.hops} ${m.hops === 1 ? 'passaggio' : 'passaggi'} di distanza; gli amici degli amici compaiono solo se il loro server lo permette.</p>`
       : `<div class="empty" style="margin-top:var(--s4)"><h3>Nessun server collegato</h3><p>${access().admin ? 'Collega la libreria di un amico in Impostazioni → Librerie collegate.' : 'L\'amministratore di questo server può collegarlo alle librerie degli amici.'}</p>${access().admin ? '<a class="btn primary" href="#/impostazioni">Impostazioni</a>' : ''}</div>`}`;
+  $('#netMap').onclick = e => { const b = e.target.closest('[data-netpl]'); if (b) netPlaylists(b.dataset.netpl, b.dataset.name); };
+}
+// le playlist pubbliche di un server collegato: abbonandosi, una playlist qui resta uguale alla sua (i brani si copiano)
+async function netPlaylists(nid, name) {
+  const d = $('#dlg'); d.className = 'sheet';
+  d.innerHTML = `<div class="head"><span style="min-width:0"><b style="display:block">Playlist di ${esc(name)}</b><small style="color:var(--muted)">Solo quelle pubbliche. Abbonandoti ne hai una copia tua: i brani si copiano qui e resta uguale all'originale.</small></span></div><div id="npl"><p class="sub" style="padding:0 14px">Chiedo…</p></div>`;
+  closeOutside(d); d.showModal();
+  const paint = async () => {
+    let r; try { r = await dlApi('/api/rete/playlist?node=' + encodeURIComponent(nid)); } catch (e) { $('#npl').innerHTML = `<p class="sub" style="padding:0 14px">${esc(e.message)}</p>`; return; }
+    if (!$('#npl')) return;
+    $('#npl').innerHTML = r.playlists.length ? r.playlists.map((p, i) => `<div class="mi" style="cursor:default">${ic('list')}<span class="grow"><b>${esc(p.name)}</b><small style="color:var(--muted)">${p.owner ? esc(p.owner) + ' · ' : ''}${p.songs} ${p.songs === 1 ? 'brano' : 'brani'}</small></span>
+      ${p.sub ? `<button class="btn sm" data-unsub="${esc(p.sub)}">${ic('check')} Abbonato</button>` : `<button class="btn sm primary" data-sub="${i}">Abbonati</button>`}</div>`).join('')
+      : '<p class="sub" style="padding:0 14px">Nessuna playlist pubblica su questo server.</p>';
+    $('#npl').querySelectorAll('[data-sub]').forEach(b => b.onclick = async () => {
+      const p = r.playlists[+b.dataset.sub]; b.disabled = true;
+      try {
+        const title = `${p.name} · ${name}`, pid = await createPlaylist(title, []);
+        await dlApi('/api/rete/abbonati', { method: 'POST', body: JSON.stringify({ node: nid, id: p.id, pid, name: title }) });
+        emit('playlists'); toast(`Abbonato a «${p.name}»: i brani si copiano qui e la playlist «${title}» resta uguale all'originale.`, 5000); paint();
+      } catch (e) { b.disabled = false; toast(e.message); }
+    });
+    $('#npl').querySelectorAll('[data-unsub]').forEach(b => b.onclick = async () => {
+      if (!confirm('Smettere di seguire questa playlist? La tua copia e i brani già copiati restano.')) return;
+      try { await dlApi('/api/rete/abbonati/' + encodeURIComponent(b.dataset.unsub), { method: 'DELETE' }); toast('Abbonamento tolto.'); paint(); } catch (e) { toast(e.message); }
+    });
+  };
+  paint();
 }
 async function vPlaylists() {
   if (!srv()) return noServer();
@@ -1155,9 +1182,10 @@ async function impStatus(id, n) {
   if (!srv()?.me?.caps?.includes('importsrv')) return;
   let st; try { st = await dlApi('/api/import/stato?pid=' + encodeURIComponent(id)); } catch { return; }
   const box = $('#impSt'); if (!box || stale(n) || !st?.total) return;
-  const f = x => x.toLocaleString('it-IT'), all = st.inlib >= st.total;
-  box.innerHTML = `<div class="impst${all ? ' ok' : ''}"><div class="grow"><b>${all ? `Tutti i ${f(st.total)} brani del file importato sono in libreria` : `${f(st.inlib)} di ${f(st.total)} brani del file importato in libreria`}</b>
-    <small>${[st.dl ? `${f(st.dl)} in download` : '', st.err ? `${f(st.err)} non trovati online` : '', st.miss ? `${f(st.miss)} da scaricare` : ''].filter(Boolean).join(' · ') || 'Si completa da sola quando arrivano brani nuovi.'}</small>
+  const f = x => x.toLocaleString('it-IT'), all = st.inlib >= st.total, src = st.sub ? `della playlist su ${esc(st.sub.server)}` : 'del file importato';
+  box.innerHTML = `<div class="impst${all ? ' ok' : ''}"><div class="grow"><b>${all ? `Tutti i ${f(st.total)} brani ${src} sono in libreria` : `${f(st.inlib)} di ${f(st.total)} brani ${src} in libreria`}</b>
+    ${st.sub?.error ? `<small style="color:var(--danger)">Abbonamento: ${esc(st.sub.error)}</small>` : ''}
+    <small>${[st.dl ? `${f(st.dl)} in download` : '', st.err ? `${f(st.err)} non trovati online` : '', st.miss ? `${f(st.miss)} ${st.sub ? 'in copia' : 'da scaricare'}` : ''].filter(Boolean).join(' · ') || (st.sub ? 'Resta uguale a quella originale: i brani nuovi si copiano da soli.' : 'Si completa da sola quando arrivano brani nuovi.')}</small>
     ${all ? '' : `<span class="bar"><i style="width:${st.inlib / st.total * 100}%"></i></span>`}</div>
     ${st.failed?.length ? `<details class="jerr"><summary>Vedi i non trovati</summary>${st.failed.map(x => `<div><b>${esc(x.title)}</b><small>${esc(x.error || '')}</small></div>`).join('')}</details>` : ''}</div>`;
 }
@@ -3422,6 +3450,7 @@ async function refreshFed() {
     <div class="row" style="margin:var(--s4) 0 var(--s2)"><button class="btn primary" data-act="fedinv">${ic('plus')} Crea un invito</button><button class="btn" data-act="fedjoin">Incolla un invito</button></div>
     ${f.nodes.length ? f.nodes.map(x => { const [l, c] = st(x); return `<div class="list-item fednode">
       <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${esc(x.url)}${x.state === 'attivo' ? ` · ${x.songs} brani, ${x.albums} album` : ''}${x.app ? ' · Armony ' + esc(x.app) : ''}${x.synced ? ' · aggiornato ' + new Date(x.synced * 1000).toLocaleString() : ''}</small>
+        ${x.reach === 'canale' ? `<small style="display:block">${ic('wifi')} Non si raggiunge da fuori: parla con te dal suo canale, la sua libreria arriva lo stesso</small>` : x.reach === 'uscita' ? `<small style="display:block">${ic('wifi')} Questo server non si raggiunge da fuori: resta collegato in uscita, la tua libreria passa dal canale</small>` : ''}
         ${x.error ? `<small style="display:block;color:var(--danger)">${esc(x.error)}</small>` : ''}<small style="display:block">Codice di sicurezza <span class="safety">${esc(x.safety)}</span></small></span>
       <span class="tag ${c}">${esc(l)}</span>
       ${x.state === 'richiesta' ? `<button class="btn sm primary" data-act="fedok" data-id="${esc(x.id)}" data-name="${esc(x.name)}" data-safety="${esc(x.safety)}">Accetta</button>` : ''}

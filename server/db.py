@@ -101,6 +101,12 @@ MIGRATIONS = [
                           created REAL NOT NULL, updated REAL NOT NULL, state TEXT);
     ALTER TABLE fed_nodes ADD COLUMN dir TEXT NOT NULL DEFAULT 'entrambi';
     """,
+    # 9: abbonamenti a playlist pubbliche dei server collegati (federazione.py). pid = la playlist locale dell'utente,
+    # che la riconciliazione delle importazioni (imports) tiene uguale a quella remota man mano che i brani si copiano
+    """
+    CREATE TABLE fed_subs (pid TEXT PRIMARY KEY, node TEXT NOT NULL, rid TEXT NOT NULL, owner TEXT NOT NULL, name TEXT NOT NULL,
+                           created REAL NOT NULL, last REAL, error TEXT);
+    """,
 ]
 
 _local = threading.local()

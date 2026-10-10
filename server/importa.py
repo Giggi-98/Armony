@@ -63,8 +63,9 @@ class Lib:
         self.isrc, self.title, self.path = {}, collections.defaultdict(list), {}
         c = nd()
         try:
+            # tutte le librerie: anche "Dalla rete" (federati/), dove arrivano le copie delle playlist a cui si è abbonati
             rows = c.execute("SELECT m.id, m.title, m.artist, m.album_artist, m.duration, m.tags, m.path FROM media_file m "
-                             "JOIN library l ON l.id = m.library_id WHERE m.missing = 0 AND rtrim(l.path, '/') = ?", (A.NAVIDROME_MUSIC,)).fetchall()
+                             "WHERE m.missing = 0").fetchall()
         finally:
             c.close()
         for mid, title, artist, aa, dur, tags, path in rows:
@@ -206,6 +207,7 @@ def giro(force=False):
         try:
             if owner_of(imp["pid"]) is None:
                 db.run("DELETE FROM imports WHERE pid = ?", imp["pid"])  # la playlist non c'è più
+                db.run("DELETE FROM fed_subs WHERE pid = ?", imp["pid"])
                 continue
             stato_di(imp, L)
         except Exception as e:  # noqa: BLE001
@@ -249,6 +251,10 @@ def stato():
     rows = db.all_("SELECT pid, name, state, updated FROM imports WHERE " + ("pid = ? AND (owner = ? OR ?)" if pid else "owner = ?"),
                    *((pid, u, int(g.who["admin"])) if pid else (u,)))
     out = [{"pid": r["pid"], "name": r["name"], "updated": r["updated"], **{k: v for k, v in json.loads(r["state"] or "{}").items() if k != "put"}} for r in rows]
+    for o in out:  # abbonamento a una playlist di un server collegato (federazione.py) invece di un file importato
+        sub = db.one("SELECT s.error, n.name FROM fed_subs s LEFT JOIN fed_nodes n ON n.id = s.node WHERE s.pid = ?", o["pid"])
+        if sub:
+            o["sub"] = {"server": sub["name"] or "server collegato", "error": sub["error"]}
     return jsonify(out[0] if pid and out else None if pid else out)
 
 

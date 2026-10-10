@@ -21,6 +21,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import queue
 import re
 import secrets
 import socket
@@ -164,20 +165,28 @@ def fold(s):
 
 
 # ------------------------------------------------------------------ richieste firmate verso gli altri nodi
-def fed_req(node, method, path, params=None, body=None, stream=False, timeout=10, headers=None):
+def fed_req(node, method, path, params=None, body=None, stream=False, timeout=10, headers=None, raw=None):
     q = urllib.parse.urlencode({k: v for k, v in (params or {}).items() if v not in (None, "")})
     full = path + ("?" + q if q else "")
-    data = json.dumps(body).encode() if body is not None else b""
+    data = raw if raw is not None else json.dumps(body).encode() if body is not None else b""
     date = int(time.time())
     sig = b64e(KEY.sign(canon(method, full, date, node["id"], data)))
     h = {"X-Fed-Node": ME, "X-Fed-Date": str(date), "X-Fed-To": node["id"], "X-Fed-Sig": sig, **(headers or {})}
     if body is not None:
         h["Content-Type"] = "application/json"
+    nid = node["id"]
+    # un nodo che tiene aperto il canale e che di recente non si è raggiunto direttamente: la richiesta va lì (vedi
+    # «canale inverso»). La prova diretta la fa probe() in sottofondo: dentro una richiesta costerebbe secondi
+    if chan_ok(nid) and time.time() - direct_ok.get(nid, 0) > 1800:
+        return via_chan(node, method, full, h, data, timeout), sig
     try:
         r = A.http.request(method, node["url"].rstrip("/") + full, data=data or None, headers=h, timeout=timeout,
                            stream=stream, allow_redirects=False)
     except requests.RequestException:
+        if chan_ok(nid):
+            return via_chan(node, method, full, h, data, timeout), sig
         raise FedError(f"{node.get('name') or 'Il nodo'} non risponde")
+    direct_ok[nid] = time.time()
     return r, sig
 
 
@@ -209,7 +218,7 @@ def node(nid):
 def fed_guard():
     if not request.path.startswith("/fed/v1/"):
         return None
-    if (request.content_length or 0) > 256 * 1024:
+    if (request.content_length or 0) > (CHUNK + 4096 if request.path.startswith("/fed/v1/canale/") else 256 * 1024):
         return jsonify(error="Richiesta troppo grande"), 413
     nid, sig = request.headers.get("X-Fed-Node", ""), request.headers.get("X-Fed-Sig", "")
     try:
@@ -244,7 +253,7 @@ def fed_guard():
     rl = rate.setdefault(nid, [w, 0])
     if rl[0] != w:
         rl[:] = [w, 0]
-    rl[1] += 1
+    rl[1] += not request.path.startswith("/fed/v1/canale")  # i pezzi di un brano nel canale non sono richieste nuove
     if rl[1] > RATE:
         return jsonify(error="Troppe richieste da questo nodo"), 429
     g.fed_node, g.fed_sig = n, sig
@@ -262,7 +271,7 @@ def fed_sign(resp):
 
 def hello_payload():
     # caps: funzioni in più senza alzare PROTO (un PROTO diverso chiude il collegamento)
-    return dict(nodo=ME, nome=A.NAME, proprietario=owner(), proto=PROTO, app=A.VERSION, pub=PUB, caps=["epoca", "verso"])
+    return dict(nodo=ME, nome=A.NAME, proprietario=owner(), proto=PROTO, app=A.VERSION, pub=PUB, caps=["epoca", "verso", "canale"])
 
 
 @bp.get("/fed/hello")
@@ -469,8 +478,9 @@ def catalog():
         songs = [json.loads(r["data"]) for r in rows if not r["gone"]]
         gone = [r["id"] for r in rows if r["gone"]]
     n, a = my_counts()
+    # ti_raggiungo: se no, chi chiede apre il canale inverso verso di me (è dietro NAT o un indirizzo solo interno)
     return jsonify(**hello_payload(), ver=ver, reset=reset, songs=songs, gone=gone, transitive=transitive(), total=n, albums=a, epoca=epoca(),
-                   verso=g.fed_node.get("dir") or "entrambi")
+                   verso=g.fed_node.get("dir") or "entrambi", ti_raggiungo=time.time() - direct_ok.get(g.fed_node["id"], 0) < 1800)
 
 
 def epoca():
@@ -526,6 +536,11 @@ def _refresh(nid):
             raise
     if j.get("epoca"):
         set_setting("epoca:" + nid, j["epoca"])
+    if "ti_raggiungo" in j:
+        chan_want[nid] = not j["ti_raggiungo"]
+        set_setting("canale:" + nid, int(chan_want[nid]))  # ricordato: dopo un riavvio il canale si riapre subito
+        if chan_want[nid]:
+            chan_start(nid)
 
 
 def _store(c, nid, n, j):
@@ -573,9 +588,203 @@ def loop():
             for k in [k for k, ts in pair_failed.items() if all(now - t > 600 for t in ts)]:
                 pair_failed.pop(k, None)
             db.run("DELETE FROM fed_invites WHERE expires < ?", now - 86400)
+            if int(now // 60) % 10 == 0:
+                probe()
+            for sub in db.all_("SELECT * FROM fed_subs WHERE coalesce(last, 0) < ?", now - SUB_S):
+                sub_sync(dict(sub))
         except Exception as e:  # noqa: BLE001 — il giro dopo riprova
             diagnosi.avviso("federazione", str(e))
         time.sleep(60)
+
+
+# ------------------------------------------------------------------ canale inverso: server che non si raggiungono da fuori
+# ─── PERCHÉ ───
+# Un server dietro NAT o CGNAT (niente porte aperte, niente Tailscale) può chiamare gli altri ma nessuno può chiamare
+# lui: la sua libreria restava invisibile. La foglia tiene aperta verso un vicino raggiungibile una richiesta in attesa
+# (/fed/v1/canale, 25 s alla volta); il vicino ci mette le richieste firmate destinate a lei, la foglia le esegue sul suo
+# server come se arrivassero da fuori (la firma è quella del vicino: niente di nuovo da fidarsi) e rimanda la risposta a
+# pezzi da 512 kB (/fed/v1/canale/<rq>), così passano anche i brani interi, transcodificati o no. fed_req sceglie da
+# sola: diretto se il nodo risponde, il canale se non risponde e il canale è aperto. Si forma una stella attorno ai
+# server pubblici; catalogo, ricerca, audio a catena e radio non cambiano. Costa un thread del vicino per ogni foglia.
+CHAN_POLL = 25
+CHUNK = 512 * 1024
+chan = {}        # (vicino) foglia -> {"q": richieste per lei, "at": ultimo collegamento}
+pend = {}        # (vicino) richiesta nel canale -> {"nid", "meta": Event, "info": stato e intestazioni, "chunks": pezzi}
+direct_ok = {}   # nodo -> ultima richiesta diretta riuscita
+chan_want = {}   # (foglia) vicino -> mi ha detto che non mi raggiunge: tengo il canale
+chan_threads = {}
+chan_lock = threading.Lock()
+
+
+def probe():
+    """Chi parla dal canale si riprova direttamente ogni 10 minuti: se ora risponde (porta aperta, Tailscale) si torna
+    al collegamento diretto, e lui chiude il canale quando legge ti_raggiungo."""
+    for n in nodes():
+        if chan_ok(n["id"]):
+            try:
+                if A.http.get(n["url"].rstrip("/") + "/fed/hello", timeout=5).json().get("nodo") == n["id"]:
+                    direct_ok[n["id"]] = time.time()
+            except (requests.RequestException, ValueError):
+                pass
+
+
+def chan_ok(nid):
+    c = chan.get(nid)
+    return bool(c) and time.time() - c["at"] < CHAN_POLL + 20
+
+
+class ChanResp:
+    """Come una risposta di requests, ma arriva dal canale: quanto basta a fed_json e a passthrough."""
+    def __init__(self, rq, p, read_to):
+        self.rq, self.p, self.read_to, self._content = rq, p, read_to, None
+        info = p.get("info") or {}
+        self.status_code = int(info.get("status") or 502)
+        self.ok = 200 <= self.status_code < 400
+        self.headers = requests.structures.CaseInsensitiveDict(info.get("headers") or {})
+
+    def iter_content(self, _size=None):
+        try:
+            while True:
+                c = self.p["chunks"].get(timeout=self.read_to)
+                if c is None:
+                    break
+                yield c
+        except queue.Empty:
+            pass
+        finally:
+            self.close()
+
+    @property
+    def content(self):
+        if self._content is None:
+            self._content = b"".join(self.iter_content())
+        return self._content
+
+    def json(self):
+        return json.loads(self.content)
+
+    def close(self):
+        pend.pop(self.rq, None)  # la foglia riceve 410 al pezzo dopo e smette di mandare
+
+
+def via_chan(node, method, full, h, data, timeout):
+    rq = uuid.uuid4().hex
+    p = {"nid": node["id"], "meta": threading.Event(), "chunks": queue.Queue(maxsize=16)}
+    pend[rq] = p
+    chan[node["id"]]["q"].put({"rq": rq, "method": method, "path": full, "headers": h, "body": b64e(data) if data else ""})
+    first, read = timeout if isinstance(timeout, tuple) else (timeout, timeout)
+    if not p["meta"].wait(max(first, 5) + 15):
+        pend.pop(rq, None)
+        raise FedError(f"{node.get('name') or 'Il nodo'} non risponde dal canale")
+    return ChanResp(rq, p, max(read, 30))
+
+
+@bp.post("/fed/v1/canale")
+def chan_poll():
+    nid = g.fed_node["id"]
+    with chan_lock:
+        c = chan.setdefault(nid, {"q": queue.Queue(), "at": 0, "gen": 0})
+        c["gen"] += 1
+        gen = c["gen"]
+    c["at"] = time.time()
+    out = []
+    try:
+        out.append(c["q"].get(timeout=CHAN_POLL))
+        while len(out) < 20:
+            out.append(c["q"].get_nowait())
+    except queue.Empty:
+        pass
+    if gen != c["gen"]:
+        # nel frattempo la foglia ha riaperto il canale (riavvio, rete cambiata): questa attesa è di una connessione morta,
+        # quello che ha preso torna in coda per quella nuova
+        for x in out:
+            c["q"].put(x)
+        return jsonify(reqs=[])
+    c["at"] = time.time()
+    return jsonify(reqs=out)
+
+
+@bp.post("/fed/v1/canale/<rq>")
+def chan_reply(rq):
+    p = pend.get(rq)
+    if not p or p["nid"] != g.fed_node["id"]:
+        return jsonify(error="Richiesta scaduta"), 410
+    if "info" not in p:
+        try:
+            p["info"] = json.loads(request.headers.get("X-Canale-Meta") or "{}")
+        except ValueError:
+            p["info"] = {"status": 502, "headers": {}}
+        p["meta"].set()
+    try:
+        p["chunks"].put(request.get_data(), timeout=120)  # chi ascolta va piano: la foglia aspetta (al più 8 MB in memoria)
+        if request.args.get("fine"):
+            p["chunks"].put(None, timeout=120)
+    except queue.Full:
+        pend.pop(rq, None)
+        return jsonify(error="Richiesta scaduta"), 410
+    return jsonify(ok=True)
+
+
+def chan_start(nid):
+    with chan_lock:
+        t = chan_threads.get(nid)
+        if t and t.is_alive():
+            return
+        chan_threads[nid] = threading.Thread(target=chan_run, args=(nid,), daemon=True, name="canale-" + nid[:6])
+        chan_threads[nid].start()
+
+
+def chan_run(nid):
+    while chan_want.get(nid):
+        n = node(nid)
+        if not n or n["state"] != "attivo" or n.get("dir") == "offro":
+            break
+        try:
+            j = fed_json(n, "POST", "/fed/v1/canale", body={}, timeout=(5, CHAN_POLL + 15))
+        except FedError:
+            time.sleep(10)
+            continue
+        for rq in j.get("reqs") or []:
+            if isinstance(rq, dict) and rq.get("rq"):
+                threading.Thread(target=chan_exec, args=(n, rq), daemon=True).start()
+
+
+def chan_exec(n, rq):
+    """Una richiesta arrivata dal canale: eseguita qui come se fosse arrivata da fuori, la risposta torna a pezzi."""
+    path = str(rq.get("path") or "")
+    if not path.startswith("/fed/v1/") or path.startswith("/fed/v1/canale"):
+        return
+    hdr = {k: str(v) for k, v in (rq.get("headers") or {}).items() if k.lower().startswith("x-fed-") or k.lower() in ("range", "content-type")}
+    try:
+        body = b64d(rq["body"]) if rq.get("body") else None
+        resp = A.app.test_client().open(path, method=str(rq.get("method") or "GET"), headers=hdr, data=body, buffered=False)
+    except Exception as e:  # noqa: BLE001
+        diagnosi.avviso("federazione", f"canale: richiesta non eseguita: {e}")
+        return
+    keep = {h.lower() for h in A.PASS_RESP} | {"x-fed-sig"}
+    meta = json.dumps({"status": resp.status_code, "headers": {k: v for k, v in resp.headers.items() if k.lower() in keep}})
+    seq = 0
+
+    def send(chunk, fine):
+        nonlocal seq
+        r, _ = fed_req(n, "POST", f"/fed/v1/canale/{rq['rq']}", params={"seq": seq, "fine": 1 if fine else None}, raw=chunk,
+                       headers={"X-Canale-Meta": meta} if seq == 0 else None, timeout=(5, 130))
+        seq += 1
+        return r.status_code == 200
+
+    try:
+        buf = b""
+        for part in resp.iter_encoded():
+            buf += part
+            while len(buf) >= CHUNK:
+                if not send(buf[:CHUNK], False):
+                    return
+                buf = buf[CHUNK:]
+        send(buf, True)
+    except FedError:
+        pass
+    finally:
+        resp.close()
 
 
 # ------------------------------------------------------------------ ricerca e mappa: cache dei vicini, poi inoltro
@@ -825,7 +1034,9 @@ def fed_info(sid):
 def node_out(n):
     online = n["state"] == "attivo" and not n["error"] and n["seen"] and time.time() - n["seen"] < 3 * REFRESH_S
     return {k: n[k] for k in ("id", "name", "owner", "url", "state", "created", "seen", "app", "songs", "albums", "error", "synced", "dir")} | {
-        "transitive": bool(n["transitive"]), "online": bool(online), "safety": safety(PUB, n["pub"])}
+        "transitive": bool(n["transitive"]), "online": bool(online or chan_ok(n["id"])), "safety": safety(PUB, n["pub"]),
+        # canale: lui non è raggiungibile e mi parla dal canale inverso; uscita: io non sono raggiungibile e tengo il canale verso di lui
+        "reach": "canale" if chan_ok(n["id"]) and time.time() - direct_ok.get(n["id"], 0) > 1800 else "uscita" if chan_want.get(n["id"]) else "diretto"}
 
 
 @bp.get("/api/fed")
@@ -999,7 +1210,7 @@ def rete_map():
             seen.add(x["id"])
             more.append(x)
     return jsonify(me={"id": ME, "name": A.NAME, "owner": owner(), "songs": n, "albums": a}, hops=hops(),
-                   nodes=[{k: x[k] for k in ("id", "name", "owner", "songs", "albums", "online", "seen", "app", "error")} for x in direct],
+                   nodes=[{k: x[k] for k in ("id", "name", "owner", "songs", "albums", "online", "seen", "app", "error", "state", "reach", "dir")} for x in direct],
                    far=more)
 
 
@@ -1055,6 +1266,107 @@ def rete_copy():
         A.jsave(jid)
     A.jq.put((jid, j))
     return jsonify(A.jobs[jid]), 201
+
+
+# ------------------------------------------------------------------ abbonamenti: playlist pubbliche dei server collegati
+# Chi è collegato vede le playlist *pubbliche* di questo server (le private restano private) con i soli brani offerti
+# nel catalogo. Abbonandosi, l'utente ha una sua playlist locale: i brani che mancano si copiano (run_copy) e la
+# riconciliazione delle importazioni (importa.py) la tiene uguale a quella remota, ricontrollata ogni 10 minuti.
+SUB_S = 600
+
+
+@bp.get("/fed/v1/playlist")
+def fed_playlists():
+    pls = (nd_get("getPlaylists").get("playlists") or {}).get("playlist") or []
+    return jsonify(playlists=[{"id": p["id"], "name": p.get("name") or "Playlist", "owner": p.get("owner") or "", "songs": p.get("songCount") or 0,
+                               "comment": (p.get("comment") or "")[:300]} for p in pls if p.get("public")])
+
+
+@bp.get("/fed/v1/playlist/<pid>")
+def fed_playlist(pid):
+    if not A.ID_RE.match(pid):
+        abort(400)
+    try:
+        pl = nd_get("getPlaylist", id=pid)["playlist"]
+    except FedError:
+        return jsonify(error="Playlist non trovata"), 404
+    if not pl.get("public"):
+        return jsonify(error="Playlist non trovata"), 404
+    entries = pl.get("entry") or []
+    ids = [e["id"] for e in entries]
+    offered = {r["id"] for i in range(0, len(ids), 400)
+               for r in db.all_(f"SELECT id FROM fed_mine WHERE gone = 0 AND id IN ({','.join('?' * len(ids[i:i + 400]))})", *ids[i:i + 400])}
+    return jsonify(id=pid, name=pl.get("name"), owner=pl.get("owner") or "", songs=[song_row(e) for e in entries if e["id"] in offered])
+
+
+def sub_sync(sub):
+    """Un abbonamento: elenco della playlist remota → elenco dell'importazione locale, copia dei brani che mancano."""
+    n = node(sub["node"])
+    try:
+        if not n or n["state"] != "attivo" or n.get("dir") == "offro":
+            raise FedError("Il server collegato non è attivo")
+        j = fed_json(n, "GET", f"/fed/v1/playlist/{sub['rid']}", timeout=(5, 60))
+        songs = [s for s in j.get("songs") or [] if isinstance(s, dict) and SONG_RE.match(str(s.get("id", "")))]
+        items = [{"title": s.get("title") or "", "artists": [s.get("artist") or ""], "album": s.get("album") or "", "duration": s.get("duration"),
+                  "isrc": "", "track": s.get("track"), "fed": s["id"]} for s in songs]
+        now = time.time()
+        db.run("INSERT INTO imports (pid, owner, name, items, created, updated) VALUES (?, ?, ?, ?, ?, ?) "
+               "ON CONFLICT(pid) DO UPDATE SET items = excluded.items, updated = excluded.updated", sub["pid"], sub["owner"], sub["name"], json.dumps(items), now, now)
+        L = A.importa.lib()
+        with A.jlock:
+            queued = {(x["fed"]["r"], x["fed"]["id"]) for x in A.jobs.values() if x.get("fed") and x["status"] != "errore"}
+        todo = [it for it in items if not L.match(it) and (n["id"], it["fed"]) not in queued][:300]
+        for it in todo:
+            jid = uuid.uuid4().hex[:10]
+            jj = dict(url="", mode="audio", format="", quality="", playlist=False, folder="", sponsorblock=False, meta={}, fed={"id": it["fed"], "r": n["id"]})
+            with A.jlock:
+                A.jobs[jid] = dict(jj, id=jid, status="in coda", progress=0, title=f"{it['artists'][0]} - {it['title']}", created=now, updated=now,
+                                   by=sub["owner"], batch="sub:" + sub["pid"], label=f"Abbonamento: {sub['name']}")
+                A.jsave(jid)
+            A.jq.put((jid, jj))
+        db.run("UPDATE fed_subs SET last = ?, error = NULL WHERE pid = ?", now, sub["pid"])
+        A.importa.stato_di(db.one("SELECT * FROM imports WHERE pid = ?", sub["pid"]), L)  # la playlist si riempie subito con ciò che c'è già
+        return len(todo)
+    except FedError as e:
+        db.run("UPDATE fed_subs SET last = ?, error = ? WHERE pid = ?", time.time(), str(e)[:200], sub["pid"])
+        return 0
+
+
+@bp.get("/api/rete/playlist")
+def rete_playlists():
+    n = node(request.args.get("node") or "")
+    if not n or n["state"] != "attivo":
+        return jsonify(error="Server non collegato"), 404
+    try:
+        j = fed_json(n, "GET", "/fed/v1/playlist", timeout=(5, 30))
+    except FedError as e:
+        return jsonify(error=str(e)), e.status if 400 <= e.status < 600 else 502
+    subs = {r["rid"]: r["pid"] for r in db.all_("SELECT rid, pid FROM fed_subs WHERE node = ? AND owner = ?", n["id"], g.who.get("user") or "")}
+    return jsonify(node=node_info(n), playlists=[dict(p, sub=subs.get(p.get("id"))) for p in j.get("playlists") or [] if isinstance(p, dict)])
+
+
+@bp.post("/api/rete/abbonati")
+def rete_subscribe():
+    d, u = request.get_json(silent=True) or {}, g.who.get("user")
+    if not u or not g.who["download"]:
+        return jsonify(error="Gli abbonamenti copiano i brani qui: serve il permesso di download."), 403
+    n, rid, pid = node(str(d.get("node") or "")), str(d.get("id") or ""), str(d.get("pid") or "")
+    if not n or n["state"] != "attivo" or not A.ID_RE.match(rid) or not A.ID_RE.match(pid):
+        return jsonify(error="Richiesta non valida"), 400
+    if A.importa.owner_of(pid) != u:
+        return jsonify(error="La playlist locale non è tua"), 403
+    db.run("INSERT OR REPLACE INTO fed_subs (pid, node, rid, owner, name, created) VALUES (?, ?, ?, ?, ?, ?)",
+           pid, n["id"], rid, u, str(d.get("name") or "Playlist")[:120], time.time())
+    pool.submit(sub_sync, dict(db.one("SELECT * FROM fed_subs WHERE pid = ?", pid)))
+    return jsonify(ok=True, pid=pid), 201
+
+
+@bp.delete("/api/rete/abbonati/<pid>")
+def rete_unsubscribe(pid):
+    # la playlist locale e i brani copiati restano: smette solo di seguire quella remota
+    db.run("DELETE FROM fed_subs WHERE pid = ? AND (owner = ? OR ?)", pid, g.who.get("user") or "", int(g.who["admin"]))
+    db.run("DELETE FROM imports WHERE pid = ? AND NOT EXISTS (SELECT 1 FROM fed_subs WHERE pid = ?)", pid, pid)
+    return jsonify(ok=True)
 
 
 def ensure_library():
@@ -1125,4 +1437,8 @@ def init(flask_app, host):
 
 def start():
     load_identity()  # dopo db.migrate(): la cartella dei dati esiste
+    for n in nodes():
+        if setting("canale:" + n["id"]) == "1":
+            chan_want[n["id"]] = True
+            chan_start(n["id"])
     threading.Thread(target=loop, daemon=True).start()
