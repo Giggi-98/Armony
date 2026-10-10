@@ -2791,8 +2791,9 @@ function vSettings() {
   ${grp('aspetto', 'Aspetto', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
     <div class="tbset"><span class="grow"><b>Barra in basso</b><small>${[...tabsOf().map(h => NAV.find(n => n[0] === h)[1]), 'Altro'].join(' · ')}</small></span><button class="btn sm" data-act="tabsedit">Personalizza</button></div>`)}
 
-  ${grp('backup', 'Backup e trasferimento', 'esporta importa file amico scorciatoie tastiera', `<p class="sub">Sposta tutto su un altro telefono, o passa la configurazione a un amico in dieci secondi.</p>
-  <div class="row"><button class="btn" data-act="exportset">Esporta impostazioni</button><button class="btn" data-act="importset">Importa impostazioni</button><a class="btn" href="#/tasti">Scorciatoie da tastiera</a></div>`)}
+  ${grp('backup', 'Backup e trasferimento', 'esporta importa file amico scorciatoie tastiera ripristina reset cancella vergine', `<p class="sub">Sposta tutto su un altro telefono, o passa la configurazione a un amico in dieci secondi.</p>
+  <div class="row"><button class="btn" data-act="exportset">Esporta impostazioni</button><button class="btn" data-act="importset">Importa impostazioni</button><a class="btn" href="#/tasti">Scorciatoie da tastiera</a></div>
+  <div class="row" style="margin-top:var(--s5);padding-top:var(--s4);border-top:1px solid var(--line)"><span class="grow" style="min-width:200px"><b>Ripristina ${NATIVE ? 'l\'app' : 'questo browser'}</b><br><small style="color:var(--muted)">Toglie server, chiavi, brani offline e preferenze da questo dispositivo, come appena installata${NATIVE ? '' : ''}.</small></span><button class="btn danger" data-act="resetapp">Ripristina</button></div>`)}
   <p class="small" style="color:var(--muted);margin-top:24px">Armony, dispositivo ${esc(S.device)}.</p>`;
   view.querySelectorAll('.sgroup').forEach(d => d.ontoggle = () => {
     if ($('#setQ').value) return;  // durante la ricerca i gruppi si aprono da soli: non è una scelta da ricordare
@@ -2954,6 +2955,29 @@ async function refreshApk() {
       <div class="row"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
     closeOutside(d); d.showModal(); qrInto($('#apkQrBox'), url).catch(() => { $('#apkQrBox').innerHTML = '<p class="sub">Il QR non si è caricato (serve internet): usa il link qui sotto.</p>'; });
   };
+}
+// ripristino: il dispositivo torna com'era appena installato (per ricollegarsi da capo, per esempio con le chiavi).
+// Prima, se si vuole, si revoca sul server: la sua chiave vecchia non deve restare valida
+function resetApp() {
+  const d = $('#dlg2'), mine = S.servers.filter(s => s.session && s.dev);
+  d.className = '';
+  d.innerHTML = `<h3>Ripristinare ${NATIVE ? 'l\'app' : 'questo browser'}?</h3>
+    <p class="sub">Da questo dispositivo spariscono server, chiavi, brani salvati offline, preferenze e storico non ancora sincronizzato. La musica sui server non si tocca. Poi riparti dalla schermata di benvenuto: ricollegati con un codice di abbinamento da un dispositivo fidato, o con la password e l'approvazione.</p>
+    ${mine.length ? `<label class="check"><input type="checkbox" id="rsRev" checked><span>Revoca anche questo dispositivo sul server<small>La sua chiave smette subito di valere: rientrando sarà un dispositivo nuovo.</small></span></label>` : ''}
+    <div class="row"><button class="btn danger" id="rsGo">Ripristina</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div>`;
+  $('#rsGo').onclick = async () => {
+    $('#rsGo').disabled = true; $('#rsGo').textContent = 'Ripristino…';
+    if ($('#rsRev')?.checked) for (const s of mine) await srvApi(s, `/api/dispositivi/${encodeURIComponent(s.dev)}/revoca`, { method: 'POST' }).catch(() => {});
+    else for (const s of mine) await srvApi(s, '/api/logout', { method: 'POST' }).catch(() => {});
+    try { Engine.stop(); } catch {}
+    try { localStorage.clear(); sessionStorage.clear(); } catch {}
+    try { DB._db && (await DB._db).close(); } catch {}
+    await new Promise(r => { const q = indexedDB.deleteDatabase('armony'); q.onsuccess = q.onerror = q.onblocked = r; });
+    try { for (const k of await caches.keys()) await caches.delete(k); } catch {}
+    try { for (const r of await navigator.serviceWorker?.getRegistrations?.() || []) await r.unregister(); } catch {}
+    location.replace(location.pathname + '#/home'); location.reload();
+  };
+  closeOutside(d); d.showModal();
 }
 async function qrInto(box, text) {
   // stessa libreria del QR della Jam, caricata solo quando serve
@@ -3483,6 +3507,7 @@ Deve essere uguale a quello che vede l'altro amministratore.`)) { await dlApi(`/
       case 'fedsync': await dlApi(`/api/fed/nodes/${el.dataset.id}/refresh`, { method: 'POST' }); refreshFed(); toast('Aggiornato.'); break;
       case 'fedrm': if (confirm(`Scollegare ${el.dataset.name}? Non vedrete più le vostre librerie; i brani già copiati restano.`)) { await dlApi(`/api/fed/nodes/${el.dataset.id}`, { method: 'DELETE' }); refreshFed(); } break;
       case 'usrrevoke': if (confirm(`${Disp.ok(srv()) ? `Revocare tutti i dispositivi di ${el.dataset.user}? Smettono subito di funzionare e per rientrare servirà un'approvazione.` : `Disconnettere ${el.dataset.user} da tutti i dispositivi? Dovrà rifare l'accesso.`}`)) { await dlApi(`/api/users/${encodeURIComponent(el.dataset.user)}/sessions`, { method: 'DELETE' }); refreshUsers(); } break;
+      case 'resetapp': resetApp(); break;
       case 'exportset': {
         const withPw = confirm('Includere le credenziali nel file?\nOK = sì (conservalo al sicuro), Annulla = no');
         // mai la sessione: è di questo dispositivo. Le credenziali sono token + sale, non la password

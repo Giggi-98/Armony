@@ -38,6 +38,9 @@ const Disp = {
     const n = { k: s.id, ...await this.gen() }; await DB.put('chiavi', n); return n;
   },
   forget(s) { return DB.del('chiavi', s.id).catch(() => {}); },
+  // chiave e primo accesso uno alla volta fra le schede dello stesso browser: due schede che partono insieme
+  // si creavano due chiavi diverse, e la seconda diventava un dispositivo nuovo in attesa
+  lock(s, fn) { return navigator.locks?.request ? navigator.locks.request('armony-chiave:' + s.id, fn) : fn(); },
   async sign(priv, msg) { return this.b64(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, priv, new TextEncoder().encode(msg))); },
   async fp(pub) {
     const raw = Uint8Array.from(atob(pub.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
@@ -77,7 +80,8 @@ const Disp = {
     if (j.code === 'sconosciuto' || j.code === 'firma') { delete s.dev; await this.forget(s); return null; }
     return this.take(s, r, j);
   },
-  async login(s) {
+  login(s) { return this.lock(s, () => this.login1(s)); },
+  async login1(s) {
     const base = absUrl(s.url);
     if (s.dev && this.can()) { const k = await this.key(s, false); if (k) { const j = await this.signIn(s, k); if (j) return j; } }
     if (!s.tok) throw new Error('Serve la password: modifica il server e reinseriscila.');
@@ -88,7 +92,7 @@ const Disp = {
       Object.assign(body, { pub: k.pub, nonce: n, sig: await this.sign(k.priv, `armony1|login|${n}|${s.user}`) });
     }
     let [r, j] = await this.post(base + '/api/login', body);
-    if (j.code === 'chiave_altrui') { await this.forget(s); delete s.dev; return this.login(s); }
+    if (j.code === 'chiave_altrui') { await this.forget(s); delete s.dev; return this.login1(s); }
     if (j.code === 'revocato' && body.pub) { await this.forget(s); delete s.dev; [r, j] = await this.post(base + '/api/login', { ...body, ...await this.relogBody(s, base) }); }
     return this.take(s, r, j);
   },
@@ -98,8 +102,11 @@ const Disp = {
     return { pub: k.pub, nonce: n, sig: await this.sign(k.priv, `armony1|login|${n}|${s.user}`) };
   },
   // prima chiave di un dispositivo che entrava senza (client aggiornato) o chiave nuova scelta da qui
-  async setKey(s) {
+  setKey(s, fresh) { return this.lock(s, () => this.setKey1(s, fresh)); },
+  async setKey1(s, fresh) {
     if (!this.can() || !s.session || !s.dev) return;
+    // un'altra scheda l'ha appena registrata: si usa quella (salvo una chiave nuova chiesta apposta)
+    if (!fresh && await this.key(s, false)) return;
     const base = absUrl(s.url), nk = await this.gen(), n = await this.nonce(base);
     const [r, j] = await this.post(base + '/api/dispositivi/chiave', { pub: nk.pub, nonce: n, sig: await this.sign(nk.priv, `armony1|chiave|${n}|${s.dev}`), name: this.name(), kind: this.kind() }, s.session);
     if (r.ok) await DB.put('chiavi', { k: s.id, ...nk });
@@ -243,7 +250,7 @@ const Disp = {
     try {
       if (a === 'pair') return this.pairSheet();
       if (a === 'menu') return this.menu(d);
-      if (a === 'selfkey') { await this.setKey(s); persistServers(); toast('Chiave nuova pronta: la vecchia non vale più.'); return this.paint(); }
+      if (a === 'selfkey') { await this.setKey(s, true); persistServers(); toast('Chiave nuova pronta: la vecchia non vale più.'); return this.paint(); }
       if (a === 'rename') {
         const name = await ask('Nome del dispositivo', d?.name || '', 'Es. Telefono di Giulia'); if (!name) return;
         await this.api(base, { method: 'PUT', body: JSON.stringify({ name }) });

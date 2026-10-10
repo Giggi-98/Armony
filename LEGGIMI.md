@@ -165,6 +165,8 @@ Ogni telefono, PC o browser si crea da solo una chiave segreta che non lascia ma
 
 Da lì vedi i tuoi dispositivi (ultimo accesso, da casa o da internet), li rinomini, chiedi una chiave nuova o li **revochi**: un dispositivo revocato smette subito di suonare e di usare Armony. L'amministratore vede quelli di tutti e il registro degli accessi.
 
+**Ripartire da zero.** In Impostazioni → Backup e trasferimento → **Ripristina** il dispositivo torna come appena installato: spariscono server, chiavi, brani offline e preferenze (la musica sui server non si tocca), e di base viene anche revocato sul server, così la sua chiave vecchia non vale più. Poi ti ricolleghi con un codice di abbinamento da un dispositivo fidato, o con la password e l'approvazione.
+
 **Client senza chiave.** Le app vecchie e Armony aperta senza HTTPS (es. `http://192.168…`) non hanno una chiave. L'amministratore sceglie se accettarli sempre, solo da casa e da Tailscale (consigliato) o mai. Dopo l'aggiornamento c'è un periodo di transizione di 14 giorni in cui entrano ancora da ovunque: aggiorna l'app sui telefoni e poi passa a «Da casa e Tailscale». Le app Subsonic di terze parti (Symfonium, Tempo…) collegate ad Armony valgono come client senza chiave.
 
 **Esposto su internet.** Il codice di emergenza `ARMONY_TOKEN` funziona solo da casa o da Tailscale, mai dal Funnel o da indirizzi pubblici. Dopo 4 password sbagliate in un'ora l'accesso aspetta 30 secondi, poi il doppio a ogni errore. Se l'amministratore non ha ancora un dispositivo fidato, il primo accesso va fatto da casa.
