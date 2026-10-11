@@ -929,7 +929,10 @@ async function vArtist(id) {
   // luce dalla copertina sul server (stessa origine): l'immagine grande dell'artista spesso è di un altro dominio
   Glow.show(coverUrl(a.coverArt || arr(a.album)[0]?.coverArt, 300), 'album');
   const albums = arr(a.album), sim = arr(info?.similarArtist).filter(x => x.id);
-  const img = info?.largeImageUrl ? `<img src="${esc(info.largeImageUrl)}" alt="" onerror="this.remove()">` : imgTag(a.coverArt, 500);
+  // la foto dell'artista dal server (getCoverArt ar-…, con il gettone): largeImageUrl di Navidrome punta al suo
+  // indirizzo interno (http://127.0.0.1:4533/share/img/…), che da un telefono o da un altro PC non si apre
+  const big = info?.largeImageUrl && !/^https?:\/\/(127\.|localhost|\[::1\])/.test(info.largeImageUrl) ? info.largeImageUrl : '';
+  const img = a.coverArt ? imgTag(a.coverArt, 500) : big ? `<img src="${esc(big)}" alt="" onerror="this.remove()">` : '';
   const aside = bio ? `<span class="phero-kind">Informazioni</span><span class="lbio" style="display:block">${esc(bio.slice(0, 600))}</span>` : '';
   S.bio = { name: a.name, text: bio };
   view.innerHTML = lPhero({ kind: 'Artista', title: a.name, ph: a.coverArt, art: img, round: true, aside, meta: `${albums.length} album${top.length ? ` · ${top.length} brani popolari` : ''}` }) +
