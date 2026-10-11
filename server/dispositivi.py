@@ -765,6 +765,7 @@ def pulizia():
             db.run("UPDATE pairings SET t = '', s = '' WHERE expires < ? AND (t != '' OR s != '')", now)
             db.run("DELETE FROM sessions WHERE exp IS NOT NULL AND exp < ?", now)
             db.run("DELETE FROM mandati WHERE ts < ? AND id NOT IN (SELECT id FROM mandati ORDER BY id DESC LIMIT 2000)", now - 90 * 86400)
+            db.run("DELETE FROM notif_gettoni WHERE dev NOT IN (SELECT id FROM devices WHERE state = 'fidato')")
             A.pota_lavori()
             with _hlock:
                 for k in [k for k, v in _hits.items() if not v or now - v[-1] > 3600]:

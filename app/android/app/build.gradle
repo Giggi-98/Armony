@@ -57,6 +57,8 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     implementation "androidx.media:media:1.7.0"
+    // notifiche ad app chiusa: ArmonyNotificheWorker ogni 15 minuti
+    implementation "androidx.work:work-runtime:2.10.0"
     // ProxyController per il DNS di riserva (ArmonyNetPlugin); stessa versione che usa Capacitor
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
     testImplementation "junit:junit:$junitVersion"

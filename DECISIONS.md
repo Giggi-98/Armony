@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Notifiche ad app Android chiusa: WorkManager ogni 15 minuti con un gettone dedicato
+
+**Contesto:** l'utente vuole le notifiche di Android con l'app in sottofondo o chiusa; finora arrivavano solo mentre il canale dal vivo era aperto (voce 9.6 del piano).
+**Scelta:** `ArmonyNotificheWorker` (WorkManager, periodico 15 minuti, solo con la rete) chiede `/api/notifiche/nuove?dopo=ID` con un gettone dedicato (`notif_gettoni`, migrazione 14, salvato come sha256) che vale solo per leggere le notifiche non lette e muore con la revoca del dispositivo; lo chiede il client all'avvio e quando cambiano le scelte. Con l'app in primo piano il worker non mostra niente; le notifiche già mostrate dall'app si segnano (`notifySeen`) e una ripetuta prende il posto della prima (stesso id) senza suonare di nuovo.
+**Alternative scartate:** Firebase Cloud Messaging (servizio esterno con account e chiavi, già scartato); un servizio in primo piano sempre acceso con il canale dal vivo (notifica fissa e batteria); usare la sessione del dispositivo nel worker (si rinnova solo firmando con la chiave chiusa nella WebView, e darla al codice nativo allargherebbe cosa può fare); un gettone che apre anche altre rotte.
+**Conseguenze:** ritardo fino a 15 minuti (di più in risparmio energetico, e alcuni produttori fermano i lavori delle app «ottimizzate»); una richiesta piccola ogni 15 minuti per telefono.
+**Da rivedere se:** servono avvisi immediati ad app chiusa (allora un servizio push, o un canale nativo come la voce 2.9).
+
 ## 2026-10-11 — Controllo giornaliero di nome e certificato
 
 **Contesto:** con un DynDNS gratuito (No-IP: conferma ogni 30 giorni) e un inoltro sul firewall, Armony può sparire da internet senza che nessuno se ne accorga finché un amico non resta fuori.

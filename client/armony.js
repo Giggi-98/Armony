@@ -3763,8 +3763,21 @@ const Notif = {
   async load() {
     if (!this.on()) { this.paint(); return; }
     try { const r = await srvApi(srv(), '/api/notifiche'); this.items = r.items; this.unread = r.unread; } catch {}
-    this.paint();
+    this.paint(); this.seen(Math.max(0, ...this.items.map(x => x.id))); this.native();
   },
+  // app Android: le notifiche arrivano anche ad app chiusa (ArmonyNotificheWorker, ogni 15 minuti) con un gettone che
+  // vale solo per leggere quelle nuove; i tipi seguono Impostazioni → Notifiche. Con l'app aperta restano dentro l'app
+  async native() {
+    const F = NATIVE && window.Capacitor?.Plugins?.ArmonyFiles, s = srv();
+    if (!F?.notifySetup || !s?.session || s.local || !s.me?.caps?.includes('notifondo')) return;
+    if (!P.notifOn) return F.notifySetup({ on: false }).catch(() => {});
+    try {
+      const j = await srvApi(s, '/api/notifiche/gettone', { method: 'POST' });
+      const kinds = Object.entries(NKIND).filter(([, k]) => P[k] !== false).map(([kind]) => kind).join(',');
+      await F.notifySetup({ on: true, url: absUrl(s.url), token: j.token, last: j.last, kinds });
+    } catch {}
+  },
+  seen(id) { const F = NATIVE && window.Capacitor?.Plugins?.ArmonyFiles; if (F?.notifySeen && id) F.notifySeen({ last: id }).catch(() => {}); },
   paint() {
     const b = $('#hBell'); if (!b) return;
     b.hidden = !this.on();
@@ -3775,7 +3788,7 @@ const Notif = {
   recv(m) {
     if (m.lette) { if (m.lette === 'tutte') { this.items.forEach(x => x.letta = 1); this.unread = 0; } else { this.items.forEach(x => { if (m.lette.includes(x.id)) x.letta = 1; }); this.unread = this.items.filter(x => !x.letta).length; } this.paint(); return; }
     const n = m.item; if (!n || this.items.some(x => x.id === n.id)) return;
-    this.items.unshift(n); this.unread++; this.paint();
+    this.items.unshift(n); this.unread++; this.paint(); this.seen(n.id);  // mostrata qui: il controllo nativo non la ripete
     if (location.hash.startsWith('#/notifiche')) vNotifiche();
     const k = NKIND[n.kind];
     if (document.visibilityState === 'visible') return toast(`${n.title}${n.body ? ' · ' + n.body : ''}`, 5000);
@@ -4282,7 +4295,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   if ($('#pAv')) { $('#pAv').onclick = () => Avatar.choose(); $('#pAvDel').onclick = () => Avatar.remove(); }
   if ($('#pNotif')) $('#pNotif').onchange = async e => {
     if (e.target.checked && !(await Notif.permission())) { e.target.checked = false; toast(NATIVE ? 'Consenti le notifiche ad Armony nelle impostazioni del telefono.' : 'Il browser non ha consentito le notifiche: abilitale dal lucchetto accanto all\'indirizzo.', 7000); return; }
-    P.notifOn = e.target.checked; savePrefs(); toast(P.notifOn ? 'Avvisi attivi su questo dispositivo.' : 'Avvisi spenti: le notifiche restano nella campanella.');
+    P.notifOn = e.target.checked; savePrefs(); Notif.native(); toast(P.notifOn ? 'Avvisi attivi su questo dispositivo.' : 'Avvisi spenti: le notifiche restano nella campanella.');
   };
   if ($('#pShare')) $('#pShare').onchange = async e => {
     try { Presence.share = (await srvApi(srv(), '/api/live/privacy', { method: 'PUT', body: JSON.stringify({ share: e.target.checked }) })).share; toast(Presence.share ? 'Gli altri vedono cosa ascolti.' : 'Non compari più agli altri.'); }
@@ -4295,6 +4308,7 @@ function vSettings(id = location.hash.split('/')[2]) {
     if (el.dataset.pb === 'compat') toast('Ricarica la pagina per applicare.');
     if (el.dataset.pb === 'sync' && P.sync) { PrefSync.pull(); HistSync.run(); }
     if (el.dataset.pb === 'live') Live.connect();
+    if (Object.values(NKIND).includes(el.dataset.pb)) Notif.native();  // i tipi scelti valgono anche ad app chiusa
   });
   $('#cacheMB').onchange = e => { P.cacheMB = +e.target.value; savePrefs(); if (!P.cacheMB) ACache.clear().then(() => { $('#cacheUse').textContent = '0 MB usati'; }); else ACache.trim(); };
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };

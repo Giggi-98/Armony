@@ -134,6 +134,11 @@ MIGRATIONS = [
                           ref TEXT NOT NULL, title TEXT, sub TEXT, msg TEXT);
     CREATE INDEX mandati_a ON mandati(a, id);
     """,
+    # 14: gettoni per le notifiche dell'app Android ad app chiusa (notifiche.py): leggono solo le notifiche nuove
+    """
+    CREATE TABLE notif_gettoni (token TEXT PRIMARY KEY, dev TEXT NOT NULL, user TEXT NOT NULL, created REAL NOT NULL);
+    CREATE INDEX notif_gettoni_dev ON notif_gettoni(dev);
+    """,
 ]
 
 _local = threading.local()

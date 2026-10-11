@@ -34,6 +34,7 @@ import java.io.OutputStream;
  *  save      → Download/Armony (MediaStore; sotto Android 10 si condivide, senza chiedere permessi di scrittura)
  *  share     → il foglio «Condividi» di Android (FileProvider della cache)
  *  notify    → una notifica del canale «Avvisi»; il tocco apre l'app sull'indirizzo #/… indicato
+ *  notifySetup, notifySeen → le notifiche ad app chiusa: ArmonyNotificheWorker le chiede al server ogni 15 minuti
  */
 @CapacitorPlugin(
     name = "ArmonyFiles",
@@ -115,31 +116,59 @@ public class ArmonyFilesPlugin extends Plugin {
 
     @PluginMethod
     public void notify(PluginCall call) {
-        Context c = getContext();
+        try {
+            post(getContext(), call.getInt("id", (int) (System.currentTimeMillis() & 0x7fffffff)), call.getString("title", "Armony"),
+                 call.getString("body", ""), call.getString("link", ""));
+            call.resolve();
+        } catch (SecurityException e) {
+            call.reject("Notifiche non consentite");
+        }
+    }
+
+    /** Lo stesso id della notifica sul server: se arriva sia dall'app sia dal worker, la seconda prende il posto della prima. */
+    static void post(Context c, int id, String title, String body, String link) {
         NotificationManager nm = c.getSystemService(NotificationManager.class);
         if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(CHANNEL) == null) {
             NotificationChannel ch = new NotificationChannel(CHANNEL, "Avvisi", NotificationManager.IMPORTANCE_DEFAULT);
             ch.setDescription("Importazioni e download finiti, amici in Jam, dispositivi da approvare");
             nm.createNotificationChannel(ch);
         }
-        String link = call.getString("link", "");
         Intent open = new Intent(c, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        if (link.startsWith("#/")) open.putExtra(EXTRA_LINK, link);
-        int id = call.getInt("id", (int) (System.currentTimeMillis() & 0x7fffffff));
+        if (link != null && link.startsWith("#/")) open.putExtra(EXTRA_LINK, link);
         PendingIntent pi = PendingIntent.getActivity(c, id, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         NotificationCompat.Builder b = new NotificationCompat.Builder(c, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_armony)
-            .setContentTitle(call.getString("title", "Armony"))
-            .setContentText(call.getString("body", ""))
-            .setStyle(new NotificationCompat.BigTextStyle().bigText(call.getString("body", "")))
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(pi)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(true);
-        try {
-            NotificationManagerCompat.from(c).notify("avviso", id, b.build());
-            call.resolve();
-        } catch (SecurityException e) {
-            call.reject("Notifiche non consentite");
-        }
+        NotificationManagerCompat.from(c).notify("avviso", id, b.build());
+    }
+
+    // ------------------------------------------------ notifiche ad app chiusa (ArmonyNotificheWorker)
+    /** url, token (gettone del server, vale solo per le notifiche nuove), last, kinds ("import,download,…"), on. */
+    @PluginMethod
+    public void notifySetup(PluginCall call) {
+        Context c = getContext();
+        android.content.SharedPreferences.Editor e = c.getSharedPreferences(ArmonyNotificheWorker.PREFS, Context.MODE_PRIVATE).edit();
+        boolean on = call.getBoolean("on", false);
+        if (call.getString("url") != null) e.putString("url", call.getString("url"));
+        if (call.getString("token") != null) e.putString("token", call.getString("token"));
+        if (call.getString("kinds") != null) e.putString("kinds", call.getString("kinds"));
+        e.putLong("last", Math.max(c.getSharedPreferences(ArmonyNotificheWorker.PREFS, Context.MODE_PRIVATE).getLong("last", 0), call.getInt("last", 0)));
+        e.putBoolean("on", on).apply();
+        if (on) ArmonyNotificheWorker.schedule(c); else ArmonyNotificheWorker.cancel(c);
+        call.resolve();
+    }
+
+    /** L'app ha già mostrato (o letto) le notifiche fino a questo id: il worker non le ripete. */
+    @PluginMethod
+    public void notifySeen(PluginCall call) {
+        android.content.SharedPreferences p = getContext().getSharedPreferences(ArmonyNotificheWorker.PREFS, Context.MODE_PRIVATE);
+        p.edit().putLong("last", Math.max(p.getLong("last", 0), call.getInt("last", 0))).apply();
+        call.resolve();
     }
 
     /** L'indirizzo della notifica toccata ad app chiusa (una volta sola). */

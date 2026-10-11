@@ -5,6 +5,15 @@ import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    // in primo piano le notifiche le mostra l'app (ArmonyNotificheWorker non le duplica)
+    static volatile boolean visible;
+
+    @Override
+    public void onResume() { super.onResume(); visible = true; }
+
+    @Override
+    public void onPause() { visible = false; super.onPause(); }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // plugin locali: vanno registrati prima di super.onCreate
