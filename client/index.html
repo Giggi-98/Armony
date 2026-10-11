@@ -1617,6 +1617,82 @@ dialog.profpop:not([open]){display:none}
 .dom-prob{margin:0;padding-left:1.2em;color:var(--danger);font-size:.9rem}
 .dom #domGo{align-self:flex-start}
 @media (max-width:520px){.dom-row{grid-template-columns:minmax(0,1fr);gap:2px}}
+/* lettore da telecomando: «su S25 Ultra GG» al posto dell'artista, con l'icona piccola (prima solo sul telefono: sul computer
+   l'icona prendeva tutta l'altezza del lettore) */
+.np small .ondev{display:inline-flex;align-items:center;gap:4px;max-width:100%;color:var(--accent-text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np small .ondev svg{width:13px;height:13px;flex:none}
+/* sezione Video (video.js): griglia di anteprime, pagina del video, lettore che resta in piccolo cambiando pagina */
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:var(--s5) var(--s4);margin-bottom:var(--s6)}
+.vgrid.strip{grid-auto-flow:column;grid-auto-columns:minmax(240px,300px);grid-template-columns:none;overflow-x:auto;scrollbar-width:none;padding-bottom:var(--s2);overscroll-behavior-x:contain}
+.vcard{position:relative;display:flex;flex-direction:column;gap:var(--s2);min-width:0;cursor:pointer;border-radius:var(--r-m);touch-action:manipulation}
+.vcard:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.vthumb{position:relative;aspect-ratio:16/9;border-radius:var(--r-m);overflow:hidden;background:var(--surface2);display:grid;place-items:center;color:var(--muted);box-shadow:var(--shadow-art)}
+.vthumb img{grid-area:1/1;width:100%;height:100%;object-fit:cover;position:relative;z-index:1;transition:transform .3s var(--ease-out)}
+.vthumb>svg{grid-area:1/1;width:32px;height:32px}
+.vdur{position:absolute;right:6px;bottom:8px;z-index:2;padding:2px 6px;border-radius:4px;background:rgb(0 0 0 / .78);color:#fff;font:600 .74rem/1.2 var(--body);font-variant-numeric:tabular-nums}
+.vprog{position:absolute;left:0;right:0;bottom:0;z-index:2;height:4px;background:rgb(255 255 255 / .3)}
+.vprog::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--p);background:var(--accent)}
+.vtxt{display:block;min-width:0;padding-right:36px}
+.vtxt b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-weight:600;line-height:1.3}
+.vtxt small{display:block;margin-top:2px;color:var(--muted);font-size:var(--fs-small,.84rem);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vmore{position:absolute;right:-6px;bottom:0;color:var(--muted)}
+.vcard:active .vthumb img{transform:scale(.98)}
+@media (hover:hover) and (pointer:fine){.vcard:hover .vthumb img{transform:scale(1.03)}.vcard:hover .vtxt b{color:var(--accent-text)}}
+.vcount{font-size:.85rem;font-weight:500;color:var(--muted);margin-left:var(--s2)}
+.vchips{margin-bottom:var(--s5)}
+.vchips small{color:var(--muted);font-weight:500;margin-left:2px}
+.vpage{max-width:1100px}
+@media (min-width:861px){.vpage{padding-top:40px}}  /* i tasti in alto a destra non coprono il video */
+.vstage{aspect-ratio:16/9;width:100%;border-radius:var(--r-l);overflow:hidden;background:#000;margin-bottom:var(--s4);box-shadow:var(--shadow-art)}
+.vinfo{margin-bottom:var(--s6)}
+.vinfo h1{margin:0 0 var(--s1);font-size:clamp(1.3rem,2.4vw,1.8rem)}
+.vinfo .sub{margin:0 0 var(--s3)}
+/* il lettore: dentro la pagina del video occupa il palco; fuori, una finestrella in basso a destra */
+.vdock[hidden]{display:none}
+.vstage .vdock{width:100%;height:100%}
+.vd-media,.vd-media video{width:100%;height:100%;display:block;background:#000}
+.vstage .vd-bar{display:none}
+.vdock.mini{position:fixed;right:var(--s4);bottom:calc(var(--player-h) + var(--sab) + var(--s3));z-index:30;width:min(340px,calc(100vw - 2 * var(--s4)));border-radius:var(--r-m);overflow:hidden;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-float);animation:pin .2s var(--ease-out)}
+.vdock.mini .vd-media{aspect-ratio:16/9;height:auto}
+.vd-bar{display:flex;align-items:center;gap:var(--s1);padding:var(--s1) var(--s1) var(--s1) var(--s3)}
+.vd-t{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;padding:0}
+.vd-t b{max-width:100%;font-size:.86rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vd-t small{color:var(--muted);font-size:.74rem}
+.vd-bar .icon-btn{width:36px;height:36px}
+@media (max-width:860px){
+  .vgrid{grid-template-columns:minmax(0,1fr);gap:var(--s5)}
+  .vgrid.strip{grid-auto-columns:78%}
+  .vstage{margin:calc(-1 * var(--pad-t)) calc(-1 * var(--pad-x)) var(--s4);width:auto;border-radius:0}
+  .vdock.mini{width:min(260px,62vw);right:var(--s2)}
+}
+/* notifiche: riquadro della campanella (computer) e pagina, «Nuove» e «Già lette» separate (armony.js, NotifPop) */
+dialog.notifpop{position:fixed;inset:auto;margin:0;width:min(420px,calc(100vw - 2 * var(--s4)));max-height:min(78vh,640px);padding:0;display:flex;flex-direction:column;border-radius:var(--r-l);overflow:hidden}
+dialog.notifpop:not([open]){display:none}
+dialog.notifpop::backdrop{background:transparent}
+.np-head{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s3) var(--s3) var(--s4);border-bottom:1px solid var(--line)}
+.np-head b{flex:1;font-size:1.05rem}
+.np-hint{display:flex;align-items:center;gap:var(--s2);margin:var(--s2) var(--s3) 0;padding:var(--s2) var(--s3);border-radius:var(--r-m);background:var(--accent-soft);color:inherit;text-decoration:none;font-size:.86rem;font-weight:600}
+.np-hint span{flex:1}
+.np-hint svg{width:18px;height:18px;flex:none}
+.np-list{overflow-y:auto;overscroll-behavior:contain;padding:var(--s1) var(--s2) var(--s2);flex:1;min-height:0}
+.np-foot{display:block;padding:var(--s3);text-align:center;border-top:1px solid var(--line);color:var(--muted);font-size:.86rem;font-weight:600;text-decoration:none}
+.nsec{display:flex;flex-direction:column}
+.nsec+.nsec{margin-top:var(--s3);padding-top:var(--s2);border-top:1px solid var(--line)}
+.nsec-h{display:flex;align-items:center;gap:var(--s2);margin:var(--s3) var(--s2) var(--s2);font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.nday{margin:var(--s2) var(--s2) var(--s1);font-size:.78rem;font-weight:600;color:var(--muted)}
+.nnone{display:flex;align-items:center;gap:var(--s2);margin:0 var(--s2) var(--s2);color:var(--muted);font-size:.9rem}
+.nnone svg{width:18px;height:18px}
+.nrow{position:relative;cursor:default;touch-action:manipulation}
+.nrow.go{cursor:pointer}
+.nrow:not(.new) .nic{opacity:.6}
+.nrow:not(.new) b{font-weight:500;color:color-mix(in srgb,var(--ink) 80%,transparent)}
+.nrow time{display:block;margin-top:2px}
+.nrow:active{background:var(--surface2)}
+.nrow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.ndot{flex:none;width:28px;height:28px;border:0;border-radius:50%;background:none;display:grid;place-items:center;cursor:pointer}
+.ndot::after{content:"";width:10px;height:10px;border-radius:50%;background:var(--accent)}
+@media (hover:hover) and (pointer:fine){.ndot:hover{background:var(--surface2)}.np-foot:hover{color:var(--ink)}}
+.nempty{padding:var(--s6) var(--s3)}
 /* trasloco: barra «Armony si è spostato» (dispositivi.js) */
 .movebar{position:fixed;left:50%;transform:translateX(-50%);top:calc(var(--sat) + var(--s3));z-index:40;display:flex;align-items:center;gap:var(--s3);width:min(560px,calc(100% - 2 * var(--s4)));padding:var(--s2) var(--s2) var(--s2) var(--s4);border-radius:var(--r-l);background:var(--surface2);border:1px solid var(--line);box-shadow:var(--shadow-float);animation:pin .2s var(--ease-out)}
 .movebar>svg{width:22px;height:22px;flex:none;color:var(--accent-text)}
@@ -1685,6 +1761,7 @@ dialog.profpop:not([open]){display:none}
 <script src="armony.js"></script>
 <script src="jam.js"></script>
 <script src="radio.js"></script>
+<script src="video.js"></script>
 <script src="telefono.js"></script>
 <script src="dispositivi.js"></script>
 <script src="diagnosi.js"></script>

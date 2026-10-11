@@ -462,7 +462,7 @@ const PP = { play: ['M8 5.5L13.25 8.75L13.25 15.25L8 18.5Z', 'M13.25 8.75L18.5 1
 /* ================= router ================= */
 const NAV = [
   ['home', 'Home', 'home'], ['cerca', 'Cerca', 'search'], ['libreria', 'Libreria', 'lib'], ['playlist', 'Playlist', 'list'],
-  ['preferiti', 'Preferiti', 'heart'], ['jam', 'Jam', 'jam'], ['radio', 'Radio', 'radio'], ['amici', 'Amici', 'friends'], ['rete', 'Rete', 'globe'], ['offline', 'Offline', 'offline'],
+  ['preferiti', 'Preferiti', 'heart'], ['jam', 'Jam', 'jam'], ['radio', 'Radio', 'radio'], ['amici', 'Amici', 'friends'], ['rete', 'Rete', 'globe'], ['offline', 'Offline', 'offline'], ['video', 'Video', 'film'],
   ['statistiche', 'Statistiche', 'stats'], ['scarica', 'Scarica', 'down'], ['impostazioni', 'Impostazioni', 'gear']
 ];
 const view = $('#view');
@@ -490,7 +490,7 @@ async function route() {
   const fn = Disp.gate(r) || {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, mix: vMix, testo: vLyrics, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
+    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, mix: vMix, testo: vLyrics, video: vVideo, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav;
   if (changed && Scene.hash) Scene.back = Scene.r === 'ora' || Scene.r === 'testo' ? Scene.back : Scene.hash;  // dove torna la freccia del lettore
@@ -498,6 +498,7 @@ async function route() {
   document.documentElement.dataset.r = r;  // il telefono cambia il lettore in basso su "In riproduzione" (index.html)
   const run = async () => {
     if (stale(n)) return;
+    if (typeof VPlayer !== 'undefined') VPlayer.dock();  // il video in corso esce dalla pagina vecchia e continua in piccolo (video.js; const di un altro script: non sta in window)
     delete view.dataset.pl; delete document.documentElement.dataset.login;  // la pagina d'accesso lo rimette (utenti.js)
     view.innerHTML = skeleton(r, id);
     if (changed && r !== 'ora') window.scrollTo(0, 0);
@@ -3763,8 +3764,10 @@ const Notif = {
   async load() {
     if (!this.on()) { this.paint(); return; }
     try { const r = await srvApi(srv(), '/api/notifiche'); this.items = r.items; this.unread = r.unread; } catch {}
-    this.paint(); this.seen(Math.max(0, ...this.items.map(x => x.id))); this.native();
+    this.paint(); this.views(); this.seen(Math.max(0, ...this.items.map(x => x.id))); this.native();
   },
+  // riquadro aperto o pagina delle notifiche: si ridisegnano con lo stato nuovo
+  views() { NotifPop.paint(); if (location.hash.startsWith('#/notifiche') && $('#nPage')) vNotifiche(); },
   // app Android: le notifiche arrivano anche ad app chiusa (ArmonyNotificheWorker, ogni 15 minuti) con un gettone che
   // vale solo per leggere quelle nuove; i tipi seguono Impostazioni → Notifiche. Con l'app aperta restano dentro l'app
   async native() {
@@ -3789,7 +3792,7 @@ const Notif = {
     if (m.lette) { if (m.lette === 'tutte') { this.items.forEach(x => x.letta = 1); this.unread = 0; } else { this.items.forEach(x => { if (m.lette.includes(x.id)) x.letta = 1; }); this.unread = this.items.filter(x => !x.letta).length; } this.paint(); return; }
     const n = m.item; if (!n || this.items.some(x => x.id === n.id)) return;
     this.items.unshift(n); this.unread++; this.paint(); this.seen(n.id);  // mostrata qui: il controllo nativo non la ripete
-    if (location.hash.startsWith('#/notifiche')) vNotifiche();
+    this.views();
     const k = NKIND[n.kind];
     if (document.visibilityState === 'visible') return toast(`${n.title}${n.body ? ' · ' + n.body : ''}`, 5000);
     if (!P.notifOn || (k && P[k] === false)) return;
@@ -3818,23 +3821,69 @@ const Notif = {
   async read(ids) {
     if (!this.on()) return;
     try { await srvApi(srv(), '/api/notifiche/lette', { method: 'POST', body: JSON.stringify(ids ? { ids } : {}) }); } catch {}
-    this.items.forEach(x => { if (!ids || ids.includes(x.id)) x.letta = 1; }); this.unread = this.items.filter(x => !x.letta).length; this.paint();
+    this.items.forEach(x => { if (!ids || ids.includes(x.id)) x.letta = 1; }); this.unread = this.items.filter(x => !x.letta).length; this.paint(); this.views();
+  }
+};
+// notifiche: «Nuove» (non lette) sopra e «Già lette» sotto, per giorno. Una diventa letta quando la si apre o con il
+// suo pallino, o con «Segna tutte»: guardarle non basta, così le due parti restano distinte. Sul computer la campanella
+// apre un riquadro a comparsa (NotifPop); sul telefono questa pagina
+const NICON = { import: 'down', download: 'down', jam: 'jam', dispositivi: 'shield', amici: 'friends', sistema: 'bell' };
+const nWhen = ts => { const d = new Date(ts * 1000), t = new Date(), y = new Date(t - 864e5), h = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === t.toDateString() ? h : d.toDateString() === y.toDateString() ? 'ieri ' + h : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }); };
+const nDay = ts => { const d = new Date(ts * 1000), t = new Date(), y = new Date(t - 864e5); return d.toDateString() === t.toDateString() ? 'Oggi' : d.toDateString() === y.toDateString() ? 'Ieri' : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }); };
+const nRow = n => `<div class="nrow${n.letta ? '' : ' new'}${n.link ? ' go' : ''}" data-nid="${n.id}" role="button" tabindex="0"><span class="nic">${ic(NICON[n.kind] || 'bell')}</span>
+  <span class="grow"><b>${esc(n.title)}</b>${n.body ? `<small>${esc(n.body)}</small>` : ''}<time>${nWhen(n.ts)}</time></span>
+  ${n.letta ? '' : `<button class="ndot" data-nread="${n.id}" aria-label="Segna come letta" title="Segna come letta"></button>`}</div>`;
+function notifBody() {
+  if (!Notif.items.length) return '<div class="empty nempty"><h3>Niente di nuovo</h3><p>Qui arrivano importazioni e download finiti, le Jam degli amici, i brani mandati a te e i dispositivi da approvare.</p></div>';
+  const nu = Notif.items.filter(x => !x.letta), old = Notif.items.filter(x => x.letta);
+  let last = '';
+  return `<section class="nsec"><p class="nsec-h">Nuove${nu.length ? ` <span class="tag acc">${nu.length}</span>` : ''}</p>
+    ${nu.length ? nu.map(nRow).join('') : `<p class="nnone">${ic('check')} Hai letto tutto</p>`}</section>
+    ${old.length ? `<section class="nsec"><p class="nsec-h">Già lette</p>${old.map(n => { const d = nDay(n.ts), h = d !== last ? `<p class="nday">${d}</p>` : ''; last = d; return h + nRow(n); }).join('')}</section>` : ''}`;
+}
+// un clic su una riga: letta e, se ha un indirizzo, ci si va; sul pallino: solo letta
+function wireNotif(box, done) {
+  const go = el => {
+    const id = +el.dataset.nid, n = Notif.items.find(x => x.id === id); if (!n) return;
+    if (!n.letta) Notif.read([id]);
+    if (n.link) { done?.(); location.hash = n.link; }
+  };
+  box.onclick = e => { const d = e.target.closest('[data-nread]'); if (d) { e.stopPropagation(); Notif.read([+d.dataset.nread]); return; } const r = e.target.closest('.nrow'); if (r) go(r); };
+  box.onkeydown = e => { const r = e.target.closest('.nrow'); if (r && (e.key === 'Enter' || e.key === ' ') && e.target === r) { e.preventDefault(); go(r); } };
+}
+const NotifPop = {
+  open() {
+    if (!matchMedia('(min-width:861px)').matches) { location.hash = '#/notifiche'; return; }
+    const d = $('#dlg'); if (d.open && d.classList.contains('notifpop')) return d.close();
+    d.className = 'notifpop'; d.setAttribute('aria-label', 'Notifiche');
+    const r = $('#hBell').getBoundingClientRect(); d.style.top = Math.round(r.bottom + 8) + 'px'; d.style.right = Math.max(8, Math.round(innerWidth - r.right - 8)) + 'px';
+    this.paint(); closeOutside(d); d.addEventListener('close', () => { d.style.top = d.style.right = ''; $('#hBell').setAttribute('aria-expanded', 'false'); }, { once: true });
+    d.showModal(); $('#hBell').setAttribute('aria-expanded', 'true');
+    Notif.load();  // le ultime dal server: il riquadro si ridisegna da sé (Notif.views)
+  },
+  paint() {
+    const d = $('#dlg'); if (!d.classList.contains('notifpop')) return;
+    const top = d.querySelector('.np-list')?.scrollTop || 0;
+    d.innerHTML = `<div class="np-head"><b>Notifiche</b>${Notif.unread ? `<button class="btn sm" id="npAll">Segna tutte come lette</button>` : ''}
+      <a class="icon-btn" href="#/impostazioni/notifiche" aria-label="Impostazioni delle notifiche" title="Impostazioni">${ic('gear')}</a></div>
+      ${!P.notifOn ? `<a class="np-hint" href="#/impostazioni/notifiche">${ic('bell')}<span>Ricevile anche quando Armony non è in primo piano</span>${ic('chevr')}</a>` : ''}
+      <div class="np-list">${notifBody()}</div>
+      <a class="np-foot" href="#/notifiche">Apri la pagina delle notifiche</a>`;
+    d.querySelector('.np-list').scrollTop = top;
+    wireNotif(d.querySelector('.np-list'), () => d.close());
+    $('#npAll')?.addEventListener('click', () => Notif.read());
+    d.querySelectorAll('a[href]').forEach(a => a.addEventListener('click', () => d.close()));
   }
 };
 async function vNotifiche() {
   if (!Notif.on()) { view.innerHTML = '<h1>Notifiche</h1><div class="empty"><h3>Notifiche non disponibili</h3><p>Il server va aggiornato ad Armony 0.25 o successiva.</p></div>'; return; }
   if (!Notif.items.length) await Notif.load();
-  const KI = { import: 'down', download: 'down', jam: 'jam', dispositivi: 'shield', amici: 'friends', sistema: 'bell' };
-  const day = ts => { const d = new Date(ts * 1000), t = new Date(); const y = new Date(t - 864e5); return d.toDateString() === t.toDateString() ? 'Oggi' : d.toDateString() === y.toDateString() ? 'Ieri' : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }); };
-  let last = '';
   view.innerHTML = `<div class="lhead"><h1>Notifiche</h1>${Notif.unread ? '<button class="btn sm" id="nAll">Segna tutte come lette</button>' : ''}</div>
     ${!P.notifOn ? `<div class="panel nhint"><span class="grow">Ricevi gli avvisi anche quando ${NATIVE ? 'l\'app è in sottofondo' : 'Armony non è in primo piano'}.</span><a class="btn sm primary" href="#/impostazioni/notifiche">Attiva</a></div>` : ''}
-    ${Notif.items.length ? `<div class="nlist">${Notif.items.map(n => { const d = day(n.ts), h = d !== last ? `<h2 class="qhead">${d}</h2>` : ''; last = d;
-      return `${h}<${n.link ? `a href="${esc(n.link)}"` : 'div'} class="nrow${n.letta ? '' : ' new'}" data-nid="${n.id}"><span class="nic">${ic(KI[n.kind] || 'bell')}</span><span class="grow"><b>${esc(n.title)}</b>${n.body ? `<small>${esc(n.body)}</small>` : ''}</span><time>${new Date(n.ts * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</time></${n.link ? 'a' : 'div'}>`; }).join('')}</div>`
-    : '<div class="empty"><h3>Niente di nuovo</h3><p>Qui arrivano importazioni e download finiti, le Jam degli amici e i dispositivi da approvare.</p></div>'}`;
-  $('#nAll')?.addEventListener('click', () => Notif.read().then(vNotifiche));
-  // aprire la pagina le segna come lette dopo un attimo (restano evidenziate finché la si guarda)
-  const ids = Notif.items.filter(x => !x.letta).map(x => x.id); if (ids.length) setTimeout(() => Notif.read(ids), 1500);
+    <div class="nlist" id="nPage">${notifBody()}</div>`;
+  $('#nAll')?.addEventListener('click', () => Notif.read());
+  wireNotif($('#nPage'));
 }
 // coda come Spotify: "Riproduci dopo" va subito dopo il brano attuale, "Aggiungi alla coda" dopo gli altri brani aggiunti a
 // mano (segnati _q) e prima del resto della playlist o dell'album (prima andava in fondo, dopo centinaia di brani).
@@ -4867,7 +4916,7 @@ function profPop() {
 function drawer() {
   const d = $('#dlg'); d.className = 'drawer';
   const s = srv(), u = s?.user || 'Ospite', cur = location.hash.replace(/^#\/?/, '').split('/')[0] || 'home';
-  const items = NAV.filter(([h]) => inMore(h) && (h !== 'rete' || can('rete')));
+  const items = NAV.filter(([h]) => inMore(h) && (h !== 'rete' || can('rete')) && (h !== 'video' || (S.dl.url && can('download'))));
   const dot = h => h === 'amici' && Presence.on() && Presence.playingCount() ? '<i class="dot pdot" aria-label="qualcuno sta ascoltando"></i>'
     : h === 'impostazioni' && srv()?.me?.pending ? '<i class="dot pdot" aria-label="dispositivi in attesa"></i>' : '';
   d.innerHTML = `<div class="dr-me">${pavatar({ user: u, name: u }, 'm')}<span class="grow"><b>${esc(u)}</b><small>${esc(s?.name || 'Nessun server')}${s?.me?.admin ? ' · amministratore' : ''}</small></span></div>
@@ -5165,11 +5214,7 @@ view.addEventListener('click', async e => {
       case 'upforce': { const u = Up.list[+el.dataset.i]; if (u) { u.force = true; u.status = 'in coda'; upRun(); } break; }
       case 'upclear': Up.list = Up.list.filter(u => ['in coda', 'in corso'].includes(u.status)); upRender(); break;
       case 'clearjobs': await dlApi('/api/jobs', { method: 'DELETE' }); refreshJobs(); break;
-      case 'playvideo': {
-        const d = $('#dlg'); d.className = 'wide';
-        d.innerHTML = `<h3>${esc(el.dataset.name)}</h3><video controls autoplay playsinline src="${esc(videoUrl(el.dataset.path))}"></video><div class="row" style="margin-top:12px"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
-        Engine.el.pause(); d.onclose = () => { d.className = ''; d.innerHTML = ''; d.onclose = null; }; d.showModal(); break;
-      }
+      case 'playvideo': location.hash = vHash(el.dataset.path); break;  // la sezione Video (video.js)
       case 'delvideo': if (confirm('Eliminare questo video dal server?')) { await dlApi('/api/videos/' + el.dataset.path.split('/').map(encodeURIComponent).join('/'), { method: 'DELETE' }); refreshVideos(); } break;
       case 'cacheclear': await ACache.clear(); $('#cacheUse').textContent = bytes(0) + ' usati'; toast('Cache dei brani svuotata.'); refreshSpazio(); break;
       case 'offclear': if (confirm('Eliminare tutti i brani salvati per l\'offline?')) { await DB.clear('offline'); Offline.keys.clear(); route(); } break;
@@ -6017,7 +6062,7 @@ function wirePlayer() {
   $('#bQueueM').innerHTML = ic('queue'); $('#bQueueM').onclick = () => location.hash = '#/coda';
   $('#hMe').onclick = drawer;
   $('#hProf').onclick = profPop;
-  $('#hBell').onclick = () => { location.hash = '#/notifiche'; };
+  $('#hBell').onclick = () => NotifPop.open(); $('#hBell').setAttribute('aria-haspopup', 'dialog');
   miniGestures();
   $('#sleepPill').onclick = sleepDialog; $('#jamPill').onclick = () => location.hash = '#/jam';
   $('#bShuf').onclick = () => {
@@ -6075,7 +6120,7 @@ async function sidePlaylists() {
     <span class="pic">${p.songCount ? imgTag(p.coverArt, 80) : ic('list')}</span><span class="grow"><b>${esc(p.name)}</b><small>Playlist · ${esc(p.owner || srv()?.user || '')}</small></span></a>`).join('')}` : '';
 }
 async function boot() {
-  $('#nav').innerHTML = NAV.filter(([h]) => h !== 'rete' || can('rete')).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
+  $('#nav').innerHTML = NAV.filter(([h]) => (h !== 'rete' || can('rete')) && (h !== 'video' || (S.dl.url && can('download')))).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
   Bus.addEventListener('playlists', sidePlaylists); sidePlaylists();
   paintTabs();
   $('#tabs').oncontextmenu = e => { if (matchMedia('(pointer:fine)').matches) return; e.preventDefault(); tabsEditor(); };  // tenere premuta la barra la personalizza (col mouse c'è il menu)

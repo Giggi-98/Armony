@@ -39,6 +39,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - **Cerca anche fuori dalla libreria** (con anteprima di 30 secondi), **nuove uscite** dei tuoi artisti, volume uniforme sui brani scaricati, playlist da riordinare trascinando, cronologia degli ascolti.
 - **Notifiche**: campanella con importazioni e download finiti, Jam degli amici e dispositivi da approvare, anche come avvisi del telefono o del computer.
 - Album completi: le tracce che mancano compaiono al loro posto e si scaricano con un tocco.
+- **Video**: i video scaricati con anteprime, «Continua a guardare» e un lettore che resta aperto mentre navighi.
 - Cartelle di playlist, come su Spotify.
 - Modifica di titoli, artisti e copertine; eliminazione dei brani; statistiche d'ascolto, tue e di tutto il server (quante volte è stato ascoltato ogni brano e da chi), con l'immagine da condividere tua e del gruppo.
 

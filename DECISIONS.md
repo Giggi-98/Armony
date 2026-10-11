@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Sezione Video con un lettore che sopravvive al cambio di pagina; notifiche lette solo su azione
+
+**Contesto:** i video scaricati stavano in un elenco della pagina Scarica e si guardavano in una finestra che si chiudeva cambiando pagina. La campanella apriva una pagina che segnava tutto come letto dopo 1,5 secondi.
+**Scelta:** `video.js`: `#/video` (Continua a guardare, cartelle, ricerca, ordine, griglia) e `#/video/<percorso>`; un solo `<video>` (VPlayer) che sulla pagina del video sta dentro la pagina e a ogni cambio di rotta torna in `<body>` come finestrella (spostare un elemento media nel DOM nello stesso compito non lo ferma; route() chiama `VPlayer.dock()` prima di sostituire la vista). Durata misurata dal server con ffprobe una volta per file (`data/armony/video.json`), anteprima dalla copertina incorporata o da un fotogramma (`/api/videos-mini`, cache in `data/armony/miniature`). Posizione per dispositivo in localStorage. Notifiche: «Nuove» e «Già lette» separate; una diventa letta solo aprendola, con il pallino o con «Segna tutte»; sul computer un riquadro sotto la campanella.
+**Alternative scartate:** un `<video>` fisso posizionato sopra un segnaposto con le coordinate (da ricalcolare a ogni scorrimento e ridimensionamento); il Picture-in-Picture del browser come unico modo di guardare navigando (non c'è ovunque e si chiude cambiando scheda su alcuni telefoni); posizioni dei video sul server (per ora un dato per dispositivo basta); segnare lette le notifiche solo guardandole (le due parti non si distinguevano più).
+**Conseguenze:** la finestrella copre un angolo della pagina finché non la si chiude. Le anteprime occupano qualche decina di kB per video.
+**Da rivedere se:** si vuole riprendere un video da un altro dispositivo (posizioni sul server, come la coda della musica).
+
 ## 2026-10-11 — Notifiche ad app Android chiusa: WorkManager ogni 15 minuti con un gettone dedicato
 
 **Contesto:** l'utente vuole le notifiche di Android con l'app in sottofondo o chiusa; finora arrivavano solo mentre il canale dal vivo era aperto (voce 9.6 del piano).

@@ -40,6 +40,7 @@ Armony - server di supporto.
   /api/download, /api/jobs, /api/search, /api/videos   download con yt-dlp (permesso "download");
                         /api/jobs?grouped=1 riunisce i brani di un'importazione in un gruppo con l'avanzamento,
                         /api/jobs?ids=a,b solo lo stato di quei lavori (le barre di avanzamento delle pagine)
+  /api/videos (elenco con durata), /api/videos/<file> (Range), /api/videos-mini?p= (anteprima): sezione Video
   /api/youtube          stato di YouTube per i download (solo amministratori): cookie di un account secondario
                         (PUT/DELETE /api/youtube/cookies, in data/armony/youtube-cookies.txt), servizio PO Token,
                         pausa dopo un blocco; POST /api/youtube/prova scarica un video di 19 secondi come prova
@@ -94,6 +95,7 @@ import secrets
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -2651,17 +2653,82 @@ def youtube_prova():
     return jsonify(ok=ok, error=err, secondi=round(time.time() - t0, 1), pot=pot_ok(), ytdlp=yt_dlp.version.__version__)
 
 
+# ─── sezione Video: durata e anteprima ───
+# La durata la misura ffprobe una volta per file (cache in data/armony/video.json, chiave percorso + data di modifica);
+# l'anteprima è la copertina incorporata dal download (EmbedThumbnail) o, se manca, un fotogramma a un decimo del video,
+# 480 px, fatta alla prima richiesta e tenuta in data/armony/miniature
+VCACHE = os.path.join(os.path.dirname(db.PATH), "video.json")
+VMINI = os.path.join(os.path.dirname(db.PATH), "miniature")
+vlock = threading.Lock()
+
+
+def video_durata(p, key, cache):
+    if key not in cache:
+        try:
+            r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", p],
+                               capture_output=True, text=True, timeout=20)
+            cache[key] = round(float(r.stdout.strip() or 0))
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            cache[key] = 0
+    return cache[key]
+
+
 @app.get("/api/videos")
 def list_videos():
     out = []
-    for root, _, files in os.walk(VIDEO_DIR):
-        for f in files:
-            if f.lower().endswith(VIDEO_EXT):
-                p = os.path.join(root, f)
-                st = os.stat(p)
-                out.append(dict(path=os.path.relpath(p, VIDEO_DIR), name=os.path.splitext(f)[0],
-                                folder=os.path.relpath(root, VIDEO_DIR), size=st.st_size, mtime=st.st_mtime))
+    with vlock:
+        try:
+            with open(VCACHE) as f:
+                cache = json.load(f)
+        except (OSError, ValueError):
+            cache = {}
+        n0 = len(cache)
+        for root, _, files in os.walk(VIDEO_DIR):
+            for f in files:
+                if f.lower().endswith(VIDEO_EXT):
+                    p = os.path.join(root, f)
+                    st = os.stat(p)
+                    rel = os.path.relpath(p, VIDEO_DIR)
+                    out.append(dict(path=rel, name=os.path.splitext(f)[0], folder=os.path.relpath(root, VIDEO_DIR), size=st.st_size,
+                                    mtime=st.st_mtime, duration=video_durata(p, f"{rel}|{int(st.st_mtime)}", cache)))
+        if len(cache) != n0:
+            keep = {f"{v['path']}|{int(v['mtime'])}" for v in out}  # via le voci dei video eliminati o cambiati
+            with open(VCACHE, "w") as f:
+                json.dump({k: v for k, v in cache.items() if k in keep}, f)
     return jsonify(sorted(out, key=lambda v: v["mtime"], reverse=True))
+
+
+@app.get("/api/videos-mini")
+def video_mini():
+    full = os.path.realpath(os.path.join(VIDEO_DIR, request.args.get("p") or ""))
+    if not full.startswith(os.path.realpath(VIDEO_DIR) + os.sep) or not os.path.isfile(full):
+        abort(404)
+    st = os.stat(full)
+    out = os.path.join(VMINI, hashlib.sha1(f"{full}|{int(st.st_mtime)}".encode()).hexdigest() + ".jpg")
+    if not os.path.exists(out):
+        os.makedirs(VMINI, exist_ok=True)
+        tmp = out + ".part.jpg"
+        # prima la copertina incorporata, poi un fotogramma a un decimo della durata
+        cmds = [["ffmpeg", "-v", "error", "-y", "-i", full, "-map", "0:v:disp:attached_pic", "-frames:v", "1", "-vf", "scale=480:-2", tmp]]
+        try:
+            d = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", full],
+                                     capture_output=True, text=True, timeout=20).stdout.strip() or 0)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            d = 0
+        cmds.append(["ffmpeg", "-v", "error", "-y", "-ss", str(round(d / 10, 1)), "-i", full, "-frames:v", "1", "-vf", "scale=480:-2", tmp])
+        for c in cmds:
+            try:
+                subprocess.run(c, capture_output=True, timeout=30)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+                os.replace(tmp, out)
+                break
+        if not os.path.exists(out):
+            abort(404)
+    r = send_from_directory(VMINI, os.path.basename(out), mimetype="image/jpeg", max_age=86400)
+    r.headers["Cache-Control"] = "private, max-age=86400"
+    return r
 
 
 @app.get("/api/videos/<path:p>")
