@@ -521,7 +521,7 @@ async function route() {
   const fn = Disp.gate(r) || {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, mix: vMix, testo: vLyrics, video: vVideo, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
+    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, mix: vMix, testo: vLyrics, video: vVideo, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto, collab: vCollab
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav;
   if (changed && Scene.hash) Scene.back = Scene.r === 'ora' || Scene.r === 'testo' ? Scene.back : Scene.hash;  // dove torna la freccia del lettore
@@ -1368,6 +1368,57 @@ async function netSearch(v, n, q) {
   };
 }
 // la mappa: io, i server collegati e, sotto ciascuno, quelli che si vedono passando da lui
+/* ---- collaboratori da altri server (federazione, capacità "fedcollab") ---- */
+const fedCollabOk = (s = srv()) => !!(s && !s.local && s.session && s.me?.caps?.includes('fedcollab')) && can('rete');
+// il proprietario sceglie utenti dei server collegati: li vede solo se quel server mostra i suoi utenti
+async function fedCollabSheet(pid) {
+  const d = $('#dlg'); d.className = 'sheet';
+  d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">Collaboratori federazione</b><small style="color:var(--muted)">Utenti dei server collegati: vedono la playlist dal loro Armony e ci aggiungono i loro brani, che si copiano qui.</small></span></div><div id="fcBox"><p class="sub" style="padding:0 14px">Chiedo ai server collegati…</p></div>`;
+  closeOutside(d); d.showModal();
+  let r; try { r = await srvApi(srv(), '/api/collab/rete?pid=' + encodeURIComponent(pid)); } catch (e) { $('#fcBox').innerHTML = `<p class="sub" style="padding:0 14px">${esc(e.message)}</p>`; return; }
+  if (!$('#fcBox')) return;
+  const on = new Set(r.users.map(u => u.node + '|' + u.user.toLowerCase()));
+  $('#fcBox').innerHTML = (r.nodes.length ? r.nodes.map(n => `<p class="nsec-h" style="margin:var(--s3) 14px var(--s1)">${esc(n.name)}</p>
+      ${n.utenti === null ? `<p class="sub" style="padding:0 14px;margin:0">${esc(n.error || 'Non risponde.')}</p>`
+        : n.utenti.length ? n.utenti.map(u => `<label class="check" style="padding:8px 14px"><input type="checkbox" value="${esc(n.id + '|' + u)}" ${on.has(n.id + '|' + u.toLowerCase()) ? 'checked' : ''}><span>${esc(u)} <small style="color:var(--muted)">di ${esc(n.name)}</small></span></label>`).join('')
+        : '<p class="sub" style="padding:0 14px;margin:0">Nessun utente.</p>'}`).join('')
+      : '<p class="sub" style="padding:0 14px">Nessun server collegato: collegane uno in Impostazioni → Federazione.</p>')
+    + `<div class="row" style="padding:12px 14px"><button class="btn primary" id="fcOk">Salva</button></div>`;
+  $('#fcOk').onclick = async () => {
+    const users = [...d.querySelectorAll('#fcBox input:checked')].map(i => { const [node, ...u] = i.value.split('|'); return { node, user: u.join('|') }; });
+    try { await srvApi(srv(), '/api/collab/rete', { method: 'PUT', body: JSON.stringify({ pid, users }) }); d.close(); toast(users.length ? `Collaborativa con ${users.map(u => u.user).join(', ')}: ricevono un avviso sul loro server.` : 'Nessun collaboratore da altri server.', 5000); }
+    catch (e) { toast(e.message); }
+  };
+}
+// in Playlist: quelle di altri server in cui collaboro
+async function fedCollabInto(box, n) {
+  if (!box || !fedCollabOk()) return;
+  let r; try { r = await srvApi(srv(), '/api/rete/collab'); } catch { return; }
+  if (stale(n) || !box.isConnected || !r.playlists.length) return;
+  box.innerHTML = `<div class="hsec"><h2>Su altri server</h2></div><div class="lcards ${store.get('plView', matchMedia('(max-width:860px)').matches ? 'list' : 'grid')}">${r.playlists.map(p => `<a class="lcard remota" href="#/collab/${encodeURIComponent(p.node)}/${encodeURIComponent(p.id)}"><div class="lcover">${ic('globe')}</div><b>${esc(p.name)}</b><small>di ${esc(p.owner)} su ${esc(p.nodeName)} · ${p.songs} ${p.songs === 1 ? 'brano' : 'brani'}</small></a>`).join('')}</div>`;
+}
+// una playlist di un altro server in cui collaboro: i brani si ascoltano attraverso il collegamento; i miei si aggiungono
+// dal menu di un brano → Aggiungi a playlist
+async function vCollab(id) {
+  if (!srv()) return noServer();
+  const n = Scene.nav, [nid, pid] = id.split('/');
+  view.innerHTML = `<div class="sk-page">${SK.row.repeat(4)}</div>`;
+  let j; try { j = await srvApi(srv(), `/api/rete/collab/${encodeURIComponent(nid)}/${encodeURIComponent(pid)}`); } catch (e) { if (!stale(n)) view.innerHTML = `<h1>Playlist</h1><div class="empty"><h3>Non disponibile</h3><p>${esc(e.message)}</p></div>`; return; }
+  if (stale(n)) return;
+  const nodes = { [nid]: { name: j.node.name, owner: j.owner } }, songs = j.songs.map(x => netTrack({ ...x, path: [nid] }, nodes)), ok = songs.filter(t => !t.fed.off);
+  const row = (t, i) => `<div class="song" data-net="${i}" role="button" tabindex="0"><span class="n">${i + 1}</span><span class="thumb">${imgTag(t.coverArt, 84, t.serverId)}</span>
+    <span class="t"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small>${t.fed.off ? '<small class="netsrc">non ascoltabile da qui</small>' : ''}</span>
+    <span class="d">${fmt(t.duration)}</span><span class="acts"><button class="icon-btn" data-netmore="${i}" aria-label="Altre azioni">${ic('more')}</button></span></div>`;
+  view.innerHTML = `<h1>${esc(j.name)}</h1><p class="sub">Playlist di <b>${esc(j.owner)}</b> su ${esc(j.node.name)} · ${songs.length} ${songs.length === 1 ? 'brano' : 'brani'}. Collabori: aggiungi i tuoi brani dal menu ⋯ di un brano → «Aggiungi a playlist».</p>
+    <div class="row" style="margin-bottom:var(--s4)"><button class="btn primary" id="clPlay" ${ok.length ? '' : 'disabled'}>${ic('play')} Ascolta</button></div>
+    ${songs.length ? `<div class="songs tracklist noalb netsongs">${songs.map(row).join('')}</div>` : '<div class="empty"><h3>Ancora vuota</h3><p>Aggiungi tu il primo brano.</p></div>'}`;
+  $('#clPlay').onclick = () => setQueue(ok, 0);
+  view.querySelector('.netsongs')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-netmore],[data-net]'); if (!b) return;
+    if (b.dataset.netmore) return songMenu(songs[+b.dataset.netmore]);
+    const t = songs[+b.dataset.net]; if (!t.fed.off) setQueue(ok, ok.indexOf(t));
+  });
+}
 async function vRete() {
   if (!srv()) return noServer();
   const n = Scene.nav;
@@ -1418,8 +1469,9 @@ async function netPlaylists(nid, name) {
 async function vPlaylists() {
   if (!srv()) return noServer();
   const n = Scene.nav;
-  view.innerHTML = `<h1>Playlist</h1><p class="sub">${srv().local ? 'Restano su questo telefono; con la copia sul server attiva finiscono anche lì.' : 'Le tue playlist e, se puoi vederle, quelle condivise degli altri.'}</p><div id="plBox"></div>`;
+  view.innerHTML = `<h1>Playlist</h1><p class="sub">${srv().local ? 'Restano su questo telefono; con la copia sul server attiva finiscono anche lì.' : 'Le tue playlist e, se puoi vederle, quelle condivise degli altri.'}</p><div id="plBox"></div><div id="plRete"></div>`;
   await playlistsInto($('#plBox'), n);
+  fedCollabInto($('#plRete'), n);
   // tempo reale: conteggi e copertine cambiano quando una playlist si riempie (anche dal server, dopo i download)
   const again = () => { Bus.removeEventListener('playlists', again); if (!stale(n)) vPlaylists(); };
   Bus.addEventListener('playlists', again);
@@ -1570,6 +1622,7 @@ async function vPlaylist(id) {
       mine && { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
       mine && !srv().local && srv().me?.caps?.includes('plordina') && { act: 'reorderpl', label: 'Riordina i brani', icon: 'grip', data: { id } },
       owner && !srv().local && Amici.on() && { act: 'collabpl', label: 'Collaboratori', icon: 'friends', data: { id } },
+      owner && fedCollabOk() && { act: 'fedcollabpl', label: 'Collaboratori federazione', icon: 'globe', data: { id } },
       Amici.on() && !srv().local && { act: 'sendpl', label: 'Manda a un amico', icon: 'send', data: { id, name: p.name } },
       mine && !srv().local && { act: 'dedupepl', label: 'Togli doppioni', icon: 'list', data: { id } },
       mine && p.public && can('rete') && srv().me?.caps?.includes('fedofferta') && { act: 'offerpl', label: 'Server collegati…', icon: 'globe', data: { id } },
@@ -3780,6 +3833,18 @@ async function addToPlaylistDialog(tracks) {
       } catch (e) { toast(e.message); }
     });
     $('#npGo').onclick = async () => { const name = $('#npName').value.trim(); if (!name) return; try { await createPlaylist(name, ids, sid); d.close(); toast(`Playlist "${name}" creata.`); } catch (e) { toast(e.message); } };
+    // i miei brani nelle playlist di altri server in cui collaboro: là si copiano (dopo, per non far aspettare le mie)
+    if (fedCollabOk(srv(sid)) && !tracks.some(t => t.fed)) srvApi(srv(sid), '/api/rete/collab').then(r => {
+      if (!r.playlists.length || !d.open || !$('#apList')) return;
+      $('#apList').insertAdjacentHTML('beforeend', `<p class="nsec-h" style="margin:var(--s3) 0 var(--s1)">Su altri server</p>${r.playlists.map((p, i) => `<div class="list-item" data-rpl="${i}"><span class="grow"><b>${esc(p.name)}</b><small>collaborativa · di ${esc(p.owner)} su ${esc(p.nodeName)}</small></span><small>${p.songs}</small></div>`).join('')}`);
+      d.querySelectorAll('[data-rpl]').forEach(el => el.onclick = async () => {
+        const p = r.playlists[+el.dataset.rpl];
+        try {
+          const x = await srvApi(srv(sid), `/api/rete/collab/${p.node}/${p.id}`, { method: 'POST', body: JSON.stringify({ ids }) });
+          d.close(); toast(x.copia ? `Aggiunto a «${p.name}»: ${x.copia === 1 ? 'il brano si copia' : x.copia + ' brani si copiano'} su ${p.nodeName}, compare fra poco.` : `Aggiunto a «${p.name}» su ${p.nodeName}.`, 5000);
+        } catch (e) { toast(e.message); }
+      });
+    }).catch(() => {});
   } catch (e) { d.innerHTML = `<h3>Errore</h3><p>${esc(e.message)}</p><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button>`; }
 }
 // «Aggiungi brani» dentro una playlist, come Spotify: cerca nella libreria (senza scrivere niente: ascoltati di recente
@@ -4004,7 +4069,7 @@ const Notif = {
     this.items.forEach(x => { if (!ids || ids.includes(x.id)) x.letta = 1; }); this.unread = this.items.filter(x => !x.letta).length; this.paint(); this.views();
   }
 };
-// notifiche: «Nuove» (non lette) sopra e «Già lette» sotto, per giorno. Una diventa letta quando la si apre o con il
+// notifiche: due schede, «Da leggere» e «Lette» (lo storico, per giorno). Una diventa letta quando la si apre o con il
 // suo pallino, o con «Segna tutte»: guardarle non basta, così le due parti restano distinte. Sul computer la campanella
 // apre un riquadro a comparsa (NotifPop); sul telefono questa pagina
 const NICON = { import: 'down', download: 'down', jam: 'jam', dispositivi: 'shield', amici: 'friends', sistema: 'bell' };
@@ -4014,13 +4079,13 @@ const nDay = ts => { const d = new Date(ts * 1000), t = new Date(), y = new Date
 const nRow = n => `<div class="nrow${n.letta ? '' : ' new'}${n.link ? ' go' : ''}" data-nid="${n.id}" role="button" tabindex="0"><span class="nic">${ic(NICON[n.kind] || 'bell')}</span>
   <span class="grow"><b>${esc(n.title)}</b>${n.body ? `<small>${esc(n.body)}</small>` : ''}<time>${nWhen(n.ts)}</time></span>
   ${n.letta ? '' : `<button class="ndot" data-nread="${n.id}" aria-label="Segna come letta" title="Segna come letta"></button>`}</div>`;
-function notifBody() {
-  if (!Notif.items.length) return '<div class="empty nempty"><h3>Niente di nuovo</h3><p>Qui arrivano importazioni e download finiti, le Jam degli amici, i brani mandati a te e i dispositivi da approvare.</p></div>';
+function notifBody(tab) {
+  if (!Notif.items.length) return '<div class="empty nempty"><h3>Niente di nuovo</h3><p>Qui arrivano importazioni e download finiti, le Jam degli amici, i brani mandati a te, gli aggiornamenti e i dispositivi da approvare.</p></div>';
   const nu = Notif.items.filter(x => !x.letta), old = Notif.items.filter(x => x.letta);
+  if (tab === 'nuove') return nu.length ? nu.map(nRow).join('') : `<div class="empty nempty"><h3>${ic('check')} Hai letto tutto</h3><p>Le notifiche già viste sono in «Lette».</p></div>`;
   let last = '';
-  return `<section class="nsec"><p class="nsec-h">Nuove${nu.length ? ` <span class="tag acc">${nu.length}</span>` : ''}</p>
-    ${nu.length ? nu.map(nRow).join('') : `<p class="nnone">${ic('check')} Hai letto tutto</p>`}</section>
-    ${old.length ? `<section class="nsec"><p class="nsec-h">Già lette</p>${old.map(n => { const d = nDay(n.ts), h = d !== last ? `<p class="nday">${d}</p>` : ''; last = d; return h + nRow(n); }).join('')}</section>` : ''}`;
+  return old.length ? old.map(n => { const d = nDay(n.ts), h = d !== last ? `<p class="nday">${d}</p>` : ''; last = d; return h + nRow(n); }).join('')
+    : '<div class="empty nempty"><h3>Ancora niente</h3><p>Qui restano le notifiche che hai già letto.</p></div>';
 }
 // un clic su una riga: letta e, se ha un indirizzo, ci si va; sul pallino: solo letta
 function wireNotif(box, done) {
@@ -4033,7 +4098,9 @@ function wireNotif(box, done) {
   box.onkeydown = e => { const r = e.target.closest('.nrow'); if (r && (e.key === 'Enter' || e.key === ' ') && e.target === r) { e.preventDefault(); go(r); } };
 }
 const NotifPop = {
+  tab: '',
   open() {
+    this.tab = Notif.unread ? 'nuove' : 'lette';  // si apre dove c'è qualcosa da vedere
     const d = $('#dlg'); if (d.open && d.classList.contains('notifpop')) return d.close();
     d.className = 'notifpop'; d.setAttribute('aria-label', 'Notifiche');
     const r = $('#hBell').getBoundingClientRect(); d.style.top = Math.round(r.bottom + 8) + 'px'; d.style.right = Math.max(8, Math.round(innerWidth - r.right - 8)) + 'px';
@@ -4043,12 +4110,16 @@ const NotifPop = {
   },
   paint() {
     const d = $('#dlg'); if (!d.classList.contains('notifpop')) return;
-    const top = d.querySelector('.np-list')?.scrollTop || 0;
-    d.innerHTML = `<div class="npo-head"><b>Notifiche</b>${Notif.unread ? `<button class="btn sm" id="npAll">Segna tutte come lette</button>` : ''}
+    const top = d.querySelector('.np-list')?.scrollTop || 0, tab = this.tab || 'nuove';
+    d.innerHTML = `<div class="npo-head"><b>Notifiche</b>${Notif.unread && tab === 'nuove' ? `<button class="btn sm" id="npAll">Segna tutte come lette</button>` : ''}
       <a class="icon-btn" href="#/impostazioni/notifiche" aria-label="Impostazioni delle notifiche" title="Impostazioni">${ic('gear')}</a></div>
+      <div class="np-tabs"><div class="seg" role="radiogroup" aria-label="Quali notifiche">
+        <label><input type="radio" name="ntab" value="nuove" ${tab === 'nuove' ? 'checked' : ''}><span>Da leggere${Notif.unread ? ` <span class="tag acc">${Notif.unread}</span>` : ''}</span></label>
+        <label><input type="radio" name="ntab" value="lette" ${tab === 'lette' ? 'checked' : ''}><span>Lette</span></label></div></div>
       ${!P.notifOn ? `<a class="np-hint" href="#/impostazioni/notifiche">${ic('bell')}<span>Ricevile anche quando Armony non è in primo piano</span>${ic('chevr')}</a>` : ''}
-      <div class="np-list">${notifBody()}</div>`;
+      <div class="np-list">${notifBody(tab)}</div>`;
     d.querySelector('.np-list').scrollTop = top;
+    d.querySelectorAll('input[name="ntab"]').forEach(i => i.onchange = () => { this.tab = i.value; d.querySelector('.np-list').scrollTop = 0; this.paint(); });
     wireNotif(d.querySelector('.np-list'), () => d.close());
     $('#npAll')?.addEventListener('click', () => Notif.read());
     d.querySelectorAll('a[href]').forEach(a => a.addEventListener('click', () => d.close()));
@@ -4384,6 +4455,8 @@ document.addEventListener('contextmenu', e => {
     return menu(groupItems(() => plTracks(id), [['list', 'Apri la playlist', go('#/playlist/' + encodeURIComponent(id))]],
       [['down', 'Esporta (M3U, JSON, CSV)', async () => { try { exportTracks(name, await plTracks(id)); } catch (er) { toast(er.message); } }],
        srv()?.local || !can('condividi') ? null : ['share', 'Condividi un link', () => shareItem(id, name)],
+       srv()?.local || !Amici.on() ? null : ['friends', 'Collaboratori', () => Amici.collabSheet(id)],
+       fedCollabOk() ? ['globe', 'Collaboratori federazione', () => fedCollabSheet(id)] : null,
        ['folder', 'Sposta in una cartella', () => PlDir.pick(id, at || [innerWidth / 2, innerHeight / 3])]].filter(Boolean)), `<b>${esc(name)}</b><small>Playlist</small>`);
   }
   const ghost = e.target.closest('.card.ghost [data-act="dzalbum"], .card.ghost')?.closest('.card');
@@ -4833,7 +4906,7 @@ function inviteSheet(code) {
 const fedBase = () => pubBase(srv());
 const fedLoop = /^https?:\/\/(127\.|localhost|\[::1\])/;
 const fedAgo = t => { const s = (Date.now() / 1000 - t) | 0; return !t ? 'mai' : s < 10 ? 'adesso' : s < 60 ? `${s} s fa` : ago(t * 1000); };
-let fedT = 0, fedMyUrl = '';
+let fedT = 0;
 // il botta e risposta di un collegamento, in tre passi: richiesta → conferma → in linea
 function fedSteps(x) {
   const out = x.state === 'attesa', inc = x.state === 'richiesta';
@@ -4845,7 +4918,7 @@ function fedCard(x) {
   const id = esc(x.id), nm = esc(x.name), recv = x.dir === 'entrambi' || x.dir === 'ricevo';
   const via = { canale: 'dal suo canale', uscita: 'dal tuo canale', diretto: 'diretto', lui: 'ci contatta lui' }[x.reach] || '';
   // senza indirizzo, fra l'accettazione e il primo giro del suo canale passa un minuto: è un'attesa, non un errore
-  const quiet = x.state === 'attivo' && !x.online && !x.url && x.dir !== 'offro' && (!x.contatto || Date.now() / 1000 - x.contatto < 300);
+  const quiet = x.state === 'attivo' && !x.online && !x.url && (!x.contatto || Date.now() / 1000 - x.contatto < 300);
   const stat = x.state === 'attivo'
     ? x.online ? `<span class="feddot ok"></span>In linea · ${via} · ultimo contatto ${fedAgo(x.contatto)}`
       : quiet ? `<span class="feddot wait"></span>Collegato · aspetto il suo canale` : `<span class="feddot err"></span>Non risponde · ultimo contatto ${fedAgo(x.contatto)}`
@@ -4864,11 +4937,10 @@ function fedCard(x) {
       <div class="row"><button class="btn primary" data-act="fedpl" data-id="${id}" data-name="${nm}">${ic('list')} Scegli le playlist</button><button class="btn" data-act="fedstream" data-id="${id}">No, ascolto in streaming</button></div></div>`;
   const meta = x.state === 'attivo' ? `<p class="fedmeta">${[`${x.songs} brani, ${x.albums} album${x.app ? ' · Armony ' + esc(x.app) : ''}${x.synced ? ' · catalogo ' + fedAgo(x.synced) : ''}`,
     // il canale: chi lo apre e perché, così nessuno deve chiedersi cosa fare
-    !x.url && x.dir === 'offro' ? `Non apre un canale: con «Solo lui vede me» non ti serve. Se vuoi vedere la sua libreria scegli «Ci vediamo a vicenda» qui sotto e il canale lo apre lui da solo.`
-      : !x.url && x.reach === 'canale' ? `Non si raggiunge da fuori: tiene aperto lui un canale verso questo server, da cui passa la sua libreria.`
+    !x.url && x.reach === 'canale' ? `Non si raggiunge da fuori: tiene aperto lui un canale verso questo server, da cui passa la sua libreria.`
       : x.reach === 'uscita' ? `Questo server non si raggiunge da fuori: tiene aperto un canale verso ${nm}, da cui passa la tua libreria. Non devi fare niente.`
-      : !fedMyUrl && x.dir === 'ricevo' ? `${nm} ha scelto di non vedere la tua libreria: vedi la sua, e il canale non serve.` : '',
-    !recv ? (x.url ? 'Lui vede la tua libreria; tu non cerchi nella sua.' : '') : x.sync === 'playlist' ? `Copi le playlist che scegli, il resto in streaming. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Playlist</button>`
+      : '',
+    !recv ? 'Lui vede la tua libreria; tu non cerchi nella sua.' : x.sync === 'playlist' ? `Copi le playlist che scegli, il resto in streaming. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Playlist</button>`
       : x.sync === 'stream' ? `Ascolti in streaming, senza copiare. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Copia delle playlist</button>` : '',
     `Codice di sicurezza <span class="safety sm">${esc(x.safety)}</span>`].filter(Boolean).join('<br>')}</p>` : '';
   const foot = x.state === 'attivo' ? `<div class="fedfoot">${x.dir ? `<select class="fedverso" data-id="${id}" aria-label="Verso del collegamento con ${nm}">${[['entrambi', 'Ci vediamo a vicenda'], ['offro', 'Solo lui vede me'], ['ricevo', 'Solo io vedo lui']].map(([v, l]) => `<option value="${v}" ${x.dir === v ? 'selected' : ''}>${l}</option>`).join('')}</select>` : ''}
@@ -4883,7 +4955,6 @@ async function refreshFed() {
   clearTimeout(fedT);
   let f; try { f = await dlApi('/api/fed'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
   if (!box.isConnected) return;  // nel frattempo si è cambiata pagina
-  fedMyUrl = f.settings.url;
   const head = `<span class="fedav">${ic('home')}</span><span class="grow"><b>${esc(f.me.nome)}</b><small>${f.me.songs} brani · ${f.me.albums} album · impronta <code>${esc(f.me.short)}</code></small></span>
     <span class="tag ${f.settings.url ? 'ok' : ''}">${f.settings.url ? 'Raggiungibile da fuori' : 'Senza indirizzo'}</span>`;
   if (!box.dataset.on) {
@@ -4896,6 +4967,7 @@ async function refreshFed() {
         <p class="fedmeta" style="margin:0">Se questo server non si raggiunge da fuori (nessun IP pubblico, porte chiuse, firewall), lascia vuoto l'indirizzo: usa l'invito di un server raggiungibile e la tua libreria passa da lui.</p>
         <details class="fedopt"><summary>Visibilità e ricerca</summary>
           <label class="check"><input type="checkbox" id="fedTrans" ${f.settings.transitive ? 'checked' : ''}><span>Visibile agli amici degli amici<small>Chi è collegato a un tuo collegato trova e ascolta la tua libreria passando da lui. Spento: solo i server che colleghi tu.</small></span></label>
+          <label class="check"><input type="checkbox" id="fedUtenti" ${f.settings.utenti ? 'checked' : ''}><span>Mostra i nomi degli utenti ai server collegati<small>Servono a chi vuole invitare i tuoi utenti a collaborare a una sua playlist. Solo i nomi, nient'altro.</small></span></label>
           <label class="f">Dove cercare<select id="fedHops">${[1, 2, 3].map(h => `<option value="${h}" ${f.settings.hops === h ? 'selected' : ''}>${hopsTxt[h]}</option>`).join('')}</select></label></details></div>
       <div class="fedacts">
         <button class="fedtile primary" data-act="fedinv"><span class="fedav">${ic('plus')}</span><span><b>Invita un server</b><small>Crei un codice da mandare a chi vuoi collegare. Lo crea il server raggiungibile da fuori.</small></span></button>
@@ -4912,6 +4984,7 @@ async function refreshFed() {
     $('#fedUrl').onchange = e => save({ url: e.target.value.trim() });
     $('#fedTrans').onchange = e => save({ transitive: e.target.checked });
     $('#fedHops').onchange = e => save({ hops: +e.target.value });
+    $('#fedUtenti').onchange = e => save({ utenti: e.target.checked });
   } else $('#fedHead').innerHTML = head;
   // ogni 5 secondi (15 con la pagina nascosta) si rilegge lo stato: chi aspetta una conferma la vede arrivare da sola.
   // Non mentre si usa il menu del verso: si chiuderebbe in mano
@@ -5417,6 +5490,7 @@ view.addEventListener('click', async e => {
       case 'libplus': libPlus(); break;
       case 'reorderpl': reorderPl(id); break;
       case 'collabpl': Amici.collabSheet(id); break;
+      case 'fedcollabpl': fedCollabSheet(id); break;
       case 'sendpl': Amici.manda({ kind: 'playlist', id, title: el.dataset.name || '' }); break;
       case 'sendalb': Amici.manda({ kind: 'album', id, title: el.dataset.name || '', sub: el.dataset.sub || '' }); break;
       case 'exportpl': { const p = (await api('getPlaylist', { id })).playlist; exportTracks(p.name, arr(p.entry).map(x => norm(x))); break; }

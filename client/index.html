@@ -1564,7 +1564,9 @@ details.sosp input[type=checkbox]{width:18px;height:18px;accent-color:var(--acce
 .now-title{display:flex;align-items:center;gap:var(--s3);margin-top:18px;min-width:0}
 .now-title h1{margin:0;min-width:0;flex:1}
 .now-star{flex:none}
-.lcard.favs{text-decoration:none;color:inherit}
+.lcard.favs,.lcard.remota{text-decoration:none;color:inherit}
+.lcard.remota .lcover{display:grid;place-items:center;background:var(--surface2);color:var(--muted)}
+.lcard.remota .lcover svg{width:40%;height:40%}
 .lcard.favs .lcover{display:grid;place-items:center;background:linear-gradient(135deg,#4a2fbd,#c7a0ff);color:#fff}
 .lcard.favs .lcover svg{width:42%;height:42%}
 /* === fine D === */
@@ -1977,21 +1979,21 @@ details.sosp:not([open]) summary small{display:none}  /* «Da controllare» chiu
   .vdock.mini{width:min(260px,62vw);right:var(--s2)}
 }
 /* notifiche: riquadro della campanella (computer) e pagina, «Nuove» e «Già lette» separate (armony.js, NotifPop) */
-dialog.notifpop{position:fixed;inset:auto;margin:0;width:min(420px,calc(100vw - 2 * var(--s4)));max-height:min(78vh,640px);padding:0;display:flex;flex-direction:column;border-radius:var(--r-l);overflow:hidden}
+dialog.notifpop{position:fixed;inset:auto;margin:0;width:min(520px,calc(100vw - 2 * var(--s4)));height:min(80vh,720px);padding:0;display:flex;flex-direction:column;border-radius:var(--r-l);overflow:hidden}
 dialog.notifpop:not([open]){display:none}
 dialog.notifpop::backdrop{background:transparent}
 .npo-head{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s3) var(--s3) var(--s4);border-bottom:1px solid var(--line)}
 .npo-head b{flex:1;font-size:1.05rem}
+.np-tabs{padding:var(--s3) var(--s4) var(--s1)}
+.np-tabs .seg{display:flex}.np-tabs .seg label{flex:1;justify-content:center}
+.np-tabs .tag{padding:1px 8px}
+.nempty h3{display:flex;align-items:center;justify-content:center;gap:var(--s2)}.nempty h3 svg{width:20px;height:20px}
 .np-hint{display:flex;align-items:center;gap:var(--s2);margin:var(--s2) var(--s3) 0;padding:var(--s2) var(--s3);border-radius:var(--r-m);background:var(--accent-soft);color:inherit;text-decoration:none;font-size:.86rem;font-weight:600}
 .np-hint span{flex:1}
 .np-hint svg{width:18px;height:18px;flex:none}
 .np-list{overflow-y:auto;overscroll-behavior:contain;padding:var(--s1) var(--s2) var(--s2);flex:1;min-height:0}
-.nsec{display:flex;flex-direction:column}
-.nsec+.nsec{margin-top:var(--s3);padding-top:var(--s2);border-top:1px solid var(--line)}
 .nsec-h{display:flex;align-items:center;gap:var(--s2);margin:var(--s3) var(--s2) var(--s2);font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .nday{margin:var(--s2) var(--s2) var(--s1);font-size:.78rem;font-weight:600;color:var(--muted)}
-.nnone{display:flex;align-items:center;gap:var(--s2);margin:0 var(--s2) var(--s2);color:var(--muted);font-size:.9rem}
-.nnone svg{width:18px;height:18px}
 .nrow{position:relative;cursor:default;touch-action:manipulation}
 .nrow.go{cursor:pointer}
 .nrow:not(.new) .nic{opacity:.6}
@@ -2002,7 +2004,7 @@ dialog.notifpop::backdrop{background:transparent}
 .ndot{flex:none;width:28px;height:28px;border:0;border-radius:50%;background:none;display:grid;place-items:center;cursor:pointer}
 .ndot::after{content:"";width:10px;height:10px;border-radius:50%;background:var(--accent)}
 @media (hover:hover) and (pointer:fine){.ndot:hover{background:var(--surface2)}}
-@media (max-width:860px){dialog.notifpop{left:var(--s3)!important;right:var(--s3)!important;width:auto;max-width:none;max-height:min(80dvh,640px)}}
+@media (max-width:860px){dialog.notifpop{left:var(--s3)!important;right:var(--s3)!important;width:auto;max-width:none;height:min(82dvh,720px)}}
 .nempty{padding:var(--s6) var(--s3)}
 /* trasloco: barra «Armony si è spostato» (dispositivi.js) */
 .movebar{position:fixed;left:50%;transform:translateX(-50%);top:calc(var(--sat) + var(--s3));z-index:40;display:flex;align-items:center;gap:var(--s3);width:min(560px,calc(100% - 2 * var(--s4)));padding:var(--s2) var(--s2) var(--s2) var(--s4);border-radius:var(--r-l);background:var(--surface2);border:1px solid var(--line);box-shadow:var(--shadow-float);animation:pin .2s var(--ease-out)}

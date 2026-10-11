@@ -155,7 +155,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
 RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
@@ -2070,14 +2070,16 @@ def nd_last_scan():
 
 
 def nd_files(paths):
-    """percorso → brano in Navidrome (solo la libreria della musica, non i mancanti), dal suo DB in sola lettura."""
+    """percorso → brano in Navidrome (libreria della musica e copie dai server collegati, non i mancanti), dal suo DB in sola
+    lettura. Le copie servono ai brani aggiunti da un collaboratore di un altro server (federazione.fed_collab_add)."""
     paths, out = list(paths), {}
     nd = sqlite3.connect(f"file:{NAVIDROME_DB}?mode=ro", uri=True, timeout=10)
     try:
         for i in range(0, len(paths), 400):
             part = paths[i:i + 400]
             for r in nd.execute("SELECT m.path, m.id, m.album_id, m.album, m.album_artist FROM media_file m JOIN library l ON l.id = m.library_id "
-                                f"WHERE m.missing = 0 AND rtrim(l.path, '/') = ? AND m.path IN ({','.join('?' * len(part))})", [NAVIDROME_MUSIC, *part]):
+                                f"WHERE m.missing = 0 AND rtrim(l.path, '/') IN (?, ?) AND m.path IN ({','.join('?' * len(part))})",
+                                [NAVIDROME_MUSIC, federazione.FED_ND_PATH.rstrip("/"), *part]):
                 out[r[0]] = {"id": r[1], "albumId": r[2], "album": r[3], "artist": r[4]}
     finally:
         nd.close()

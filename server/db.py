@@ -144,6 +144,11 @@ MIGRATIONS = [
     CREATE TABLE webradio (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL UNIQUE, favicon TEXT, homepage TEXT, tags TEXT,
                            country TEXT, codec TEXT, bitrate INTEGER, added_by TEXT, created REAL NOT NULL);
     """,
+    # 16: collaboratori da altri server (federazione.py): utenti di un server collegato che aggiungono brani a una playlist
+    """
+    CREATE TABLE fed_collab (pid TEXT NOT NULL, node TEXT NOT NULL, user TEXT NOT NULL, added REAL, PRIMARY KEY (pid, node, user));
+    CREATE INDEX fed_collab_nu ON fed_collab(node, user);
+    """,
 ]
 
 _local = threading.local()

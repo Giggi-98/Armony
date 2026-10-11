@@ -11,10 +11,17 @@ Armony - federazione: server Armony collegati fra loro (docs/FEDERAZIONE.md).
     cerca, vicini                    ricerca e mappa inoltrate agli amici degli amici (ttl, rid contro i cicli)
     file/<id>, cover/<id>, info/<id> il brano (Range), la copertina, dimensione e sha256; ?via=a,b a catena
     radio, radio/<id>, ora           Jam Radio: le definisce radio.py su questo blueprint (stesse firme)
+    utenti                           i nomi degli utenti, solo se l'amministratore lo permette (Federazione)
+    collab?user=, collab/<pid>?user=, collab/<pid>/aggiungi
+                                     playlist di questo server in cui collabora un utente del nodo che chiede
+    notifica                         {user, title, body, link}: un avviso per un mio utente (invito a collaborare)
   /api/fed/*             gestione, solo amministratori: impostazioni, inviti, collegamenti; nodes/<id>/sync {mode}:
                          «playlist» o «stream», la risposta alla domanda fatta quando il collegamento è in linea
   /api/rete/*            per gli utenti: cerca, stream, cover, mappa; copia (permesso "download");
-                         offerte (GET), offerta {pid, on} (POST): quali playlist pubbliche vanno ai server collegati
+                         offerte (GET), offerta {pid, on} (POST): quali playlist pubbliche vanno ai server collegati;
+                         collab (GET) le playlist di altri server in cui collaboro, collab/<nodo>/<pid> (GET i brani,
+                         POST {ids} aggiunge i miei brani: lì si copiano)
+  /api/collab/rete       GET ?pid= e PUT {pid, users: [{node, user}]}: i collaboratori di altri server (il proprietario)
 
 Registrato da app.py con init(): usa da lì sessione HTTP, credenziali di Navidrome e coda dei lavori.
 """
@@ -252,8 +259,10 @@ def fed_guard():
     if n["state"] not in allowed.get(request.path, ("attivo",)):
         return jsonify(error="Collegamento non attivo" if n["state"] != "richiesta" else "Collegamento in attesa di conferma"), 403
     # verso "ricevo": prendo dalla sua libreria ma la mia non la mostro a lui (né catalogo, né ricerca, né audio)
-    if n.get("dir") == "ricevo" and request.path not in allowed and request.path not in ("/fed/v1/ora", "/fed/v1/raggiungo") \
-            and not request.path.startswith("/fed/v1/canale"):
+    # La collaborazione alle playlist passa comunque (la decide il proprietario), e così i brani che un mio utente ha
+    # aggiunto a una sua playlist: deve poterli copiare (grants)
+    if n.get("dir") == "ricevo" and request.path not in allowed and request.path not in ("/fed/v1/ora", "/fed/v1/raggiungo", "/fed/v1/notifica") \
+            and not request.path.startswith(("/fed/v1/canale", "/fed/v1/collab", "/fed/v1/utenti")) and not concesso(nid, request.path):
         return jsonify(error=f"{A.NAME} non condivide la sua libreria con questo server", code="verso"), 403
     w = int(time.time() // 60)
     rl = rate.setdefault(nid, [w, 0])
@@ -820,8 +829,10 @@ def chan_start(nid):
 def chan_run(nid):
     while chan_want.get(nid):
         n = node(nid)
-        if not n or n["state"] != "attivo" or n.get("dir") == "ricevo":
-            break  # "ricevo": la mia libreria a lui non la do, il canale non serve
+        if not n or n["state"] != "attivo":
+            break
+        # anche con «ricevo»: il canale serve a raggiungermi (nomi degli utenti, inviti a collaborare, brani concessi);
+        # cosa gli do lo decide il verso, controllato su ogni richiesta che arriva
         try:
             j = fed_json(n, "POST", "/fed/v1/canale", body={}, timeout=(5, CHAN_POLL + 15))
         except FedError:
@@ -1116,10 +1127,9 @@ def fed_info(sid):
 
 # ------------------------------------------------------------------ gestione (solo amministratori)
 def node_out(n):
-    # senza indirizzo lui ci parla, ma noi lo raggiungiamo solo dal suo canale: in linea vuol dire canale aperto. Tranne
-    # con «offro» (non prendo niente da lui, il canale non si apre): basta che si faccia sentire, scaricando il mio catalogo
+    # senza indirizzo lui ci parla, ma noi lo raggiungiamo solo dal suo canale: in linea vuol dire canale aperto
     seen_ok = n["state"] == "attivo" and n["seen"] and time.time() - n["seen"] < 3 * REFRESH_S
-    online = seen_ok and (n["url"] and not n["error"] or not n["url"] and n.get("dir") == "offro")
+    online = seen_ok and n["url"] and not n["error"]
     canale = time.time() - chan_last.get(n["id"], 0) < CHAN_POLL + 30  # (foglia) il mio canale verso di lui gira
     return {k: n[k] for k in ("id", "name", "owner", "url", "state", "created", "seen", "app", "songs", "albums", "error", "synced", "dir")} | {
         "transitive": bool(n["transitive"]), "online": bool(online or chan_ok(n["id"]) or canale and n["state"] == "attivo"), "safety": safety(PUB, n["pub"]),
@@ -1137,7 +1147,7 @@ def node_out(n):
 def fed_status():
     n, a = my_counts()
     return jsonify(me=dict(hello_payload(), url=my_url(), songs=n, albums=a, short=ME[:8]),
-                   settings=dict(url=my_url(), owner=owner(), transitive=transitive(), hops=hops()),
+                   settings=dict(url=my_url(), owner=owner(), transitive=transitive(), hops=hops(), utenti=setting("utenti", "0") == "1"),
                    ready=bool(A.nd_admin()), nodes=[node_out(dict(r)) for r in db.all_("SELECT * FROM fed_nodes ORDER BY state != 'richiesta', name")])
 
 
@@ -1153,6 +1163,8 @@ def fed_settings():
         set_setting("owner", str(d["owner"] or "").strip()[:60])
     if "transitive" in d:
         set_setting("transitive", "1" if d["transitive"] else "0")
+    if "utenti" in d:
+        set_setting("utenti", "1" if d["utenti"] else "0")
     if "hops" in d:
         try:
             set_setting("hops", max(1, min(int(d["hops"]), 4)))
@@ -1532,6 +1544,206 @@ def rete_unsubscribe(pid):
     if gone:  # solo l'elenco dell'abbonamento appena tolto, mai un'importazione da file
         db.run("DELETE FROM imports WHERE pid = ?", pid)
     return jsonify(ok=True) if gone else (jsonify(error="Abbonamento non trovato"), 404)
+
+
+# ------------------------------------------------------------------ collaboratori da altri server
+# Il proprietario di una playlist sceglie utenti dei server collegati (utente@server, solo se quel server mostra i suoi
+# utenti): la vedono dal loro Armony e ci aggiungono brani. Un brano che qui c'è già entra subito; uno che c'è solo da
+# loro si copia qui (cartella dei server collegati) e la playlist lo prende appena Navidrome lo vede (plwait).
+# ─── PERCHÉ il collaboratore «concede» i brani ───
+# Il server del collaboratore può non darci la sua libreria (verso «ricevo»), e senza indirizzo ci parla solo dal
+# canale, che con «ricevo» non si apre. I brani che un suo utente aggiunge diventano concessi per 7 giorni: li serve
+# anche a chi non vede la sua libreria, e il canale resta aperto finché ce ne sono.
+GRANT_S = 7 * 86400
+
+
+def grants(nid):
+    now = time.time()
+    return {k: v for k, v in json.loads(setting("grant:" + nid) or "{}").items() if v > now}
+
+
+def concesso(nid, path):
+    m = re.match(r"^/fed/v1/(file|info|cover)/([^/]+)$", path)
+    return bool(m and m.group(2) in grants(nid))
+
+
+def e_fcollab(pid, nid, user):
+    return bool(user and db.one("SELECT 1 FROM fed_collab WHERE pid = ? AND node = ? AND lower(user) = lower(?)", pid, nid, user))
+
+
+@bp.get("/fed/v1/utenti")
+def fed_utenti():
+    if setting("utenti", "0") != "1":
+        return jsonify(error=f"{A.NAME} non mostra i nomi dei suoi utenti ai server collegati", code="privato"), 403
+    return jsonify(utenti=A.amici.utenti_server())
+
+
+@bp.post("/fed/v1/notifica")
+def fed_notifica():
+    d = request.get_json(silent=True) or {}
+    u = A.amici.canon(d.get("user"))
+    if not u:
+        return jsonify(error="Utente sconosciuto"), 404
+    A.notifiche.notifica(u, "amici", str(d.get("title") or "")[:120], str(d.get("body") or "")[:300], str(d.get("link") or "")[:120] or None,
+                         only_once=f"fednot:{g.fed_node['id']}:{str(d.get('once') or time.time())[:60]}")
+    return jsonify(ok=True)
+
+
+@bp.get("/fed/v1/collab")
+def fed_collab_list():
+    nid, u = g.fed_node["id"], str(request.args.get("user") or "")
+    out = []
+    for r in db.all_("SELECT pid FROM fed_collab WHERE node = ? AND lower(user) = lower(?)", nid, u):
+        try:
+            p = nd_get("getPlaylist", id=r["pid"])["playlist"]
+        except FedError:
+            continue  # cancellata, o Navidrome non risponde
+        out.append({"id": r["pid"], "name": p.get("name") or "Playlist", "owner": p.get("owner") or "", "songs": p.get("songCount") or 0})
+    return jsonify(playlists=out)
+
+
+@bp.get("/fed/v1/collab/<pid>")
+def fed_collab_get(pid):
+    nid, u = g.fed_node["id"], str(request.args.get("user") or "")
+    if not A.ID_RE.match(pid) or not e_fcollab(pid, nid, u):
+        return jsonify(error="Non collabori a questa playlist"), 403
+    p = nd_get("getPlaylist", id=pid)["playlist"]
+    offered = {r["id"]: r["cover"] for r in db.all_("SELECT id, cover FROM fed_mine WHERE gone = 0")}
+    songs = [{"id": e["id"], "title": e.get("title") or "", "artist": e.get("artist") or "", "album": e.get("album") or "",
+              "duration": e.get("duration") or 0, "track": e.get("track"), "cover": bool(offered.get(e["id"])), "offline": e["id"] not in offered}
+             for e in p.get("entry") or []]
+    return jsonify(id=pid, name=p.get("name") or "Playlist", owner=p.get("owner") or "", songs=songs)
+
+
+@bp.post("/fed/v1/collab/<pid>/aggiungi")
+def fed_collab_add(pid):
+    d, n = request.get_json(silent=True) or {}, g.fed_node
+    u = str(d.get("user") or "")
+    if not A.ID_RE.match(pid) or not e_fcollab(pid, n["id"], u):
+        return jsonify(error="Non collabori a questa playlist"), 403
+    own = A.importa.owner_of(pid)
+    songs = [s for s in (d.get("songs") or [])[:200] if isinstance(s, dict) and SONG_RE.match(str(s.get("id", "")))]
+    L, here, copy = A.importa.lib(), [], []
+    for s in songs:
+        m = L.match({"title": s.get("title") or "", "artists": [s.get("artist") or ""], "album": s.get("album") or "",
+                     "duration": s.get("duration"), "isrc": "", "track": s.get("track")})
+        (here.append(m) if m else copy.append(s))
+    if here:
+        with A.importa.plock(pid):
+            for i in range(0, len(here), 200):
+                nd_get("updatePlaylist", playlistId=pid, songIdToAdd=here[i:i + 200])
+    now, who, nome = time.time(), f"{u} di {n['name']}", A.amici.nome_pl(pid)
+    for s in copy:
+        jid = uuid.uuid4().hex[:10]
+        jj = dict(url="", mode="audio", format="", quality="", playlist=False, folder="", sponsorblock=False, meta={}, fed={"id": s["id"], "r": n["id"]})
+        with A.jlock:
+            A.jobs[jid] = dict(jj, id=jid, status="in coda", progress=0, title=f"{s.get('artist') or ''} - {s.get('title') or ''}", created=now,
+                               updated=now, by=own, pids=[pid], plwait=True, batch=f"fcollab:{pid}:{int(now)}", label=f"Da {who}: «{nome}»")
+            A.jsave(jid)
+        A.jq.put((jid, jj))
+    k = len(songs)
+    for x in {own, *(r["user"] for r in db.all_("SELECT user FROM collab WHERE pid = ?", pid))}:
+        if here:
+            A.live_put(x, {"type": "libreria", "playlists": [{"id": pid, "added": len(here)}]})
+        A.notifiche.notifica(x, "amici", f"{who} ha aggiunto {k} {'brano' if k == 1 else 'brani'}",
+                             f"a «{nome}»" + (f": {len(copy)} si copiano dal suo server" if copy else ""), f"#/playlist/{pid}",
+                             only_once=f"fcollabadd:{pid}:{x}:{n['id']}:{u.lower()}:{int(now // 600)}")
+    return jsonify(ok=True, added=len(here), copia=len(copy))
+
+
+@bp.get("/api/collab/rete")
+def collab_rete_get():
+    pid = str(request.args.get("pid") or "")
+    own = A.importa.owner_of(pid) if A.ID_RE.match(pid) else None
+    if own is None or not (g.who["admin"] or own.lower() == (g.who.get("user") or "").lower()):
+        return jsonify(error="Solo il proprietario sceglie i collaboratori."), 403
+    users = [{"node": r["node"], "user": r["user"]} for r in db.all_("SELECT node, user FROM fed_collab WHERE pid = ?", pid)]
+
+    def utenti_di(n):
+        try:
+            return {"id": n["id"], "name": n["name"], "utenti": fed_json(n, "GET", "/fed/v1/utenti", timeout=(5, 15)).get("utenti") or []}
+        except FedError as e:
+            return {"id": n["id"], "name": n["name"], "utenti": None, "error": str(e)[:200]}
+    out = list(pool.map(utenti_di, nodes()))
+    return jsonify(users=users, nodes=out)
+
+
+@bp.put("/api/collab/rete")
+def collab_rete_put():
+    d = request.get_json(silent=True) or {}
+    pid, me = str(d.get("pid") or ""), g.who.get("user") or ""
+    own = A.importa.owner_of(pid) if A.ID_RE.match(pid) else None
+    if own is None or not (g.who["admin"] or own.lower() == me.lower()):
+        return jsonify(error="Solo il proprietario sceglie i collaboratori."), 403
+    want = {(str(x.get("node") or ""), str(x.get("user") or "")[:60]) for x in (d.get("users") or [])[:200] if isinstance(x, dict)}
+    want = {(nid, u) for nid, u in want if u and node(nid) and node(nid)["state"] == "attivo"}
+    old = {(r["node"], r["user"]) for r in db.all_("SELECT node, user FROM fed_collab WHERE pid = ?", pid)}
+    db.run("DELETE FROM fed_collab WHERE pid = ?", pid)
+    for nid, u in want:
+        db.run("INSERT INTO fed_collab (pid, node, user, added) VALUES (?, ?, ?, ?)", pid, nid, u, time.time())
+    nome = A.amici.nome_pl(pid)
+    for nid, u in want - old:  # ai nuovi un avviso sul loro server: la playlist la trovano in Playlist → «Su altri server»
+        try:
+            fed_json(node(nid), "POST", "/fed/v1/notifica", body={"user": u, "title": f"{own} di {A.NAME} ti ha invitato a collaborare",
+                     "body": f"«{nome}»: aggiungi i tuoi brani da Playlist → Su altri server", "link": "#/playlist", "once": f"invito:{pid}"}, timeout=(5, 15))
+        except FedError:
+            pass
+    return jsonify(ok=True, users=[{"node": nid, "user": u} for nid, u in sorted(want)])
+
+
+def mie_collab(n, u):
+    try:
+        return [dict(p, node=n["id"], nodeName=n["name"]) for p in fed_json(n, "GET", "/fed/v1/collab", params={"user": u}, timeout=(5, 15)).get("playlists") or []]
+    except FedError:
+        return []
+
+
+@bp.get("/api/rete/collab")
+def rete_collab():
+    u = g.who.get("user")
+    if not u:
+        return jsonify(playlists=[])
+    return jsonify(playlists=[p for lst in pool.map(lambda n: mie_collab(n, u), nodes()) for p in lst])
+
+
+@bp.get("/api/rete/collab/<nid>/<pid>")
+def rete_collab_get(nid, pid):
+    n = node(nid)
+    if not n or n["state"] != "attivo" or not A.ID_RE.match(pid):
+        return jsonify(error="Server non collegato"), 404
+    try:
+        j = fed_json(n, "GET", f"/fed/v1/collab/{pid}", params={"user": g.who.get("user") or ""}, timeout=(5, 30))
+    except FedError as e:
+        return jsonify(error=str(e)), e.status if 400 <= e.status < 600 else 502
+    return jsonify(node=dict(node_info(n), id=nid), **j)
+
+
+@bp.post("/api/rete/collab/<nid>/<pid>")
+def rete_collab_add(nid, pid):
+    u, n = g.who.get("user"), node(nid)
+    if not u or not n or n["state"] != "attivo" or not A.ID_RE.match(pid):
+        return jsonify(error="Richiesta non valida"), 400
+    if not g.who["admin"] and not g.who["perm"].get("playlist", True):
+        return jsonify(error="«Crea e modifica playlist» non è abilitato per il tuo utente."), 403
+    ids = [str(x) for x in ((request.get_json(silent=True) or {}).get("ids") or [])[:200] if SONG_RE.match(str(x))]
+    rows = {r["id"]: json.loads(r["data"]) for r in db.all_(f"SELECT id, data FROM fed_mine WHERE gone = 0 AND id IN ({','.join('?' * len(ids))})", *ids)} if ids else {}
+    songs = [dict(rows[i], id=i) for i in ids if i in rows]
+    if not songs:
+        return jsonify(error="Questi brani non sono nel catalogo di questo server"), 400
+    g_ = grants(nid)
+    g_.update({s["id"]: time.time() + GRANT_S for s in songs})
+    set_setting("grant:" + nid, json.dumps(g_))
+    if chan_want.get(nid):  # lui non mi raggiunge: il canale si apre prima, così la copia non lo trova chiuso
+        chan_start(nid)
+        for _ in range(16):
+            if time.time() - chan_last.get(nid, 0) < 5:
+                break
+            time.sleep(0.5)
+    try:
+        j = fed_json(n, "POST", f"/fed/v1/collab/{pid}/aggiungi", body={"user": u, "songs": songs}, timeout=(5, 60))
+    except FedError as e:
+        return jsonify(error=str(e)), e.status if 400 <= e.status < 600 else 502
+    return jsonify(ok=True, added=j.get("added", 0), copia=j.get("copia", 0))
 
 
 def ensure_library():
