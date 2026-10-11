@@ -3791,7 +3791,7 @@ const Notif = {
     this.paint(); this.views(); this.seen(Math.max(0, ...this.items.map(x => x.id))); this.native();
   },
   // riquadro aperto o pagina delle notifiche: si ridisegnano con lo stato nuovo
-  views() { NotifPop.paint(); if (location.hash.startsWith('#/notifiche') && $('#nPage')) vNotifiche(); },
+  views() { NotifPop.paint(); },
   // app Android: le notifiche arrivano anche ad app chiusa (ArmonyNotificheWorker, ogni 15 minuti) con un gettone che
   // vale solo per leggere quelle nuove; i tipi seguono Impostazioni → Notifiche. Con l'app aperta restano dentro l'app
   async native() {
@@ -3878,7 +3878,6 @@ function wireNotif(box, done) {
 }
 const NotifPop = {
   open() {
-    if (!matchMedia('(min-width:861px)').matches) { location.hash = '#/notifiche'; return; }
     const d = $('#dlg'); if (d.open && d.classList.contains('notifpop')) return d.close();
     d.className = 'notifpop'; d.setAttribute('aria-label', 'Notifiche');
     const r = $('#hBell').getBoundingClientRect(); d.style.top = Math.round(r.bottom + 8) + 'px'; d.style.right = Math.max(8, Math.round(innerWidth - r.right - 8)) + 'px';
@@ -3892,22 +3891,18 @@ const NotifPop = {
     d.innerHTML = `<div class="npo-head"><b>Notifiche</b>${Notif.unread ? `<button class="btn sm" id="npAll">Segna tutte come lette</button>` : ''}
       <a class="icon-btn" href="#/impostazioni/notifiche" aria-label="Impostazioni delle notifiche" title="Impostazioni">${ic('gear')}</a></div>
       ${!P.notifOn ? `<a class="np-hint" href="#/impostazioni/notifiche">${ic('bell')}<span>Ricevile anche quando Armony non è in primo piano</span>${ic('chevr')}</a>` : ''}
-      <div class="np-list">${notifBody()}</div>
-      <a class="np-foot" href="#/notifiche">Apri la pagina delle notifiche</a>`;
+      <div class="np-list">${notifBody()}</div>`;
     d.querySelector('.np-list').scrollTop = top;
     wireNotif(d.querySelector('.np-list'), () => d.close());
     $('#npAll')?.addEventListener('click', () => Notif.read());
     d.querySelectorAll('a[href]').forEach(a => a.addEventListener('click', () => d.close()));
   }
 };
-async function vNotifiche() {
-  if (!Notif.on()) { view.innerHTML = '<h1>Notifiche</h1><div class="empty"><h3>Notifiche non disponibili</h3><p>Il server va aggiornato ad Armony 0.25 o successiva.</p></div>'; return; }
-  if (!Notif.items.length) await Notif.load();
-  view.innerHTML = `<div class="lhead"><h1>Notifiche</h1>${Notif.unread ? '<button class="btn sm" id="nAll">Segna tutte come lette</button>' : ''}</div>
-    ${!P.notifOn ? `<div class="panel nhint"><span class="grow">Ricevi gli avvisi anche quando ${NATIVE ? 'l\'app è in sottofondo' : 'Armony non è in primo piano'}.</span><a class="btn sm primary" href="#/impostazioni/notifiche">Attiva</a></div>` : ''}
-    <div class="nlist" id="nPage">${notifBody()}</div>`;
-  $('#nAll')?.addEventListener('click', () => Notif.read());
-  wireNotif($('#nPage'));
+// la pagina delle notifiche non c'è più: tutto sta nel riquadro della campanella. Un link vecchio (#/notifiche, l'avviso
+// che raggruppa più notifiche) porta alla Home con il riquadro aperto
+function vNotifiche() {
+  location.replace('#/home');
+  setTimeout(() => { if (Notif.on()) NotifPop.open(); }, 400);
 }
 // coda come Spotify: "Riproduci dopo" va subito dopo il brano attuale, "Aggiungi alla coda" dopo gli altri brani aggiunti a
 // mano (segnati _q) e prima del resto della playlist o dell'album (prima andava in fondo, dopo centinaia di brani).
@@ -5574,7 +5569,15 @@ const Live = {
   loc(w) { return localize(w, srv()?.local ? null : S.active); },
   track() { const s = this.st(); return s?.track ? this.loc(s.track) : null; },
   playing() { return !!this.st()?.playing; },
-  pos() { const s = this.st(); if (!s) return 0; const p = (s.position || 0) + (s.playing ? (Date.now() - s.recvAt) / 1000 * (s.rate || 1) : 0); return s.duration ? Math.min(p, s.duration) : p; },
+  // ─── PERCHÉ l'ora del server ───
+  // Contare dal momento in cui lo stato arriva qui lascia indietro di tutto il ritardo di consegna (con il Funnel anche
+  // 10-20 s). Il server mette su ogni stato l'ora in cui l'ha ricevuto (at): con lo scarto fra gli orologi (off, ms:
+  // ora del server = Date.now() + off) l'età dello stato è quella vera. Ogni stato arrivato dice che off è almeno
+  // at - arrivo: il più alto visto è il più vicino al vero. Senza at (risposte immediate ai comandi) si conta dall'arrivo
+  off: null,
+  seenOff(serverMs, now = Date.now()) { const c = serverMs - now; if (this.off == null || c > this.off) this.off = c; },
+  age(s) { return s.at && this.off != null ? Math.max(0, Date.now() + this.off - s.at * 1000) : Date.now() - s.recvAt; },
+  pos() { const s = this.st(); if (!s) return 0; const p = (s.position || 0) + (s.playing ? this.age(s) / 1000 * (s.rate || 1) : 0); return s.duration ? Math.min(p, s.duration) : p; },
   dur() { return this.st()?.duration || 0; },
   // il server manda ping e riceve battiti (livehb): solo allora il cane da guardia ha senso
   hb() { return !!srv()?.me?.caps?.includes('livehb'); },
@@ -5586,7 +5589,7 @@ const Live = {
     const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&${authQ(s)}${hb ? '&hb=1' : ''}`);
     this.last = Date.now();
     es.onmessage = e => { if (Date.now() - this.last > 12000) Trace.add('canale dal vivo: segnale'); this.last = Date.now(); try { this.recv(JSON.parse(e.data)); } catch {} };
-    es.onopen = () => { Trace.add('canale dal vivo: aperto'); this.fails = 0; this.last = Date.now(); this.sent = null; this.publish(); };
+    es.onopen = () => { Trace.add('canale dal vivo: aperto'); this.watch(); this.fails = 0; this.last = Date.now(); this.sent = null; this.publish(); };
     // EventSource si ricollega da solo dopo un errore di rete; se il server rifiuta (sessione scaduta) chiude:
     // si rifà l'accesso con tok/salt e si riprova, sempre più piano
     es.onerror = () => { Trace.add('canale dal vivo: errore, stato ' + es.readyState); if (es.readyState === EventSource.CLOSED && this.es === es) { clearInterval(this.dog); this.retry = setTimeout(() => this.relogin(), Math.min(60000, 5000 * ++this.fails)); } };
@@ -5619,6 +5622,7 @@ const Live = {
     const s = srv(); if (!s?.session || !s.me?.caps?.includes('livestato')) return null;
     let r; try { r = await srvApi(s, '/api/live/stato?' + new URLSearchParams({ ...(mine ? { device: S.device } : {}), ...(cmd ? { cmd } : {}) })); } catch { return null; }
     const now = Date.now(), off = r.now * 1000 - now;
+    this.off = null; this.seenOff(r.now * 1000, now); arr(r.states).forEach(x => x.at && this.seenOff(x.at * 1000, now));
     this.devices = new Map(arr(r.devices).filter(d => d.device !== S.device).map(d => [d.device, d.name]));
     this.states = new Map(arr(r.states).filter(x => x.device !== S.device).map(x => [x.device, { ...x, recvAt: now }]));
     if (this.target && !this.devices.has(this.target)) this.target = null;
@@ -5656,6 +5660,7 @@ const Live = {
     if (m.type === 'libreria') { emitSoon('libreria'); if (m.playlists) emitSoon('playlists'); return; }  // brani nuovi, playlist completate dal server
     if (m.type === 'hello') {
       this.helloAt = now; Presence.hello(m); Radio.hello(m);
+      this.off = null; if (m.now) this.seenOff(m.now * 1000, now); arr(m.states).forEach(x => x.at && this.seenOff(x.at * 1000, now));
       this.devices = new Map(arr(m.devices).map(d => [d.device, d.name]));
       this.states = new Map(arr(m.states).map(s => [s.device, { ...s, recvAt: now }]));
       const p = arr(m.states).find(s => s.playing && !s.solo);
@@ -5669,7 +5674,7 @@ const Live = {
       const name = this.devices.get(m.device); (this.gone ||= {})[m.device] = name; this.devices.delete(m.device); this.states.delete(m.device);
       if (this.target === m.device) { this.target = null; toast(`${name || 'Il dispositivo'} si è scollegato.`); }
     } else if (m.type === 'state') {
-      const s = { ...m.state, recvAt: now }; this.states.set(s.device, s); this.devices.set(s.device, s.name);
+      const s = { ...m.state, recvAt: now }; this.states.set(s.device, s); this.devices.set(s.device, s.name); if (s.at) this.seenOff(s.at * 1000, now);
       if (s.solo && this.target === s.device) this.target = null;  // si è sganciato: non è più la nostra uscita
       if (s.playing && !s.solo && !P.solo && !Jam.role) {
         // un solo dispositivo suona: chi comincia ferma gli altri (anche la radio)
@@ -5721,9 +5726,9 @@ const Live = {
     const st = this.states.get(to);
     if (st && to === this.target) {
       const p = this.pos(), now = Date.now();
-      if (cmd === 'pause' || cmd === 'toggle' && st.playing) Object.assign(st, { position: p, playing: false, recvAt: now });
-      else if (cmd === 'play' || cmd === 'toggle') Object.assign(st, { position: p, playing: true, recvAt: now });
-      else if (cmd === 'seek') Object.assign(st, { position: value, recvAt: now });
+      if (cmd === 'pause' || cmd === 'toggle' && st.playing) Object.assign(st, { position: p, playing: false, recvAt: now, at: null });
+      else if (cmd === 'play' || cmd === 'toggle') Object.assign(st, { position: p, playing: true, recvAt: now, at: null });
+      else if (cmd === 'seek') Object.assign(st, { position: value, recvAt: now, at: null });
       else if (cmd === 'shuffle') st.shuffle = !st.shuffle;
       else if (cmd === 'repeat') st.repeat = { off: 'all', all: 'one', one: 'off' }[st.repeat || 'off'];
       this.paint();
@@ -5763,6 +5768,9 @@ const Live = {
     toast(`${name} non risponde: suono qui.`); window.Diag?.report('avviso', 'live', `${name} non ha risposto al comando entro 5 s`, v ? 'transfer' : '');
     if (v) this.exec({ cmd: 'transfer', value: v }); else this.paint();
   },
+  // chi suona ricontrolla ogni 10 s: se la posizione vera si è staccata da quella che gli altri calcolano (brano che si è
+  // fermato a caricare, rallentamenti) la ripubblica; altrimenti non manda niente
+  watch() { clearInterval(this.wt); this.wt = setInterval(() => { if (!Engine.el.paused && !this.remote()) this.publish(); }, 10000); },
   publish() {
     if (!this.es || !this.on() || Jam.role === 'guest') return;
     const t = Radio.st ? Radio.track : S.queue[S.index]; if (!t) return;
@@ -5773,7 +5781,7 @@ const Live = {
     now.sig = up.map(x => x.id).join() + '|' + now.left;  // solo per accorgersi che la coda è cambiata
     if (now.playing && this.target) { this.target = null; this.pill(); }
     const s = this.sent, exp = s ? s.position + (s.playing ? (Date.now() - s.at) / 1000 * s.rate : 0) : 0;
-    if (s && s.track.id === now.track.id && s.playing === now.playing && s.rate === now.rate && s.solo === now.solo && s.shuffle === now.shuffle && s.repeat === now.repeat && s.sig === now.sig && Math.abs(exp - now.position) < 2) return;
+    if (s && s.track.id === now.track.id && s.playing === now.playing && s.rate === now.rate && s.solo === now.solo && s.shuffle === now.shuffle && s.repeat === now.repeat && s.sig === now.sig && Math.abs(exp - now.position) < 1.5) return;
     this.sent = { ...now, at: Date.now() };
     srvApi(srv(), '/api/live/state', { method: 'POST', body: JSON.stringify(now) }).catch(() => {});
   },
