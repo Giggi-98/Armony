@@ -5189,11 +5189,11 @@ async function refreshTrasf() {
     function scelta() {
       const m = t.misure || {};
       return `<p>Agganciato a <b>${esc(t.nome_nuovo || t.url)}</b>. Confronta il codice di sicurezza con quello sul suo schermo:</p><p class="safety">${esc(t.safety)}</p>
-        <p class="fedmeta">${t.raggiungibile === false ? '<span class="federr">Il server nuovo ora non risponde.</span>' : t.confermato ? `${ic('check')} Sul nuovo hanno confermato.` : 'Aspetto che sul nuovo confermino…'}</p>
+        <ul class="trcheck">${(t.verifica || []).map(c => `<li class="${c.ok ? 'ok' : c.blocca ? 'no' : 'warn'}">${ic(c.ok ? 'check' : 'close')}<span><b>${esc(c.nome)}</b>${c.msg ? `<small>${esc(c.msg)}</small>` : ''}</span></li>`).join('')}</ul>
         <label class="check"><input type="checkbox" id="trBr" checked><span>Porta anche i brani (${bytes(m.brani || 0)})<small>Sul nuovo ci sono ${bytes(t.libero || 0)} liberi. Senza, questo server resta come libreria collegata e i brani si spostano dopo.</small></span></label>
         ${m.video ? `<label class="check"><input type="checkbox" id="trVi"><span>Porta anche i video (${bytes(m.video)})</span></label>` : ''}
         <p class="fedmeta">Durante l'invio questo server funziona; alla fine si ferma un minuto per le modifiche, poi il nuovo prende il suo posto.</p>
-        <div class="row"><button class="btn primary" id="trGo" ${t.confermato ? '' : 'disabled'}>${ic('send')} Avvia il trasferimento</button>${annulla}</div>`;
+        <div class="row"><button class="btn primary" id="trGo" ${t.blocco === false ? '' : 'disabled'}>${ic('send')} Avvia il trasferimento</button>${annulla}</div>`;
     }
     function bar() {
       return `<p>${esc(v?.msg || 'In corso…')}</p><div class="trbar"><i style="width:${pct}%"></i></div>

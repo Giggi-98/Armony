@@ -260,6 +260,8 @@ for k in ARMONY_PORT NAVIDROME_PORT POT_PORT; do env_set $k "${!k}"; done
 [ "$NUOVO_ND" = 1 ] && { env_set NAVIDROME_ADMIN_USER "$ND_USER"; env_set NAVIDROME_ADMIN_PASS "$ND_PASS"; }
 # profili in .env: anche il tasto «Aggiorna» (docker compose up) li tiene accesi
 P=""; [ -n "$DOMINIO" ] && P=https; [ "$TURN" = s ] && P="${P:+$P,}turn"
+# senza systemd (WSL, NAS, Docker Desktop) il tasto «Aggiorna» e il trasferimento li esegue il guardiano, un container
+if [ ! -d /run/systemd/system ]; then P="${P:+$P,}guardiano"; env_set ARMONY_DIR "$DIR"; fi
 env_set COMPOSE_PROFILES "$P"
 docker compose config -q || { echo "docker compose non accetta la configurazione: controlla $ENVF" >&2; exit 1; }
 echo "Scritto $ENVF"
@@ -320,7 +322,7 @@ fi
 # --- aggiornamenti e firewall ---------------------------------------------------------------------------------------
 passo "Tasto «Aggiorna»"
 if [ -d /run/systemd/system ]; then sh deploy/install-updater.sh
-else echo "Senza systemd il servizio di aggiornamento non si installa: aggiorna a mano (vedi LEGGIMI.md, Manutenzione)."; fi
+else echo "Senza systemd lo fa il guardiano (container armony-guardiano): $(docker ps --filter name=^armony-guardiano$ --format '{{.Status}}' | grep -q Up && echo attivo || echo 'non partito, guarda: docker logs armony-guardiano')."; fi
 
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
   if si_no "Il firewall ufw è attivo. Apro le porte di Armony ($ARMONY_PORT${DOMINIO:+, $ARMONY_HTTPS_PORT}${TURN_PORT:+, TURN})?"; then

@@ -308,6 +308,11 @@ label.check small{display:block;color:var(--muted)}
 .fedmeta svg{width:14px;height:14px;vertical-align:-2px;color:var(--sage)}
 @media (max-width:520px){.fedsteps{gap:var(--s1)}.fedsteps li{font-size:.68rem;overflow-wrap:anywhere}}
 .federr{color:var(--danger);font-size:.88rem}
+.trcheck{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s2)}
+.trcheck li{display:flex;gap:var(--s2);align-items:flex-start;font-size:.9rem}
+.trcheck li>svg{flex:none;width:18px;height:18px;margin-top:1px;padding:2px;border-radius:50%;color:#fff;background:var(--sage)}
+.trcheck li.no>svg{background:var(--danger)}.trcheck li.warn>svg{background:var(--accent);color:var(--on-accent)}
+.trcheck b{font-weight:600}.trcheck small{display:block;color:var(--muted);font-size:.84rem}
 .trbar{height:10px;border-radius:99px;background:var(--surface2);overflow:hidden}
 .trbar i{display:block;height:100%;background:var(--accent);border-radius:inherit;transition:width .6s var(--ease-out)}
 .linkb{background:none;border:0;padding:0;font:inherit;color:var(--accent-text);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px}

@@ -14,7 +14,14 @@ U="$DIR/updates"
 OWNER=$(stat -c %U "$DIR")
 SIGNERS=/etc/armony/allowed_signers
 cd "$DIR" || exit 1
-g() { runuser -u "$OWNER" -- git "$@"; }
+if [ "$OWNER" != UNKNOWN ] && id -u "$OWNER" >/dev/null 2>&1; then
+  g() { runuser -u "$OWNER" -- git "$@"; }
+else
+  # dal guardiano (container): il proprietario della cartella qui non esiste. git come root, poi i file tornano suoi
+  OWN=$(stat -c %u:%g "$DIR")
+  g() { git -c safe.directory="$DIR" "$@"; r=$?; chown -R "$OWN" "$DIR/.git" 2>/dev/null
+        git -c safe.directory="$DIR" ls-files -z | xargs -0 chown "$OWN" 2>/dev/null; return $r; }
+fi
 # JSON scritto da python: un messaggio con le virgolette rompeva il file e l'app non mostrava l'errore
 status() {
   python3 -c 'import json,sys,time; json.dump({"state": sys.argv[1], "msg": sys.argv[2], "ts": int(time.time())}, open(sys.argv[3], "w"))' \

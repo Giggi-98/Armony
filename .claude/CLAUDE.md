@@ -134,7 +134,10 @@ Transform tasks into verifiable goals:
 - "Fix the bug" → "Reproduce it (curl, browser, log), then make it disappear"
 - "Refactor X" → "Same behaviour before and after, checked the same way"
 
-Non ci sono test automatici. Le verifiche disponibili:
+Le verifiche disponibili:
+- tutto, con più server veri: `sudo python3 deploy/collaudo.py` (circa 15 minuti, quattro server
+  isolati: federazione, canale, collaboratori, mappa, trasferimento, guardiano). **Prima di ogni tag**;
+  `--tieni` lascia accesi i server per guardarli, `--pulisci` li toglie;
 - server: `python3 -m py_compile server/app.py`, poi `curl` sulle rotte
   (`/api/health` con `X-Token`, `/rest/ping.view` per il proxy),
   `docker logs armony-app`;

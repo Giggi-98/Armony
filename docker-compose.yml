@@ -117,6 +117,24 @@ services:
       - ./data/caddy:/data
     restart: unless-stopped
 
+  # Senza systemd (WSL, NAS, Docker Desktop) il tasto «Aggiorna» e il trasferimento li esegue il guardiano invece di
+  # armony-update.path: profilo "guardiano" (installa.sh lo attiva da solo). ARMONY_DIR in .env = questa cartella, con
+  # il percorso intero: dentro il container deve essere uguale, perché docker compose risolve lì i percorsi
+  guardiano:
+    build: deploy/guardiano
+    image: armony-guardiano
+    container_name: armony-guardiano
+    logging: *logging
+    profiles: ["guardiano"]
+    environment:
+      ARMONY_DIR: "${ARMONY_DIR:-}"
+    working_dir: "${ARMONY_DIR:-/armony}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:${ARMONY_DIR:-/armony}
+    command: ["sh", "deploy/guardiano/guarda.sh"]
+    restart: unless-stopped
+
   turn:
     image: coturn/coturn:latest
     container_name: armony-turn

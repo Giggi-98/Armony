@@ -209,7 +209,16 @@ def t_stato():
     d, err = firmata(("agganciato", "ricezione", "applicazione", "applicato"))
     if err:
         return err
-    return jsonify(confermato=bool(d.get("confermato")), stage=d["stage"], libero=libero(), nome=A.NAME, app=A.VERSION)
+    return jsonify(confermato=bool(d.get("confermato")), stage=d["stage"], libero=libero(), nome=A.NAME, app=A.VERSION,
+                   servizio=servizio(), ora=time.time())
+
+
+def servizio():
+    """Chi applicherà i dati: il servizio di systemd (install-updater.sh) o il guardiano (container, senza systemd)."""
+    g_ = os.path.join(A.UPDATE_DIR, "guardiano.json")
+    if os.path.exists(g_) and time.time() - os.path.getmtime(g_) < 60:
+        return "guardiano"
+    return "systemd" if os.path.exists(os.path.join(A.UPDATE_DIR, "installed")) else None
 
 
 def dest_path(dest, nome):
@@ -569,17 +578,45 @@ def passaggio(brani):
     A.diagnosi.log("info", "trasferimento", f"trasferito su {url}" + ("" if brani else ": questo server resta come libreria collegata"))
 
 
+def verifica():
+    """Prima di «Avvia»: tutto quello che farebbe fallire il trasferimento a metà, detto prima. L'ultima voce porta lo
+    stato del nuovo (chi chiama lo toglie)."""
+    d, out = st(), []
+    t0 = time.time()
+    try:
+        s = tjson("GET", "/trasf/v1/stato", timeout=(5, 10))
+    except (RuntimeError, requests.RequestException) as e:
+        return [{"nome": "Il server nuovo risponde", "ok": False, "blocca": True, "msg": str(e)[:200], "stato": None}]
+    rtt = time.time() - t0
+    out.append({"nome": "Il server nuovo risponde", "ok": True, "msg": d.get("url")})
+    out.append({"nome": "Codice di sicurezza confermato sul nuovo", "ok": bool(s.get("confermato")), "blocca": True,
+                "msg": "" if s.get("confermato") else "Sul nuovo premete «È uguale, conferma»"})
+    same = s.get("app") == A.VERSION
+    out.append({"nome": "Stessa versione di Armony", "ok": same, "blocca": True,
+                "msg": f"{A.VERSION} su tutti e due" if same else f"questo {A.VERSION}, il nuovo {s.get('app')}: aggiorna quello più vecchio"})
+    sv = s.get("servizio")
+    out.append({"nome": "Sul nuovo c'è chi applica i dati", "ok": bool(sv), "blocca": True,
+                "msg": {"systemd": "servizio di sistema", "guardiano": "guardiano (senza systemd)"}.get(sv,
+                       "manca: sul nuovo lancia «sudo deploy/install-updater.sh» o attiva il guardiano (LEGGIMI, Manutenzione)")})
+    skew = abs((s.get("ora") or 0) + rtt / 2 - time.time())
+    out.append({"nome": "Stessa ora sui due server", "ok": skew < 120, "blocca": True,
+                "msg": f"scarto di {int(skew)} s" + ("" if skew < 120 else ": le firme scadono dopo 5 minuti, sistema l'ora (NTP)")})
+    https = str(d.get("url") or "").startswith("https://")
+    out.append({"nome": "Collegamento cifrato (HTTPS)", "ok": https, "blocca": False,
+                "msg": "" if https else "senza HTTPS fallo solo dentro la rete di casa: passano anche le impronte delle password", "stato": s})
+    return out
+
+
 @bp.post("/api/trasferimento/avvia")
 def avvia():
     d, j = st(), request.get_json(silent=True) or {}
     if d.get("ruolo") != "invia" or d.get("stage") not in ("agganciato", "errore"):
         return jsonify(error="Prima aggancia il server nuovo con il suo codice"), 409
-    try:
-        s = tjson("GET", "/trasf/v1/stato")
-    except (RuntimeError, requests.RequestException) as e:
-        return jsonify(error=str(e)), 502
-    if not s.get("confermato"):
-        return jsonify(error="Sul server nuovo non hanno ancora confermato il codice di sicurezza"), 409
+    v = verifica()
+    s = v[-1].pop("stato", None) or {}
+    bad = [c for c in v if not c["ok"] and c.get("blocca")]
+    if bad:
+        return jsonify(error=f"{bad[0]['nome']}: {bad[0]['msg']}"), 409
     brani, video = bool(j.get("brani")), bool(j.get("video"))
     tot = misura(brani, video)[1]
     if tot > s.get("libero", 0):
@@ -633,11 +670,11 @@ def stato():
     if d.get("ruolo") == "invia" and d.get("stage") in ("invio", "congelato", "applicazione") or stato_vivo["msg"].startswith("Brani"):
         out["vivo"] = dict(stato_vivo)
     if d.get("ruolo") == "invia" and d.get("stage") in ("agganciato", "errore"):
-        try:
-            s = tjson("GET", "/trasf/v1/stato", timeout=(5, 10))
-            out["confermato"], out["libero"] = s.get("confermato"), s.get("libero")
-        except (RuntimeError, requests.RequestException):
-            out["raggiungibile"] = False
+        out["verifica"] = verifica()
+        s = out["verifica"][-1].pop("stato", None) or {}
+        out["confermato"], out["libero"] = s.get("confermato"), s.get("libero")
+        out["raggiungibile"] = bool(s)
+        out["blocco"] = any(not c["ok"] and c.get("blocca") for c in out["verifica"])
         out["misure"] = {"brani": misura(True, False)[1], "video": sum(x["size"] for x in elenco("video", A.VIDEO_DIR))}
     if d.get("stage") in ("trasferito", "concluso"):
         now = time.time()
