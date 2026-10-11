@@ -215,10 +215,41 @@ label.check small{display:block;color:var(--muted)}
 .netav svg{width:22px;height:22px}
 .netdot{width:10px;height:10px;border-radius:50%;background:var(--sage);flex:none}
 .netdot.off{background:var(--muted);opacity:.5}
-.fednode{cursor:default;flex-wrap:wrap}
-.list-item.fednode .grow{flex:1 1 16rem}
-.fednode .grow>small{display:block}
-.fednode small svg{width:14px;height:14px;vertical-align:-2px;margin-right:2px}
+/* federazione: la scheda del server, i due tasti d'ingresso e una scheda per collegamento con i passi del botta e risposta */
+.fedme{display:flex;flex-direction:column;gap:var(--s4)}
+.fedme-head,.fedcard-head{display:flex;align-items:center;gap:var(--s3)}
+.fedme-head .grow,.fedcard-head .grow{min-width:0}
+.fedme-head small{display:block;color:var(--muted);font-size:.86rem}
+.fedav{flex:none;width:44px;height:44px;border-radius:var(--r-m);display:grid;place-items:center;background:var(--surface2);color:var(--ink);font-weight:700;font-size:1.1rem}
+.fedav svg{width:22px;height:22px}
+.fedopt summary{cursor:pointer;font-weight:600;padding:var(--s1) 0}
+.fedopt[open] summary{margin-bottom:var(--s3)}
+.fedacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:var(--s3);margin:0 0 var(--s5)}
+.fedtile{display:flex;gap:var(--s3);align-items:flex-start;text-align:left;padding:var(--s4);min-height:var(--hit);border-radius:var(--r-l);border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;cursor:pointer;transition:border-color .15s}
+.fedtile b{display:block}.fedtile small{display:block;color:var(--muted);margin-top:2px;font-size:.86rem;line-height:1.35}
+.fedtile.primary .fedav{background:var(--accent);color:var(--on-accent)}
+@media (hover:hover) and (pointer:fine){.fedtile:hover{border-color:var(--accent)}}
+.fedh{margin:0 0 var(--s3);font-size:1rem}
+.fedcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);padding:var(--s4);margin-bottom:var(--s3);display:flex;flex-direction:column;gap:var(--s3)}
+.fedcard.ask{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.fedcard p{margin:0}
+.fedcard-head b small{font-weight:400;color:var(--muted)}
+.fedstat{display:block;font-size:.86rem;color:var(--muted);margin-top:2px}
+.feddot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);margin-right:6px;vertical-align:1px}
+.feddot.ok{background:var(--sage);animation:fedpulse 2s ease-out infinite}.feddot.wait{background:var(--accent)}.feddot.err{background:var(--danger)}
+@keyframes fedpulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--sage) 55%,transparent)}100%{box-shadow:0 0 0 7px transparent}}
+@media (prefers-reduced-motion:reduce){.feddot.ok{animation:none}}
+.fedsteps{display:flex;list-style:none;margin:0;padding:0;gap:var(--s2)}
+.fedsteps li{flex:1;min-width:0;font-size:.8rem;color:var(--muted);padding-top:var(--s2);border-top:3px solid var(--surface2)}
+.fedsteps li.done{border-color:var(--sage);color:var(--ink)}.fedsteps li.cur{border-color:var(--accent);color:var(--ink);font-weight:600}
+.fedcard .safety{font-size:1.6rem}.fedcard .safety.sm{font-size:1rem;letter-spacing:.08em}
+.fedsync{background:var(--accent-soft);border-radius:var(--r-m);padding:var(--s4);display:flex;flex-direction:column;gap:var(--s2)}
+.fedsync small{font-size:.88rem;line-height:1.4}
+.fedmeta{font-size:.86rem;color:var(--muted);line-height:1.6}
+.federr{color:var(--danger);font-size:.88rem}
+.linkb{background:none;border:0;padding:0;font:inherit;color:var(--accent-text);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.fedfoot{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;border-top:1px solid var(--line);padding-top:var(--s3)}
+.fedfoot select{width:auto;flex:1 1 12rem;max-width:20rem}
 .badge-off{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sage);margin-right:6px;vertical-align:middle}
 .list-item{display:flex;align-items:center;gap:var(--s3);min-height:64px;padding:8px;border-bottom:1px solid var(--line);cursor:pointer;transition:background var(--t-tap) ease}
 .list-item .grow{flex:1;min-width:0}

@@ -11,7 +11,8 @@ Armony - federazione: server Armony collegati fra loro (docs/FEDERAZIONE.md).
     cerca, vicini                    ricerca e mappa inoltrate agli amici degli amici (ttl, rid contro i cicli)
     file/<id>, cover/<id>, info/<id> il brano (Range), la copertina, dimensione e sha256; ?via=a,b a catena
     radio, radio/<id>, ora           Jam Radio: le definisce radio.py su questo blueprint (stesse firme)
-  /api/fed/*             gestione, solo amministratori: impostazioni, inviti, collegamenti
+  /api/fed/*             gestione, solo amministratori: impostazioni, inviti, collegamenti; nodes/<id>/sync {mode}:
+                         «playlist» o «stream», la risposta alla domanda fatta quando il collegamento è in linea
   /api/rete/*            per gli utenti: cerca, stream, cover, mappa; copia (permesso "download");
                          offerte (GET), offerta {pid, on} (POST): quali playlist pubbliche vanno ai server collegati
 
@@ -348,7 +349,14 @@ def pair():
            "state = CASE WHEN fed_nodes.state = 'attivo' THEN 'attivo' ELSE 'richiesta' END",
            nid, d["pub"], str(d.get("name") or "Server")[:60], str(d.get("owner") or "")[:60], url, now, now,
            str(d.get("app") or "")[:20], int(d.get("proto") or 0))
-    return jsonify(**hello_payload(), state=node(nid)["state"])
+    n = node(nid)
+    if n["state"] == "richiesta":
+        # chi ha creato l'invito spesso non sta guardando la pagina: gli amministratori lo sanno subito, dalla campanella
+        for u in db.all_("SELECT DISTINCT user FROM devices WHERE admin = 1 AND state = 'fidato'"):
+            A.notifiche.notifica(u["user"], "sistema", f"{n['name']} chiede di collegarsi a questo server",
+                                 f"Codice di sicurezza {safety(PUB, n['pub'])}: se è uguale sul suo schermo, accetta in Impostazioni → Federazione",
+                                 "#/impostazioni/librerie", only_once="fedpair:" + nid + ":" + str(int(now)))
+    return jsonify(**hello_payload(), state=n["state"])
 
 
 @bp.post("/fed/v1/accettato")
@@ -640,6 +648,7 @@ chan = {}        # (vicino) foglia -> {"q": richieste per lei, "at": ultimo coll
 pend = {}        # (vicino) richiesta nel canale -> {"nid", "meta": Event, "info": stato e intestazioni, "chunks": pezzi}
 direct_ok = {}   # nodo -> ultima richiesta diretta riuscita
 chan_want = {}   # (foglia) vicino -> mi ha detto che non mi raggiunge: tengo il canale
+chan_last = {}   # (foglia) vicino -> ultimo giro del canale andato a buon fine: il «battito» del collegamento
 chan_threads = {}
 last_probe = [0.0]
 chan_lock = threading.Lock()
@@ -739,7 +748,9 @@ def chan_poll():
     if nid not in direct_ok:
         pool.submit(probe_one, nid)  # canale appena aperto: si prova subito se in realtà si raggiunge
     n = node(nid) if aperto else None
-    if n and (n["error"] or not n["synced"]) and n.get("dir") != "offro":
+    if n and n["error"] and n.get("dir") == "offro":
+        db.run("UPDATE fed_nodes SET error = NULL WHERE id = ?", nid)  # non scarico il suo catalogo: l'errore vecchio non si cancellerebbe più
+    elif n and (n["error"] or not n["synced"]) and n.get("dir") != "offro":
         # il catalogo chiesto quando il canale non c'era ancora (foglia senza indirizzo): si riprende subito, non fra 20 minuti
         fails.pop(nid, None)
         pool.submit(refresh, nid)
@@ -816,6 +827,7 @@ def chan_run(nid):
         except FedError:
             time.sleep(10)
             continue
+        chan_last[nid] = time.time()
         for rq in j.get("reqs") or []:
             if isinstance(rq, dict) and rq.get("rq"):
                 threading.Thread(target=chan_exec, args=(n, rq), daemon=True).start()
@@ -1104,11 +1116,19 @@ def fed_info(sid):
 
 # ------------------------------------------------------------------ gestione (solo amministratori)
 def node_out(n):
-    online = n["state"] == "attivo" and not n["error"] and n["seen"] and time.time() - n["seen"] < 3 * REFRESH_S
+    # senza indirizzo lui ci parla, ma noi lo raggiungiamo solo dal suo canale: in linea vuol dire canale aperto
+    online = n["state"] == "attivo" and not n["error"] and n["seen"] and time.time() - n["seen"] < 3 * REFRESH_S and n["url"]
+    canale = time.time() - chan_last.get(n["id"], 0) < CHAN_POLL + 30  # (foglia) il mio canale verso di lui gira
     return {k: n[k] for k in ("id", "name", "owner", "url", "state", "created", "seen", "app", "songs", "albums", "error", "synced", "dir")} | {
-        "transitive": bool(n["transitive"]), "online": bool(online or chan_ok(n["id"])), "safety": safety(PUB, n["pub"]),
+        "transitive": bool(n["transitive"]), "online": bool(online or chan_ok(n["id"]) or canale and n["state"] == "attivo"), "safety": safety(PUB, n["pub"]),
+        # ultimo scambio riuscito in un verso o nell'altro (sue richieste, mio canale, mie richieste dirette): per «ultimo contatto»
+        "contatto": max(n["seen"] or 0, chan_last.get(n["id"], 0), direct_ok.get(n["id"], 0)),
+        # cosa fare della sua libreria, chiesto una volta appena è in linea: "playlist" (copio quelle scelte) o "stream"
+        "sync": setting("sync:" + n["id"], ""),
         # canale: lui non è raggiungibile e mi parla dal canale inverso; uscita: io non sono raggiungibile e tengo il canale verso di lui
-        "reach": "canale" if chan_ok(n["id"]) and time.time() - direct_ok.get(n["id"], 0) > 1800 else "uscita" if chan_want.get(n["id"]) else "diretto"}
+        # diretto: l'ho raggiunto io di recente; lui: mi parla lui, ma io non l'ho ancora raggiunto
+        "reach": "canale" if chan_ok(n["id"]) and time.time() - direct_ok.get(n["id"], 0) > 1800 else "uscita" if chan_want.get(n["id"])
+                 else "diretto" if time.time() - direct_ok.get(n["id"], 0) < 1800 else "lui"}
 
 
 @bp.get("/api/fed")
@@ -1235,6 +1255,16 @@ def fed_dir(nid):
     return jsonify(ok=True, dir=d)
 
 
+@bp.put("/api/fed/nodes/<nid>/sync")
+def fed_sync(nid):
+    """La risposta alla domanda «copio le sue playlist o ascolto in streaming?»: si ricorda per non richiederla."""
+    m = str((request.get_json(silent=True) or {}).get("mode") or "")
+    if m not in ("playlist", "stream") or not node(nid):
+        return jsonify(error="Scelta non valida"), 400
+    set_setting("sync:" + nid, m)
+    return jsonify(ok=True, sync=m)
+
+
 @bp.post("/api/fed/nodes/<nid>/refresh")
 def fed_refresh(nid):
     if not node(nid):
@@ -1255,6 +1285,7 @@ def fed_remove(nid):
             pass  # spento o irraggiungibile: le sue richieste saranno comunque rifiutate
     db.run("DELETE FROM fed_catalog WHERE node = ?", nid)
     db.run("DELETE FROM fed_nodes WHERE id = ?", nid)
+    db.run("DELETE FROM settings WHERE key = ?", "fed_sync:" + nid)  # ricollegandolo, la domanda sulle playlist torna
     return jsonify(ok=True)
 
 

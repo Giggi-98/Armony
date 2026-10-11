@@ -1386,7 +1386,7 @@ async function vRete() {
       <span class="grow"><b>${esc(m.me.name)}${m.me.owner ? ` <small>di ${esc(m.me.owner)}</small>` : ''}</b><small>Questo server · ${num(m.me)}</small></span></div>
     ${m.nodes.length ? `<ul>${m.nodes.map(x => nodeHtml(x)).join('')}</ul>` : ''}</li></ul>
     ${m.nodes.length ? `<p class="small" style="color:var(--muted);margin-top:var(--s4)">${m.nodes.length + m.far.length + 1} librerie, ${tot} brani in tutto. Si vedono fino a ${m.hops} ${m.hops === 1 ? 'passaggio' : 'passaggi'} di distanza; gli amici degli amici compaiono solo se il loro server lo permette.</p>`
-      : `<div class="empty" style="margin-top:var(--s4)"><h3>Nessun server collegato</h3><p>${access().admin ? 'Collega la libreria di un amico in Impostazioni → Librerie collegate.' : 'L\'amministratore di questo server può collegarlo alle librerie degli amici.'}</p>${access().admin ? '<a class="btn primary" href="#/impostazioni">Impostazioni</a>' : ''}</div>`}`;
+      : `<div class="empty" style="margin-top:var(--s4)"><h3>Nessun server collegato</h3><p>${access().admin ? 'Collega la libreria di un amico in Impostazioni → Federazione.' : 'L\'amministratore di questo server può collegarlo alle librerie degli amici.'}</p>${access().admin ? '<a class="btn primary" href="#/impostazioni">Impostazioni</a>' : ''}</div>`}`;
   $('#netMap').onclick = e => { const b = e.target.closest('[data-netpl]'); if (b) netPlaylists(b.dataset.netpl, b.dataset.name); };
 }
 // le playlist pubbliche di un server collegato: abbonandosi, una playlist qui resta uguale alla sua (i brani si copiano)
@@ -4495,7 +4495,7 @@ function vSettings(id = location.hash.split('/')[2]) {
     <p class="small" style="color:var(--muted);margin:0">Quello con cui gli altri raggiungono Armony (Tailscale, dominio). Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati lo usano al posto dell'indirizzo di casa.</p>
     <div class="row"><button class="btn" id="pubSave">Salva</button></div></div>`] : null,
   adm && caps.includes('youtube') ? ['srv', 'youtube', 'YouTube', 'film', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>'] : null,
-  adm && netOk() ? ['srv', 'librerie', 'Librerie collegate', 'wifi', 'federazione rete server amici collegare invito codice sicurezza', '<p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare subito o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>'] : null,
+  adm && netOk() ? ['srv', 'librerie', 'Federazione', 'globe', 'federazione librerie collegate rete server amici collegare invito codice sicurezza canale', '<p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare in streaming o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>'] : null,
   adm ? ['srv', 'aggiornamenti', 'Aggiornamenti', 'repeat', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>'] : null,
   // stato del server (diagnosi.js) con dentro lo spazio del disco; sui server che non lo conoscono, solo lo spazio
   adm && ds?.session && caps.includes('diagnosi') ? ['srv', 'stato', 'Stato del server', 'pulse', 'cpu processore memoria ram carico rete thread ascolti flussi dispositivi risorse monitor disco spazio occupato libero', '<div id="statoBox"><p class="sub">Misuro…</p></div><h3>Spazio</h3><div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>']
@@ -4828,49 +4828,95 @@ function inviteSheet(code) {
   };
   d.showModal(); qrInto($('#regQr'), link).catch(() => {});
 }
-/* ================= librerie collegate (federazione, solo amministratori) ================= */
-const FED_STATE = { attesa: ['aspetta che accetti', ''], richiesta: ['vuole collegarsi', 'acc'], chiuso: ['chiuso dall\'altro server', 'err'] };
+/* ================= federazione: server collegati fra loro (solo amministratori) ================= */
 // l'indirizzo con cui gli altri server raggiungono questo: quello pubblico del server, se c'è
 const fedBase = () => pubBase(srv());
+const fedLoop = /^https?:\/\/(127\.|localhost|\[::1\])/;
+const fedAgo = t => { const s = (Date.now() / 1000 - t) | 0; return !t ? 'mai' : s < 10 ? 'adesso' : s < 60 ? `${s} s fa` : ago(t * 1000); };
+let fedT = 0;
+// il botta e risposta di un collegamento, in tre passi: richiesta → conferma → in linea
+function fedSteps(x) {
+  const out = x.state === 'attesa', inc = x.state === 'richiesta';
+  const names = [inc ? 'Richiesta ricevuta' : out ? 'Richiesta mandata' : 'Richiesta', inc ? 'La tua conferma' : out ? `Conferma di ${x.name}` : 'Conferma', x.url ? 'Primo contatto' : 'Apre il canale'];
+  const cur = out || inc ? 1 : 2;
+  return `<ol class="fedsteps">${names.map((n, i) => `<li class="${i < cur ? 'done' : i === cur ? 'cur' : ''}">${esc(n)}</li>`).join('')}</ol>`;
+}
+function fedCard(x) {
+  const id = esc(x.id), nm = esc(x.name), recv = x.dir === 'entrambi' || x.dir === 'ricevo';
+  const via = { canale: 'dal suo canale', uscita: 'dal tuo canale', diretto: 'diretto', lui: 'ci contatta lui' }[x.reach] || '';
+  // senza indirizzo, fra l'accettazione e il primo giro del suo canale passa un minuto: è un'attesa, non un errore
+  const quiet = x.state === 'attivo' && !x.online && !x.url && (!x.contatto || Date.now() / 1000 - x.contatto < 300);
+  const stat = x.state === 'attivo'
+    ? x.online ? `<span class="feddot ok"></span>In linea · ${via} · ultimo contatto ${fedAgo(x.contatto)}`
+      : quiet ? `<span class="feddot wait"></span>Collegato · aspetto il suo canale` : `<span class="feddot err"></span>Non risponde · ultimo contatto ${fedAgo(x.contatto)}`
+    : x.state === 'richiesta' ? `<span class="feddot wait"></span>Vuole collegarsi a questo server`
+    : x.state === 'attesa' ? `<span class="feddot wait"></span>Aspetto che accetti` : `<span class="feddot err"></span>Collegamento chiuso dall'altro server`;
+  let body = '';
+  if (x.state === 'richiesta') body = `<p>Chiedi a ${esc(x.owner || 'chi gestisce ' + x.name)} che codice vede sul suo schermo: se è uguale a questo, accetta.</p>
+      <p class="safety">${esc(x.safety)}</p>
+      <div class="row"><button class="btn primary" data-act="fedok" data-id="${id}" data-name="${nm}" data-safety="${esc(x.safety)}">${ic('check')} Accetta</button><button class="btn" data-act="fedrm" data-id="${id}" data-name="${nm}">Rifiuta</button></div>`;
+  else if (x.state === 'attesa') body = `<p>Confrontate il codice di sicurezza: deve essere uguale sui due schermi. Appena ${nm} accetta, questa scheda passa in linea da sola.</p><p class="safety">${esc(x.safety)}</p>`;
+  else if (x.state === 'attivo' && !x.online) body = quiet
+    ? `<p>${nm} non ha un indirizzo pubblico: si collega lui, aprendo un canale verso questo server. Di solito entro un minuto.</p>`
+    : `<p class="federr">${esc(x.error || 'Nessuna risposta: forse è spento o la rete è cambiata. Armony riprova da sola.')}</p>`;
+  else if (x.state === 'attivo' && recv && !x.sync) body = `<div class="fedsync"><b>Siete collegati. Vuoi copiare qui delle playlist di ${nm}?</b>
+      <small>Le playlist che scegli si copiano su questo server, brani compresi, e restano uguali alle sue. Tutto il resto della sua libreria lo cerchi e lo ascolti in streaming attraverso il collegamento, senza copiare niente.</small>
+      <div class="row"><button class="btn primary" data-act="fedpl" data-id="${id}" data-name="${nm}">${ic('list')} Scegli le playlist</button><button class="btn" data-act="fedstream" data-id="${id}">No, ascolto in streaming</button></div></div>`;
+  const meta = x.state === 'attivo' ? `<p class="fedmeta">${[`${x.songs} brani, ${x.albums} album${x.app ? ' · Armony ' + esc(x.app) : ''}${x.synced ? ' · catalogo ' + fedAgo(x.synced) : ''}`,
+    !recv ? 'Lui vede la tua libreria; tu non cerchi nella sua.' : x.sync === 'playlist' ? `Copi le playlist che scegli, il resto in streaming. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Playlist</button>`
+      : x.sync === 'stream' ? `Ascolti in streaming, senza copiare. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Copia delle playlist</button>` : '',
+    `Codice di sicurezza <span class="safety sm">${esc(x.safety)}</span>`].filter(Boolean).join('<br>')}</p>` : '';
+  const foot = x.state === 'attivo' ? `<div class="fedfoot">${x.dir ? `<select class="fedverso" data-id="${id}" aria-label="Verso del collegamento con ${nm}">${[['entrambi', 'Ci vediamo a vicenda'], ['offro', 'Solo lui vede me'], ['ricevo', 'Solo io vedo lui']].map(([v, l]) => `<option value="${v}" ${x.dir === v ? 'selected' : ''}>${l}</option>`).join('')}</select>` : ''}
+      <button class="icon-btn" data-act="fedsync" data-id="${id}" aria-label="Riscarica il catalogo" title="Riscarica il catalogo">${ic('repeat')}</button><button class="icon-btn" data-act="fedrm" data-id="${id}" data-name="${nm}" aria-label="Scollega" title="Scollega">${ic('trash')}</button></div>`
+    : x.state !== 'richiesta' ? `<div class="fedfoot"><button class="btn sm" data-act="fedrm" data-id="${id}" data-name="${nm}">${x.state === 'attesa' ? 'Annulla la richiesta' : 'Togli'}</button></div>` : '';
+  return `<div class="fedcard${x.state === 'richiesta' || (x.state === 'attivo' && recv && !x.sync && x.online) ? ' ask' : ''}">
+    <div class="fedcard-head"><span class="fedav">${esc((x.name || '?')[0].toUpperCase())}</span><span class="grow"><b>${nm}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><span class="fedstat">${stat}</span></span></div>
+    ${x.state === 'richiesta' || x.state === 'attesa' || x.state === 'attivo' && !x.online && (quiet || !x.synced) ? fedSteps(x) : ''}${body}${meta}${foot}</div>`;
+}
 async function refreshFed() {
   const box = $('#fedBox'); if (!box) return;
+  clearTimeout(fedT);
   let f; try { f = await dlApi('/api/fed'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
   if (!box.isConnected) return;  // nel frattempo si è cambiata pagina
-  const st = x => x.state === 'attivo' ? (x.online ? ['in linea', 'ok'] : ['non raggiungibile', 'err']) : FED_STATE[x.state] || [x.state, ''];
-  const hopsTxt = { 1: 'Solo i server collegati', 2: 'Anche gli amici degli amici', 3: 'Fino a tre passaggi' };
-  box.innerHTML = `${f.ready ? '' : '<div class="panel" style="margin-bottom:var(--s3)"><p style="margin:0">Per mostrare la tua libreria agli altri server serve l\'amministratore di Navidrome: inseriscilo in Utenti → Registrazione.</p></div>'}
-    <div class="panel stack">
-      <p style="margin:0">Questo server è <b>${esc(f.me.nome)}</b>: ${f.me.songs} brani, ${f.me.albums} album. Impronta <code>${esc(f.me.short)}</code></p>
-      <div class="grid2"><label class="f">Proprietario<input type="text" id="fedOwner" value="${esc(f.settings.owner)}" placeholder="Il tuo nome" maxlength="60"></label>
-        <label class="f">Indirizzo per gli altri server<input type="url" id="fedUrl" value="${esc(f.settings.url)}" placeholder="${esc(/^https?:\/\/(127\.|localhost|\[::1\])/.test(fedBase()) ? 'Nessuno: si aggancia agli altri' : fedBase())}" autocapitalize="none" autocomplete="off"></label></div>
-      <p class="sub" style="margin:0;font-size:.88rem">Se questo server non si raggiunge da fuori (rete di casa senza porte aperte, CGNAT, firewall), lascia vuoto l'indirizzo: incolla l'invito di un server raggiungibile e la tua libreria passa da lui.</p>
-      <label class="check"><input type="checkbox" id="fedTrans" ${f.settings.transitive ? 'checked' : ''}><span>Visibile agli amici degli amici<small>Chi è collegato a un tuo collegato trova e ascolta la tua libreria passando da lui. Spento: solo i server che colleghi tu.</small></span></label>
-      <label class="f">Dove cercare<select id="fedHops">${[1, 2, 3].map(h => `<option value="${h}" ${f.settings.hops === h ? 'selected' : ''}>${hopsTxt[h]}</option>`).join('')}</select></label>
-    </div>
-    <div class="row" style="margin:var(--s4) 0 var(--s2)"><button class="btn primary" data-act="fedinv">${ic('plus')} Crea un invito</button><button class="btn" data-act="fedjoin">Incolla un invito</button></div>
-    ${f.nodes.length ? f.nodes.map(x => { const [l, c] = st(x); return `<div class="list-item fednode">
-      <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${esc(x.url || 'senza indirizzo: passa dal suo canale')}${x.state === 'attivo' ? ` · ${x.songs} brani, ${x.albums} album` : ''}${x.app ? ' · Armony ' + esc(x.app) : ''}${x.synced ? ' · aggiornato ' + new Date(x.synced * 1000).toLocaleString() : ''}</small>
-        ${x.reach === 'canale' ? `<small style="display:block">${ic('wifi')} Non si raggiunge da fuori: parla con te dal suo canale, la sua libreria arriva lo stesso</small>` : x.reach === 'uscita' ? `<small style="display:block">${ic('wifi')} Questo server non si raggiunge da fuori: resta collegato in uscita, la tua libreria passa dal canale</small>` : ''}
-        ${x.error ? `<small style="display:block;color:var(--danger)">${esc(x.error)}</small>` : ''}<small style="display:block">Codice di sicurezza <span class="safety">${esc(x.safety)}</span></small></span>
-      <span class="tag ${c}">${esc(l)}</span>
-      ${x.state === 'richiesta' ? `<button class="btn sm primary" data-act="fedok" data-id="${esc(x.id)}" data-name="${esc(x.name)}" data-safety="${esc(x.safety)}">Accetta</button>` : ''}
-      ${x.state === 'attivo' && x.dir ? `<select class="fedverso" data-id="${esc(x.id)}" aria-label="Verso del collegamento con ${esc(x.name)}" style="width:auto">${[['entrambi', 'Ci vediamo a vicenda'], ['offro', 'Solo lui vede me'], ['ricevo', 'Solo io vedo lui']].map(([v, l]) => `<option value="${v}" ${x.dir === v ? 'selected' : ''}>${l}</option>`).join('')}</select>` : ''}
-      ${x.state === 'attivo' ? `<button class="icon-btn" data-act="fedsync" data-id="${esc(x.id)}" aria-label="Aggiorna ora" title="Aggiorna ora">${ic('repeat')}</button>` : ''}
-      <button class="icon-btn" data-act="fedrm" data-id="${esc(x.id)}" data-name="${esc(x.name)}" aria-label="${x.state === 'richiesta' ? 'Rifiuta' : 'Scollega'}">${ic('trash')}</button></div>`; }).join('')
-      : '<div class="empty">Nessun server collegato. Crea un invito e mandalo a un amico che ha Armony, oppure incolla il suo.</div>'}`;
-  box.querySelectorAll('.fedverso').forEach(el => el.onchange = async () => {
-    try { await dlApi(`/api/fed/nodes/${el.dataset.id}/verso`, { method: 'PUT', body: JSON.stringify({ dir: el.value }) }); toast({ entrambi: 'Le due librerie si vedono a vicenda.', offro: 'Lui vede la tua libreria, tu non cerchi più nella sua.', ricevo: 'Vedi la sua libreria, lui non vede più la tua.' }[el.value]); refreshFed(); }
-    catch (e) { toast(e.message); refreshFed(); }
-  });
-  const save = async body => { try { await dlApi('/api/fed/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('Salvato.'); } catch (e) { toast(e.message); refreshFed(); } };
-  $('#fedOwner').onchange = e => save({ owner: e.target.value.trim() });
-  $('#fedUrl').onchange = e => save({ url: e.target.value.trim() });
-  $('#fedTrans').onchange = e => save({ transitive: e.target.checked });
-  $('#fedHops').onchange = e => save({ hops: +e.target.value });
+  const head = `<span class="fedav">${ic('home')}</span><span class="grow"><b>${esc(f.me.nome)}</b><small>${f.me.songs} brani · ${f.me.albums} album · impronta <code>${esc(f.me.short)}</code></small></span>
+    <span class="tag ${f.settings.url ? 'ok' : ''}">${f.settings.url ? 'Raggiungibile da fuori' : 'Senza indirizzo'}</span>`;
+  if (!box.dataset.on) {
+    const hopsTxt = { 1: 'Solo i server collegati', 2: 'Anche gli amici degli amici', 3: 'Fino a tre passaggi' };
+    box.dataset.on = 1;
+    box.innerHTML = `${f.ready ? '' : '<div class="panel"><p style="margin:0">Per mostrare la tua libreria agli altri server serve l\'amministratore di Navidrome: inseriscilo in Utenti → Registrazione.</p></div>'}
+      <div class="panel fedme"><div class="fedme-head" id="fedHead">${head}</div>
+        <div class="grid2"><label class="f">Proprietario<input type="text" id="fedOwner" value="${esc(f.settings.owner)}" placeholder="Il tuo nome" maxlength="60"></label>
+          <label class="f">Indirizzo per gli altri server<input type="url" id="fedUrl" value="${esc(f.settings.url)}" placeholder="${esc(fedLoop.test(fedBase()) ? 'Nessuno: si aggancia agli altri' : fedBase())}" autocapitalize="none" autocomplete="off"></label></div>
+        <p class="fedmeta" style="margin:0">Se questo server non si raggiunge da fuori (nessun IP pubblico, porte chiuse, firewall), lascia vuoto l'indirizzo: usa l'invito di un server raggiungibile e la tua libreria passa da lui.</p>
+        <details class="fedopt"><summary>Visibilità e ricerca</summary>
+          <label class="check"><input type="checkbox" id="fedTrans" ${f.settings.transitive ? 'checked' : ''}><span>Visibile agli amici degli amici<small>Chi è collegato a un tuo collegato trova e ascolta la tua libreria passando da lui. Spento: solo i server che colleghi tu.</small></span></label>
+          <label class="f">Dove cercare<select id="fedHops">${[1, 2, 3].map(h => `<option value="${h}" ${f.settings.hops === h ? 'selected' : ''}>${hopsTxt[h]}</option>`).join('')}</select></label></details></div>
+      <div class="fedacts">
+        <button class="fedtile primary" data-act="fedinv"><span class="fedav">${ic('plus')}</span><span><b>Invita un server</b><small>Crei un codice da mandare a chi vuoi collegare. Lo crea il server raggiungibile da fuori.</small></span></button>
+        <button class="fedtile" data-act="fedjoin"><span class="fedav">${ic('link')}</span><span><b>Usa un invito</b><small>Incolli il codice che ti ha mandato un altro server. Va bene anche senza un indirizzo pubblico.</small></span></button></div>
+      <h3 class="fedh">Collegamenti</h3><div id="fedNodes"></div>`;
+    box.addEventListener('change', async e => {
+      const el = e.target.closest('.fedverso'); if (!el) return;
+      try { await dlApi(`/api/fed/nodes/${el.dataset.id}/verso`, { method: 'PUT', body: JSON.stringify({ dir: el.value }) }); toast({ entrambi: 'Le due librerie si vedono a vicenda.', offro: 'Lui vede la tua libreria, tu non cerchi più nella sua.', ricevo: 'Vedi la sua libreria, lui non vede più la tua.' }[el.value]); }
+      catch (err) { toast(err.message); }
+      refreshFed();
+    });
+    const save = async body => { try { await dlApi('/api/fed/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('Salvato.'); } catch (e) { toast(e.message); } refreshFed(); };
+    $('#fedOwner').onchange = e => save({ owner: e.target.value.trim() });
+    $('#fedUrl').onchange = e => save({ url: e.target.value.trim() });
+    $('#fedTrans').onchange = e => save({ transitive: e.target.checked });
+    $('#fedHops').onchange = e => save({ hops: +e.target.value });
+  } else $('#fedHead').innerHTML = head;
+  // ogni 5 secondi (15 con la pagina nascosta) si rilegge lo stato: chi aspetta una conferma la vede arrivare da sola.
+  // Non mentre si usa il menu del verso: si chiuderebbe in mano
+  const list = $('#fedNodes');
+  if (!(list.contains(document.activeElement) && document.activeElement.matches('select'))) list.innerHTML = f.nodes.length ? f.nodes.map(fedCard).join('')
+    : '<div class="empty">Nessun server collegato. Invita un amico che ha Armony, oppure usa il suo invito.</div>';
+  fedT = setTimeout(() => box.isConnected && refreshFed(), document.hidden ? 15000 : 5000);
 }
 function fedInviteSheet(code) {
   const d = $('#dlg2'); d.className = '';
-  d.innerHTML = `<h3>Invito per un altro server</h3><p class="sub" style="margin-bottom:var(--s3)">Mandalo all'amministratore dell'altro server: lo incolla in Librerie collegate → Incolla un invito. Vale una volta sola, per 24 ore. Poi qui compare la sua richiesta da accettare.</p>
+  d.innerHTML = `<h3>Invito per un altro server</h3><p class="sub" style="margin-bottom:var(--s3)">Mandalo all'amministratore dell'altro server: lo incolla in Impostazioni → Federazione → Usa un invito. Vale una volta sola, per 24 ore. Poi in Federazione compare la sua richiesta da accettare, e ti arriva una notifica.</p>
     <div class="code" style="font-size:.78rem;word-break:break-all">${esc(code)}</div><div id="fedQr" style="margin:var(--s3) 0"></div>
     <div class="row"><button class="btn primary" id="fedCopy">${ic('share')} ${navigator.share ? 'Condividi' : 'Copia'}</button><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
   $('#fedCopy').onclick = async () => {
@@ -4881,7 +4927,7 @@ function fedInviteSheet(code) {
 }
 function fedJoinSheet() {
   const d = $('#dlg2'); d.className = '';
-  d.innerHTML = `<h3>Incolla un invito</h3><p class="sub" style="margin-bottom:var(--s3)">Il codice che ti ha mandato l'amministratore dell'altro server (inizia con ARF1).</p>
+  d.innerHTML = `<h3>Usa un invito</h3><p class="sub" style="margin-bottom:var(--s3)">Il codice che ti ha mandato l'amministratore dell'altro server (inizia con ARF1).</p>
     <label class="f">Invito<textarea id="fedCode" rows="4" autocapitalize="none" autocomplete="off" spellcheck="false"></textarea></label>
     <div class="row" style="margin-top:var(--s3)"><button class="btn primary" id="fedGo">Collega</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div>`;
   $('#fedGo').onclick = async () => {
@@ -5456,6 +5502,8 @@ view.addEventListener('click', async e => {
 
 Codice di sicurezza: ${el.dataset.safety}
 Deve essere uguale a quello che vede l'altro amministratore.`)) { await dlApi(`/api/fed/nodes/${el.dataset.id}/accept`, { method: 'POST' }); toast('Collegato: la sua libreria arriva fra pochi secondi.'); setTimeout(refreshFed, 2500); refreshFed(); } break;
+      case 'fedpl': await dlApi(`/api/fed/nodes/${el.dataset.id}/sync`, { method: 'PUT', body: JSON.stringify({ mode: 'playlist' }) }); netPlaylists(el.dataset.id, el.dataset.name); refreshFed(); break;
+      case 'fedstream': await dlApi(`/api/fed/nodes/${el.dataset.id}/sync`, { method: 'PUT', body: JSON.stringify({ mode: 'stream' }) }); toast('Va bene: la sua libreria la trovi in Cerca e la ascolti in streaming.'); refreshFed(); break;
       case 'fedsync': await dlApi(`/api/fed/nodes/${el.dataset.id}/refresh`, { method: 'POST' }); refreshFed(); toast('Aggiornato.'); break;
       case 'fedrm': if (confirm(`Scollegare ${el.dataset.name}? Non vedrete più le vostre librerie; i brani già copiati restano.`)) { await dlApi(`/api/fed/nodes/${el.dataset.id}`, { method: 'DELETE' }); refreshFed(); } break;
       case 'usrrevoke': if (confirm(`${Disp.ok(srv()) ? `Revocare tutti i dispositivi di ${el.dataset.user}? Smettono subito di funzionare e per rientrare servirà un'approvazione.` : `Disconnettere ${el.dataset.user} da tutti i dispositivi? Dovrà rifare l'accesso.`}`)) { await dlApi(`/api/users/${encodeURIComponent(el.dataset.user)}/sessions`, { method: 'DELETE' }); refreshUsers(); } break;
