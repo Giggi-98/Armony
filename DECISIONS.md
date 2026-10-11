@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Trasloco: i dispositivi seguono il nuovo indirizzo pubblico
+
+**Contesto:** passando dal Funnel (`…ts.net:10000`) a `armony-net.ddns.net`, app e browser degli amici restano sull'indirizzo vecchio.
+**Scelta:** `Trasloco` (dispositivi.js): se `me.public` ha un altro host HTTPS e lì `/api/me` con la stessa sessione risponde lo stesso utente, l'app cambia `s.url` da sola; il browser (il suo localStorage è legato all'origine) mostra «Passa lì», crea un codice di abbinamento e apre `<nuovo>/#/abbina/<codice>.via`, che si abbina da solo. Indirizzi IP o http esclusi.
+**Alternative scartate:** chiedere a ognuno di modificare il server a mano (gli amici non sanno cosa sia); reindirizzare dal vecchio indirizzo al nuovo (il browser arriverebbe senza accesso e chiederebbe la password); spostare i dati del browser fra origini (non si può).
+**Conseguenze:** nel browser il vecchio dispositivo resta nell'elenco accanto al nuovo, finché non lo si revoca. Il Funnel va tenuto acceso finché gli APK vecchi non si sono aggiornati.
+**Da rivedere se:** si cambia di nuovo indirizzo e si vuole spegnere subito il vecchio.
+
 ## 2026-10-11 — HTTPS diretto con Caddy (profilo "https") al posto del Funnel; pagina d'accesso a tutta pagina
 
 **Contesto:** i registri di sessione mostrano blocchi sulla strada fra il server e i dispositivi che passano da Tailscale Funnel. L'utente ha un DynDNS (`armony-net.ddns.net`) che punta al suo firewall, che può inoltrare la 443. Sulla macchina nginx (servizi non di Armony) occupa 80, 443, 8443 (n8n, senza filtro sul nome) e 8444.

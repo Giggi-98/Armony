@@ -59,6 +59,8 @@ Rispetto a Tailscale Funnel la strada è diretta: niente nodi intermedi (dai reg
 
 Poi, in Armony, **Impostazioni → Server musicali → Indirizzo pubblico di questo server** (solo l'amministratore): scrivi l'indirizzo HTTPS, per esempio `https://armony.nome-rete.ts.net`. Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati usano quello, anche se in casa apri Armony con un altro indirizzo.
 
+**Se cambi l'indirizzo pubblico, i dispositivi lo seguono da soli.** L'app Android, al primo avvio dopo il cambio, controlla che al nuovo indirizzo risponda lo stesso server e si sposta, con un avviso. Il browser mostra la barra «Armony si è spostato»: «Passa lì» apre il nuovo indirizzo già abbinato, senza password (il browser salva l'accesso per indirizzo, quindi serve questo passaggio). Chi in casa usa l'indirizzo locale resta dov'è. Tieni acceso il vecchio indirizzo finché tutti sono passati: le app vecchie lo seguono solo dopo essersi aggiornate.
+
 ## Funzioni
 
 ### Ascolto

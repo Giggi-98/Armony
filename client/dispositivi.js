@@ -310,10 +310,53 @@ const Disp = {
     d.showModal(); qrInto($('#pairQr'), link).catch(() => {});
   }
 };
-// link di abbinamento (<server>/#/abbina/<codice>): apre "Con un codice" con indirizzo e codice già compilati
+// link di abbinamento (<server>/#/abbina/<codice>): apre "Con un codice" con indirizzo e codice già compilati.
+// Con ".via" in fondo (trasloco, qui sotto) l'abbinamento parte da solo: il codice l'ha creato un mio dispositivo un attimo fa
 function vAbbina(code) {
+  const auto = /\.via$/.test(code || ''); code = String(code || '').replace(/\.via$/, '');
   if (!S.servers.length) noServer(); else view.innerHTML = '';
-  serverDialog(null, { url: NATIVE ? '' : location.origin, mode: 'codice', code: code || '' });
+  serverDialog(null, { url: NATIVE ? '' : location.origin, mode: 'codice', code });
+  if (auto) setTimeout(() => $('#sSave')?.click(), 100);
 }
+
+/* ---------------- trasloco: il server ha cambiato indirizzo pubblico ----------------
+   Quando l'amministratore cambia l'indirizzo pubblico (es. da Tailscale Funnel a un nome suo), i dispositivi lo seguono.
+   Prima si controlla che al nuovo indirizzo risponda lo stesso server con la stessa sessione (/api/me, stesso utente).
+   L'app cambia indirizzo da sola. Il browser no: ciò che ha salvato vale solo per l'indirizzo della pagina, quindi
+   propone «Passa lì» e ci arriva già abbinato, con un codice di abbinamento creato da qui (niente password).
+   Gli indirizzi di casa (IP, http) non si toccano: in casa si può restare sull'indirizzo locale */
+const Trasloco = {
+  async check() {
+    for (const s of S.servers) {
+      const pub = s.me?.public; if (!pub || s.local || !s.session || s.revoked || s.pending) continue;
+      let cur, nu; try { cur = new URL(absUrl(s.url)); nu = new URL(pub); } catch { continue; }
+      if (cur.host === nu.host || cur.protocol !== 'https:' || nu.protocol !== 'https:' || /^[\d.]+$|^\[/.test(cur.hostname)) continue;
+      const me = await fetch(nu.origin + '/api/me', { headers: { 'X-Token': s.session }, signal: AbortSignal.timeout?.(10000) }).then(r => r.ok ? r.json() : null).catch(() => null);
+      if (!me || String(me.user || '').toLowerCase() !== String(s.user || '').toLowerCase()) continue;  // non è lo stesso server, o non risponde
+      if (NATIVE) {
+        s.url = nu.origin; if (s.shareBase && new URL(s.shareBase).host === cur.host) s.shareBase = '';
+        persistServers(); toast(`${s.name} ha un indirizzo nuovo (${nu.host}): aggiornato.`, 6000);
+        if (s.id === S.active) Live.connect?.();
+      } else if (s.id === S.active && location.origin === cur.origin) this.offer(s, nu);
+    }
+  },
+  offer(s, nu) {
+    if ($('#moveBar') || sessionStorage.getItem('armony:nomove') === nu.host) return;
+    const b = document.createElement('div'); b.id = 'moveBar'; b.className = 'movebar'; b.setAttribute('role', 'status');
+    b.innerHTML = `${ic('globe')}<span class="grow"><b>Armony si è spostato</b><small>Il nuovo indirizzo è ${esc(nu.host)}: più veloce e stabile.</small></span>
+      <button class="btn sm primary" id="mvGo">Passa lì</button><button class="icon-btn" id="mvNo" aria-label="Non ora">${ic('close')}</button>`;
+    document.body.append(b);
+    $('#mvNo').onclick = () => { sessionStorage.setItem('armony:nomove', nu.host); b.remove(); };
+    $('#mvGo').onclick = async e => {
+      e.currentTarget.disabled = true;
+      try {
+        const x = await Disp.api('/api/dispositivi/abbina', { method: 'POST', body: JSON.stringify({ t: s.tok, s: s.salt }) });
+        location.href = `${nu.origin}/#/abbina/${encodeURIComponent(x.code)}.via`;
+      } catch (er) { e.currentTarget.disabled = false; toast(er.message); }
+    };
+  }
+};
+setTimeout(async () => { const s = srv(); if (s?.session && !s.local) await Disp.fresh(s, true).catch(() => {}); Trasloco.check(); }, 5000);
+setInterval(() => !document.hidden && Trasloco.check(), 3600000);
 // il gettone scade in 12-24 ore: lo si rinnova prima, e subito se l'app torna in primo piano dopo tanto
 setInterval(() => { const s = srv(); if (s?.session && !document.hidden) Disp.fresh(s); }, 10 * 60000);
