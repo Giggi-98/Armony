@@ -13,7 +13,8 @@ manuale utente, ma anche l'unica descrizione completa delle funzioni. Se il
 codice lo contraddice, fermati e segnalalo.
 
 ```
-docker-compose.yml   navidrome (4533) · armony (8080, rete host) · turn (profilo opzionale)
+docker-compose.yml   navidrome (4533) · armony (8080, rete host) · turn (profilo opzionale); porte variabili da .env
+installa.sh          installatore testuale: sceglie porte libere e le scrive in .env (il compose non si tocca)
 server/app.py        Flask + waitress, un solo file. Docstring in testa = mappa delle rotte
 client/              HTML + JS puro, nessun bundler, nessuna compilazione
   armony.js          Parte 1: utilità, API Subsonic, viste · Parte 2: database locale, …

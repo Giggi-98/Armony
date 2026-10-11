@@ -64,6 +64,15 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 
 Serve un computer **Linux** sempre acceso (Raspberry Pi 4/5, NAS, vecchio PC, VPS). Su Mac o Windows leggi la nota in fondo.
 
+**Con l'installatore** (Ubuntu/Debian, anche via SSH): fa le domande e poi tutto il resto da solo, Docker compreso; se una porta è occupata ne sceglie un'altra libera.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Giggi-98/Armony/main/installa.sh -o installa.sh
+sudo bash installa.sh
+```
+
+**A mano:**
+
 ```sh
 # 1. Docker (se non c'è già), poi esci e rientra dalla sessione
 curl -fsSL https://get.docker.com | sudo sh
@@ -85,7 +94,7 @@ docker compose up -d
 sudo deploy/install-updater.sh
 ```
 
-6. Apri `http://IP-DEL-SERVER:4533` e crea l'**amministratore di Navidrome** (nome utente e password).
+6. Crea l'**amministratore di Navidrome** (nome utente e password). Navidrome risponde solo sulla macchina del server, così nessuno lo raggiunge saltando i controlli di Armony: dal tuo computer apri un tunnel con `ssh -L 4533:127.0.0.1:4533 utente@IP-DEL-SERVER` e vai su `http://localhost:4533`.
 7. Apri `http://IP-DEL-SERVER:8080`: questa è Armony. Tocca **Aggiungi server** (l'indirizzo è già compilato) ed entra con l'utente appena creato.
 8. In Armony: **Impostazioni → Utenti → Registrazione**, inserisci una volta le stesse credenziali dell'amministratore. Servono per far creare un account agli amici con un invito e per collegare il tuo server a quello di altri.
 9. Copia la tua musica in `musica/`: Navidrome la trova da solo in pochi minuti (o subito con il tasto di scansione).
@@ -96,7 +105,7 @@ Fatto: da qui in avanti gli aggiornamenti arrivano con il tasto **Aggiorna** in 
 
 **Mac o Windows (Docker Desktop):** nel `docker-compose.yml` togli `network_mode: host` dal servizio `armony`, aggiungi `ports: ["8080:8080"]`, metti `NAVIDROME_URL: "http://navidrome:4533"` e `ARMONY_MULTICAST: "0"`. Si perde solo la scoperta automatica in casa (multicast).
 
-**Porte:** 8080 (Armony), 4533 (Navidrome); il servizio `pot` (aiuta i download da YouTube) ascolta solo in locale. Facoltativo: `docker compose --profile turn up -d` avvia un server TURN per la Jam dietro reti mobili difficili.
+**Porte:** 8080 (Armony); Navidrome (4533) e il servizio `pot` (4416, aiuta i download da YouTube) ascoltano solo in locale. Si cambiano in `.env` (`ARMONY_PORT`, `NAVIDROME_PORT`, `POT_PORT`, …, vedi `.env.example`). Facoltativo: `docker compose --profile turn up -d` avvia un server TURN per la Jam dietro reti mobili difficili.
 
 ---
 

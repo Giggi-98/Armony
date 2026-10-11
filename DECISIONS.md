@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Installatore testuale; porte in .env invece che riscritte nel docker-compose
+**Contesto:** installare Armony su un altro server voleva sei passi a mano, e le porte fisse (8080, 4533, 4416, 8460, 3478…) su una macchina con altri servizi si scontrano.
+**Scelta:** `installa.sh` nella root, in bash, con `whiptail` se c'è e domande semplici se no (via SSH e anche con `curl … | bash`). Le porte sono variabili di `docker-compose.yml` con le predefinite di sempre (`ARMONY_PORT`, `NAVIDROME_PORT`, `POT_PORT`, `ARMONY_CADDY_ADMIN_PORT`, `TURN_*`); l'installatore cerca la prima libera da lì in su (`ss` più le porte pubblicate dai container fermi) e la scrive in `.env`, insieme a `COMPOSE_PROFILES` per https/turn. L'amministratore di Navidrome si crea con `POST /auth/createAdmin` (vale solo finché non ci sono utenti). Il clone parte dall'ultimo tag, come l'updater. Con l'occasione: `ARMONY_DOMAIN` del servizio `https` non è più obbligatorio (`:?`), perché compose valuta anche i servizi dei profili spenti e con il valore vuoto di `.env.example` ogni `docker compose up` falliva; tolto `--no-tlsv1_1`, che `coturn:latest` non riconosce più (il TURN non partiva).
+**Alternative scartate:** riscrivere `docker-compose.yml` con le porte trovate: è un file tracciato, e `armony-update.sh` rifiuta di aggiornare con modifiche locali. Un `docker-compose.override.yml`: le liste `ports` si sommano invece di sostituirsi, e le porte di Armony (rete host) sono comunque variabili d'ambiente. `dialog` al posto di `whiptail`: non è installato di base su Ubuntu.
+**Conseguenze:** in produzione, a `.env` invariato, la configurazione resta identica (unica differenza: `ARMONY_CADDY_ADMIN_PORT=2019` nel servizio `https`, uguale al predefinito di Caddy). Le porte di HTTPS e TURN si scelgono da sole ma non si correggono a mano dall'installatore (si fa in `.env`). La 47777 UDP del multicast resta fissa (nel codice, con `SO_REUSEADDR`). Collaudato su Ubuntu 24.04 in un container con Docker dentro: non con systemd, quindi il ramo `install-updater.sh` e quello «Docker manca» (get.docker.com) non sono passati dal collaudo.
+**Da rivedere se:** Armony va installata anche fuori da Debian/Ubuntu (apt), o il server smette di usare la rete host e le porte diventano mappature di Docker.
+
 ## 2026-10-11 — Telefono: avatar a destra, intestazione trasparente, dialog che non cambiano forma chiudendosi
 **Contesto:** sul telefono l'avatar (menu del profilo) stava a sinistra del marchio, come Spotify; sulle pagine con la
 fascia colorata (album, playlist) l'intestazione restava del colore del fondo, con uno stacco netto. Un menu che ne

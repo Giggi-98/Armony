@@ -7,6 +7,7 @@ La musica della vostra compagnia, dai vostri server. Ascolto in più qualità, p
 ```
 armony/
 ├── docker-compose.yml   avvia tutto con un comando (Navidrome, Armony e `pot`, che aiuta i download da YouTube)
+├── installa.sh          installatore da terminale: fa tutti i passi qui sotto da solo
 ├── client/              l'app (HTML + JS, nessuna compilazione)
 │   ├── index.html       struttura e stile
 │   ├── armony.js        libreria, lettore, offline, statistiche, download
@@ -24,6 +25,17 @@ armony/
 ## Installazione
 
 Serve un computer Linux sempre acceso con Docker: un Raspberry Pi 4/5, un NAS, un vecchio PC o un VPS.
+
+**Il modo più semplice: l'installatore.** Su Ubuntu o Debian, anche collegato in SSH:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Giggi-98/Armony/main/installa.sh -o installa.sh
+sudo bash installa.sh
+```
+
+Fa qualche domanda (nome del server, amministratore, HTTPS con un nome tuo, TURN) e fa tutto da solo: installa Docker se manca, scarica l'ultima versione, crea le cartelle, genera le password, **controlla quali porte sono libere e se una è occupata ne sceglie un'altra**, crea l'amministratore di Navidrome, avvia tutto e abilita il tasto «Aggiorna». Alla fine dice a quale indirizzo aprire Armony. Le porte scelte finiscono in `.env` (`ARMONY_PORT`, `NAVIDROME_PORT`, …): `docker-compose.yml` resta quello del repository, così gli aggiornamenti continuano a funzionare. Si può rilanciare quando vuoi (per esempio per attivare il TURN): tiene le scelte già fatte. Con `--si` non fa domande e usa le risposte predefinite.
+
+A mano, passo per passo:
 
 0. Se sul server non c'è Docker: `curl -fsSL https://get.docker.com | sudo sh` e `sudo usermod -aG docker $USER`, poi esci e rientra.
 1. Scarica Armony sul server con `git clone https://github.com/Giggi-98/Armony.git armony`, entra nella cartella e crea le cartelle dei dati con `mkdir -p musica video federati` (prima del primo avvio: altrimenti le crea Docker come root e per copiarci la musica ti servirebbe `sudo`).
@@ -285,7 +297,7 @@ Navidrome funziona anche con app già pronte, collegate allo stesso server e all
 
 **iPhone: la musica si ferma a schermo bloccato.** Attiva "Modalità compatibile" in Impostazioni. Perdi equalizzatore, dissolvenza e trasmissione nella Jam, ma il resto funziona.
 
-**Jam via 5G: gli ospiti restano su "collegamento…".** L'operatore blocca il collegamento diretto. Attiva il TURN (vedi sopra) e apri sul router le porte 3478 e 49160-49200 UDP verso il server.
+**Jam via 5G: gli ospiti restano su "collegamento…".** L'operatore blocca il collegamento diretto. Attiva il TURN (vedi sopra) e apri sul router le porte 3478 e 49160-49200 UDP verso il server (o quelle scelte dall'installatore: `TURN_PORT`, `TURN_MIN_PORT`-`TURN_MAX_PORT` in `.env`).
 
 **Le Jam vicine non compaiono.** Il multicast richiede la rete "host" di Docker su Linux, e alcuni router con "isolamento client" lo bloccano. Il link d'invito funziona sempre.
 

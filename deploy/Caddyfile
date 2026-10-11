@@ -8,6 +8,8 @@
 # Il certificato si prende con la sfida TLS-ALPN sulla 443 (quella inoltrata): niente porta 80.
 {
 	https_port {$ARMONY_HTTPS_PORT:8460}
+	# API di amministrazione di Caddy, solo locale: un altro Caddy sulla stessa macchina usa già la 2019
+	admin 127.0.0.1:{$ARMONY_CADDY_ADMIN_PORT:2019}
 	# la 80 di questa macchina può essere di un altro servizio: Caddy non la tocca
 	http_port {$ARMONY_HTTP_PORT:8462}
 	auto_https disable_redirects
