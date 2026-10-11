@@ -13,3 +13,5 @@ skills-lock.json
 __pycache__/
 # esportazioni di Exportify: dati personali (anche l'ID utente Spotify), mai su git
 spotify_playlists/
+# schermate mandate durante il lavoro: restano in locale
+/image*.png
