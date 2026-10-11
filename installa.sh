@@ -7,12 +7,16 @@
 #   Su un server nuovo:           curl -fsSL https://raw.githubusercontent.com/Giggi-98/Armony/main/installa.sh -o installa.sh
 #                                 sudo bash installa.sh
 #   Senza domande (predefiniti):  sudo bash installa.sh --si
+#   Disinstallare:                sudo bash installa.sh --disinstalla   (chiede sempre; musica e dati restano, se non dici il contrario)
 #
 # Si può rilanciare: legge il .env che trova e tiene le scelte già fatte.
 set -euo pipefail
 
 REPO_URL="https://github.com/Giggi-98/Armony.git"
-SI=0; [ "${1:-}" = "--si" ] && SI=1
+SI=0; MODO=installa
+for a in "$@"; do case "$a" in --si) SI=1;; --disinstalla) MODO=disinstalla;; *) echo "Opzione sconosciuta: $a" >&2; exit 1;; esac; done
+# la disinstallazione chiede sempre conferma
+[ "$MODO" = disinstalla ] && SI=0
 [ "$(id -u)" = 0 ] || { echo "Lancialo con sudo: sudo bash $0" >&2; exit 1; }
 # con "curl | bash" stdin è lo script: le risposte si leggono dal terminale
 [ -t 0 ] || { [ "$SI" = 1 ] || exec </dev/tty; }
@@ -70,7 +74,54 @@ libera() {
   PRESE="$PRESE$p "; printf -v "$1" '%s' "$p"
 }
 
+# --- disinstallazione ----------------------------------------------------------------------------------------------
+disinstalla() {
+  local def dim k
+  # la cartella dei container accesi, se ci sono; altrimenti quella dello script o ~/armony
+  def=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' armony-app 2>/dev/null || true)
+  [ -n "$def" ] || { def=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd); [ -f "$def/docker-compose.yml" ] || def="$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)/armony"; }
+  DIR=$(realpath -m "$(chiedi "Cartella di Armony da disinstallare" "$def")")
+  ENVF="$DIR/.env"
+  [ -f "$DIR/docker-compose.yml" ] && [ -f "$DIR/server/app.py" ] || { echo "In $DIR non c'è Armony." >&2; exit 1; }
+  si_no "Disinstallo Armony da $DIR?\n\nSi fermano e si tolgono i container (Armony, Navidrome, pot, HTTPS, TURN), le loro immagini e il servizio del tasto «Aggiorna». Docker resta." n || exit 0
+  cd "$DIR"
+
+  passo "Container e immagini"
+  docker compose --profile https --profile turn down --rmi all --remove-orphans 2>/dev/null \
+    || docker rm -f armony-app armony-navidrome armony-pot armony-https armony-turn 2>/dev/null || true
+  # copie di sicurezza dell'immagine fatte dagli aggiornamenti (armony-armony:prima-…)
+  docker images -q armony-armony | sort -u | xargs -r docker rmi -f >/dev/null 2>&1 || true
+
+  passo "Servizio di aggiornamento"
+  if [ -f /etc/systemd/system/armony-update.path ]; then
+    systemctl disable --now armony-update.path >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/armony-update.path /etc/systemd/system/armony-update.service
+    systemctl daemon-reload
+  fi
+  rm -rf /etc/armony
+
+  if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    passo "Firewall"
+    for k in ARMONY_PORT ARMONY_HTTPS_PORT TURN_PORT; do
+      [ -n "$(env_get $k)" ] && { ufw delete allow "$(env_get $k)/tcp" >/dev/null 2>&1; ufw delete allow "$(env_get $k)" >/dev/null 2>&1; }
+    done
+    [ -n "$(env_get TURN_MIN_PORT)" ] && ufw delete allow "$(env_get TURN_MIN_PORT):$(env_get TURN_MAX_PORT)/udp" >/dev/null 2>&1
+    ufw delete allow 47777/udp >/dev/null 2>&1 || true
+  fi
+
+  dim=$(du -sh "$DIR" 2>/dev/null | cut -f1)
+  if si_no "Elimino anche la cartella $DIR ($dim)?\n\nDentro ci sono la MUSICA, i video, i database (utenti, playlist, ascolti), le chiavi dei dispositivi e dell'APK e il file .env. Non si torna indietro." n \
+     && [ "$(chiedi "Per confermare scrivi ELIMINA" "")" = ELIMINA ]; then
+    cd /; rm -rf "$DIR"
+    msg "Armony è disinstallata e la cartella $DIR è eliminata."
+  else
+    msg "Armony è disinstallata. Musica, dati e .env restano in $DIR:\nper reinstallarla con gli stessi dati rilancia  sudo bash $DIR/installa.sh"
+  fi
+  exit 0
+}
+
 # =================================================================================================================
+[ "$MODO" = disinstalla ] && disinstalla
 msg "Benvenuto. Questo programma installa Armony su questo server:\n\n • Docker, se manca\n • Armony con Navidrome (la libreria musicale)\n • porte libere scelte da sole\n • l'amministratore di Navidrome\n • il servizio del tasto «Aggiorna»\n\nServe un Linux sempre acceso (Ubuntu o Debian) e qualche minuto."
 
 . /etc/os-release 2>/dev/null || true
@@ -103,6 +154,10 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 command -v systemctl >/dev/null && [ -d /run/systemd/system ] && systemctl enable --now docker >/dev/null 2>&1 || true
 docker info >/dev/null 2>&1 || { echo "Docker è installato ma non risponde (systemctl status docker)." >&2; exit 1; }
+# Docker Desktop: la rete host (quella di Armony e del multicast) c'è solo se attivata nelle sue impostazioni
+case "$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)" in *"Docker Desktop"*)
+  si_no "Qui c'è Docker Desktop. Armony usa la rete «host» di Docker: senza, dagli altri dispositivi non si raggiunge.\n\nIn Docker Desktop: Settings → Resources → Network → «Enable host networking» (versione 4.34 o successiva).\nIn alternativa installa Docker direttamente in Linux/WSL.\n\nContinuo?" n || exit 1;;
+esac
 [ "$UTENTE" != root ] && usermod -aG docker "$UTENTE"
 echo "Docker: $(docker --version | cut -d, -f1) · $(docker compose version --short 2>/dev/null)"
 
@@ -207,7 +262,23 @@ passo "Avvio (la prima volta Docker scarica e prepara le immagini: qualche minut
 mkdir -p musica video federati updates
 chown "$UTENTE": musica video federati
 docker compose pull --quiet --ignore-buildable 2>/dev/null || docker compose pull --quiet --ignore-pull-failures || true
-docker compose up -d --build
+# una porta può essere occupata dove "ss" non guarda (Docker Desktop, WSL in modalità mirrored, porte riservate da
+# Windows): Docker lo dice solo all'avvio. Allora si prende la successiva libera e si riprova
+sposta() {  # sposta porta: la variabile di .env che la usa passa a un'altra porta libera
+  local k
+  for k in ARMONY_PORT NAVIDROME_PORT POT_PORT ARMONY_HTTPS_PORT ARMONY_CADDY_ADMIN_PORT TURN_PORT; do
+    [ "${!k:-}" = "$1" ] || continue
+    PRESE="$PRESE$1 "; libera "$k" $(( $1 + 1 )) tcp; env_set "$k" "${!k}"
+    echo "La porta $1 è occupata (lo dice Docker, non si vedeva da qui): $k passa a ${!k}."
+    return 0
+  done
+  return 1
+}
+for TENTATIVO in $(seq 1 10); do
+  OUT=$(docker compose up -d --build 2>&1 | tee /dev/stderr) && break
+  P=$(printf '%s' "$OUT" | sed -nE -e 's/.*(bind host port|exposing port TCP) [0-9.]*:([0-9]+).*/\2/p' -e 's/.*Bind for [0-9.]*:([0-9]+) failed.*/\1/p' | head -n1)
+  [ -n "$P" ] && [ "$TENTATIVO" -lt 10 ] && sposta "$P" || { echo "docker compose non è riuscito ad avviare Armony (vedi sopra)." >&2; exit 1; }
+done
 # un profilo tolto (niente HTTPS o niente TURN) lascerebbe acceso il suo container: "up" non lo spegne
 [ -z "$DOMINIO" ] && docker compose --profile https rm -sf https >/dev/null 2>&1
 [ "$TURN" = n ] && docker compose --profile turn rm -sf turn >/dev/null 2>&1
@@ -215,6 +286,10 @@ printf 'Attendo che Armony risponda'
 OK=0
 for _ in $(seq 1 60); do
   curl -fs "http://127.0.0.1:$ARMONY_PORT/api/info" >/dev/null 2>&1 && { OK=1; break; }
+  # Armony usa la rete host: una porta occupata la fa ripartire in errore invece di fermare docker compose
+  if docker logs --since 1m armony-app 2>&1 | grep -q "Address already in use"; then
+    sposta "$ARMONY_PORT" && docker compose up -d armony >/dev/null 2>&1
+  fi
   printf '.'; sleep 3
 done
 echo

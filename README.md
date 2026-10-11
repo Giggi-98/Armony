@@ -71,6 +71,8 @@ curl -fsSL https://raw.githubusercontent.com/Giggi-98/Armony/main/installa.sh -o
 sudo bash installa.sh
 ```
 
+Per togliere tutto: `sudo bash installa.sh --disinstalla` (musica e dati restano, a meno che tu non scriva `ELIMINA`).
+
 **A mano:**
 
 ```sh

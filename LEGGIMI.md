@@ -33,7 +33,9 @@ curl -fsSL https://raw.githubusercontent.com/Giggi-98/Armony/main/installa.sh -o
 sudo bash installa.sh
 ```
 
-Fa qualche domanda (nome del server, amministratore, HTTPS con un nome tuo, TURN) e fa tutto da solo: installa Docker se manca, scarica l'ultima versione, crea le cartelle, genera le password, **controlla quali porte sono libere e se una è occupata ne sceglie un'altra**, crea l'amministratore di Navidrome, avvia tutto e abilita il tasto «Aggiorna». Alla fine dice a quale indirizzo aprire Armony. Le porte scelte finiscono in `.env` (`ARMONY_PORT`, `NAVIDROME_PORT`, …): `docker-compose.yml` resta quello del repository, così gli aggiornamenti continuano a funzionare. Si può rilanciare quando vuoi (per esempio per attivare il TURN): tiene le scelte già fatte. Con `--si` non fa domande e usa le risposte predefinite.
+Fa qualche domanda (nome del server, amministratore, HTTPS con un nome tuo, TURN) e fa tutto da solo: installa Docker se manca, scarica l'ultima versione, crea le cartelle, genera le password, **controlla quali porte sono libere e se una è occupata ne sceglie un'altra**, crea l'amministratore di Navidrome, avvia tutto e abilita il tasto «Aggiorna». Alla fine dice a quale indirizzo aprire Armony. Le porte scelte finiscono in `.env` (`ARMONY_PORT`, `NAVIDROME_PORT`, …): `docker-compose.yml` resta quello del repository, così gli aggiornamenti continuano a funzionare. Si può rilanciare quando vuoi (per esempio per attivare il TURN): tiene le scelte già fatte. Con `--si` non fa domande e usa le risposte predefinite. Se una porta risulta libera ma Docker non riesce a usarla (succede con Docker Desktop o WSL, dove le porte di Windows non si vedono), ne prova da solo un'altra.
+
+**Disinstallare:** `sudo bash installa.sh --disinstalla` toglie container, immagini, servizio «Aggiorna» e le regole del firewall aperte dall'installatore; Docker resta. Poi chiede se eliminare anche la cartella con musica, database e chiavi: di base resta, e per eliminarla bisogna scrivere `ELIMINA`. Con la cartella tenuta, rilanciando l'installatore Armony riparte con gli stessi dati.
 
 A mano, passo per passo:
 
