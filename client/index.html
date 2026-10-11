@@ -321,6 +321,28 @@ dialog.smart .smbody{display:flex;flex-direction:column;gap:var(--s3);padding:0 
 .smval{display:flex;gap:var(--s1);min-width:0}.smval input{min-width:0;flex:1}
 @media (max-width:560px){.smrow{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto}.smval{grid-column:1 / 3;grid-row:2}.smrow .smx{grid-row:1 / 3;grid-column:3}}
 /* salute della libreria */
+.sltiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s3)}
+.sltile{background:var(--surface2);border-radius:var(--r-m);padding:var(--s3) var(--s4);display:flex;flex-direction:column;gap:2px;min-width:0}
+.sltile b{font-size:1.4rem;font-weight:700;line-height:1.1}.sltile small{color:var(--muted);font-size:.82rem}
+.sltile.warn b{color:var(--accent-text)}.sltile.ok b{color:var(--sage)}
+@media (max-width:560px){.sltiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.slscan{display:flex;align-items:center;gap:var(--s3)}.slscan .grow{display:flex;flex-direction:column;gap:var(--s2)}
+.slres{display:flex;flex-direction:column;gap:var(--s3)}
+.slres-h{display:flex;align-items:center;gap:var(--s3)}.slres-h b{font-size:1.05rem}
+.slall{display:flex;align-items:center;gap:var(--s2);color:var(--muted);font-size:.9rem;cursor:pointer;min-height:var(--hit)}.slall input,.slpick input{width:18px;height:18px;accent-color:var(--accent);margin:0}
+.slrow.sit .grow{flex:1;min-width:0}
+.slf{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;max-width:100%;align-self:flex-start}.slf label{flex:none}.slf i{font-style:normal;opacity:.7;margin-left:2px}
+.slbulk{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;background:var(--accent-soft);border-radius:var(--r-m);padding:var(--s2) var(--s3)}
+.sllist{max-height:none;padding:0}
+.slrow.sit{align-items:flex-start}.slrow.sit.on{background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.slpick{padding-top:2px}
+.slprob{display:flex;flex-wrap:wrap;gap:var(--s1);margin-top:var(--s1)}
+.slb{font-size:.76rem;padding:2px 8px;border-radius:99px;background:var(--surface2);color:var(--ink)}
+.slb.troncato,.slb.durata,.slb.attesa{background:color-mix(in srgb,var(--danger) 16%,transparent)}
+.slb.titolo,.slb.tag,.slb.traccia{background:var(--accent-soft)}
+.slacts{display:flex;align-items:center;gap:2px;flex:none}
+.slempty{padding:var(--s5) var(--s3)}
+@media (max-width:560px){.slrow.sit{flex-wrap:wrap}.slacts{width:100%;justify-content:flex-end}}
 .slhead{display:flex;flex-direction:column;gap:var(--s3)}
 .slsec{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);margin-bottom:var(--s3)}
 .slsec>summary{display:flex;align-items:center;gap:var(--s3);padding:var(--s4);cursor:pointer;list-style:none}
@@ -1243,6 +1265,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   .disc.spin{animation:none}
   #bDev{grid-area:dev;position:relative;z-index:1;width:40px;height:40px;color:var(--muted)}
   #bDev.on{color:var(--accent-text)}
+  #bDev .devn{display:none}
   #bStarM{grid-area:star;position:relative;z-index:1;width:40px;height:40px}
   #bStarM.on{color:var(--accent-text)}
   .ctrl,.ctrl>.row{display:contents}
@@ -1279,6 +1302,8 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   :root:is([data-r="ora"],[data-r="testo"]) #bPlay{width:68px;height:68px;margin:0 var(--s4);background:var(--accent);color:var(--on-accent);box-shadow:var(--shadow-float)}
   :root:is([data-r="ora"],[data-r="testo"]) #bPlay svg{width:30px;height:30px}
   :root:is([data-r="ora"],[data-r="testo"]) #bDev{grid-area:dev}
+  :root:is([data-r="ora"],[data-r="testo"]) #bDev:has(.devn){display:flex;align-items:center;gap:var(--s1);width:auto;max-width:44vw;padding:0 var(--s2);font-size:.8rem;font-weight:700}
+  :root:is([data-r="ora"],[data-r="testo"]) #bDev .devn{display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   :root:is([data-r="ora"],[data-r="testo"]) #bQueueM{display:grid;grid-area:qm;place-items:center;width:40px;height:40px}
   .np-head.mobile-only{display:flex;align-items:center;gap:var(--s2);margin:0 calc(-1 * var(--s2)) var(--s4)}
   .np-ctx{flex:1;min-width:0;text-align:center}

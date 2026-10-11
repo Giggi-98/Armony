@@ -2063,6 +2063,7 @@ def lib_arrivo(path, album=None, artist=None, jid=None):
     with jlock:
         lnew.append(x)
     libreria.sveglia.set()  # il giro dei testi guarda anche lui
+    libreria.sveglia_c.set()  # e il controllo dei brani nuovi
 
 
 def nd_last_scan():

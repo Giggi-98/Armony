@@ -2734,6 +2734,7 @@ function updateNowPlaying() {
   $('#disc').innerHTML = t && t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 80, t.serverId))}" alt="" onerror="this.outerHTML='<div class=lbl></div>'">` : '<div class="lbl"></div>';
   // telecomando: sotto il titolo il dispositivo che suona (come la riga verde di Spotify)
   if (t && Live.remote()) { $('#npA').innerHTML = `<span class="ondev">${ic('speaker')}${esc(Live.devices.get(Live.target) || 'Altro dispositivo')}</span>`; }
+  else if (t && Phone.out) $('#npA').innerHTML = `<span class="ondev">${ic('headphones')}${esc(Phone.short())}</span>`;  // cuffie di questo telefono (solo app)
   Marquee.fit($('#npT')); Marquee.fit($('#npA'));
   // il mini lettore del telefono prende il colore della copertina
   const mu = t?.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 80, t.serverId) : '';
@@ -5307,40 +5308,101 @@ async function smartSheet(pid) {
   closeOutside(d); d.showModal();
 }
 
-/* ================= salute della libreria (capacità "salute", solo amministratori) ================= */
+/* ================= salute della libreria (capacità "salute", solo amministratori) =================
+   In alto i numeri e «Controlla la libreria»; poi «Da sistemare»: filtri per tipo, selezione e azioni in blocco; sotto
+   doppioni, generi di YouTube e album spezzati. Durante un controllo si rilegge ogni 2 secondi. */
+let salT = 0, salF = 'tutti', salSel = new Set();
 async function refreshSalute() {
   const box = $('#saluteBox'); if (!box) return;
+  clearTimeout(salT);
   let r; try { r = await dlApi('/api/salute'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
   if (!box.isConnected) return;
-  const tr = (x, extra = '') => `<div class="slrow"><span class="grow"><b>${esc(x.title || '(senza titolo)')}</b><small>${esc([x.artist || '(senza artista)', x.album].filter(Boolean).join(' · '))}${extra}</small></span>`;
-  const sec = (id, titolo, n, sub, body) => `<details class="slsec"${n ? '' : ' disabled'}><summary><span class="grow"><b>${titolo}</b><small>${sub}</small></span><span class="tag ${n ? 'acc' : 'ok'}">${n || ic('check')}</span></summary><div class="slbody" id="${id}">${body}</div></details>`;
-  const T = r.testi, pct = r.brani ? Math.round(T.con * 100 / r.brani) : 0;
-  box.innerHTML = `<div class="panel slhead"><b>${r.brani} brani in libreria</b>
-      <div class="trbar" title="Brani con il testo"><i style="width:${pct}%"></i></div>
-      <label class="check"><input type="checkbox" id="slTesti" ${T.on ? 'checked' : ''}><span>Testi: ${T.con} su ${r.brani} (${pct}%)<small>${T.on ? esc(T.fermo || (T.corrente ? `Cerco su LRCLIB: ${T.corrente} · trovati ${T.trovati} su ${T.fatti} provati` : 'Il server cerca i testi che mancano, un brano ogni 2 secondi, e li salva accanto al brano (.lrc): li leggono anche le altre app.')) : 'Spento: il server non cerca i testi che mancano.'}</small></span></label></div>
-    ${sec('slDup', 'Doppioni', r.doppioni_tot, 'Lo stesso brano più volte (titolo, artista e durata uguali). Si tiene quello di qualità migliore, in cima.',
-      r.doppioni.map((gr, i) => `<div class="slgr">${gr.map((x, j) => tr(x, `<br>${esc(x.path)} · ${x.bitrate || '?'} kbps ${esc(x.suffix || '')}`) + (j ? '' : '<span class="tag ok">si tiene</span>') + '</div>').join('')}
+  const C = r.controlli || { elenco: [], items: [], scan: {} }, T = r.testi, items = C.items || [], nomi = Object.fromEntries(C.elenco.map(x => [x.c, x.nome]));
+  const pct = r.brani ? Math.round(T.con * 100 / r.brani) : 0, sc = C.scan;
+  const cnt = {}; items.forEach(x => x.problemi.forEach(p => cnt[p.c] = (cnt[p.c] || 0) + 1));
+  if (salF !== 'tutti' && !cnt[salF]) salF = 'tutti';
+  const vis = items.filter(x => salF === 'tutti' || x.problemi.some(p => p.c === salF));
+  salSel = new Set([...salSel].filter(id => vis.some(x => x.id === id)));
+  const tile = (n, l, cls = '') => `<div class="sltile ${cls}"><b>${n}</b><small>${l}</small></div>`;
+  const quando = C.at ? new Date(C.at * 1000).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) : 'mai';
+  const row = x => `<div class="slrow sit${salSel.has(x.id) ? ' on' : ''}"><label class="slpick"><input type="checkbox" data-sel="${esc(x.id)}" ${salSel.has(x.id) ? 'checked' : ''} aria-label="Seleziona ${esc(x.title)}"></label>
+      <span class="grow"><b>${esc(x.title || '(senza titolo)')}</b><small>${esc([x.artist, x.album].filter(Boolean).join(' · '))}</small>
+        <span class="slprob">${x.problemi.map(p => `<span class="slb ${p.c}" title="${esc(nomi[p.c] || p.c)}">${esc(nomi[p.c] || p.c)}: ${esc(p.msg)}</span>`).join('')}</span></span>
+      <span class="slacts">${x.problemi.some(p => p.c === 'titolo') ? `<button class="btn sm" data-fix="${esc(x.id)}">Sistema</button>` : ''}
+        ${x.problemi.some(p => ['durata', 'attesa', 'troncato', 'qualita'].includes(p.c)) ? `<button class="icon-btn" data-ver="${esc(x.id)}" title="Scegli un'altra versione" aria-label="Scegli un'altra versione">${ic('repeat')}</button>` : ''}
+        <button class="icon-btn" data-edit="${esc(x.id)}" title="Modifica informazioni" aria-label="Modifica informazioni">${ic('pen')}</button>
+        <button class="icon-btn" data-ign="${esc(x.id)}" title="Va bene così: non segnalarlo più" aria-label="Ignora">${ic('check')}</button></span></div>`;
+  const altri = (id, titolo, n, sub, body) => `<details class="slsec"><summary><span class="grow"><b>${titolo}</b><small>${sub}</small></span><span class="tag ${n ? 'acc' : 'ok'}">${n || ic('check')}</span></summary><div class="slbody" id="${id}">${n ? body : '<p class="sub" style="margin:0">Niente da segnalare.</p>'}</div></details>`;
+  box.innerHTML = `<div class="panel slhead">
+      <div class="sltiles">${tile(r.brani, 'brani')}${tile(pct + '%', 'con il testo')}${tile(items.length, 'da sistemare', items.length ? 'warn' : 'ok')}${tile(quando, 'ultimo controllo')}</div>
+      ${!C.elenco.length ? '' : sc.on ? `<div class="slscan"><span class="grow"><b>Controllo in corso: ${sc.fatti} di ${sc.tot}</b><span class="trbar"><i style="width:${sc.tot ? Math.round(sc.fatti * 100 / sc.tot) : 0}%"></i></span></span><button class="btn sm" id="slStop">Ferma</button></div>`
+        : `<div class="row"><button class="btn primary" id="slGo">${ic('search')} Controlla la libreria</button></div>`}
+      <label class="check" ${C.elenco.length ? '' : 'hidden'}><input type="checkbox" id="slAuto" ${C.auto ? 'checked' : ''}><span>Controlla da solo ogni brano nuovo<small>Download, caricamenti e copie dalla rete: appena arrivano, con tutti i controlli (anche la durata dell'originale). Se c'è qualcosa, una notifica.</small></span></label>
+      <label class="check"><input type="checkbox" id="slTesti" ${T.on ? 'checked' : ''}><span>Cerca i testi che mancano<small>${T.on ? esc(T.fermo || (T.corrente ? `Su LRCLIB: ${T.corrente} · trovati ${T.trovati} su ${T.fatti} provati` : 'Un brano ogni 2 secondi, salvati accanto ai brani (.lrc): li leggono anche le altre app.')) : 'Spento.'}</small></span></label></div>
+    <section class="panel slres"><div class="slres-h"><b>Da sistemare</b><span class="grow"></span>${items.length ? `<label class="slall"><input type="checkbox" id="slAll" ${vis.length && salSel.size === Math.min(vis.length, 300) ? 'checked' : ''}> Seleziona tutti</label>` : ''}</div>
+      ${items.length ? `<div class="seg slf" role="radiogroup" aria-label="Quali problemi">${[['tutti', 'Tutti', items.length], ...C.elenco.filter(x => cnt[x.c]).map(x => [x.c, x.nome, cnt[x.c]])].map(([k, l, n]) => `<label><input type="radio" name="slf" value="${k}" ${salF === k ? 'checked' : ''}><span>${esc(l)} <i>${n}</i></span></label>`).join('')}</div>
+        ${salSel.size ? `<div class="slbulk"><b>${salSel.size} ${salSel.size === 1 ? 'selezionato' : 'selezionati'}</b><span class="grow"></span><button class="btn sm primary" id="slBFix">Sistema i titoli</button><button class="btn sm" id="slBIgn">${ic('check')} Va bene così</button></div>` : ''}
+        <div class="slbody sllist">${vis.slice(0, 300).map(row).join('')}${vis.length > 300 ? `<p class="sub">…e altri ${vis.length - 300}: sistemali o filtra per tipo.</p>` : ''}</div>`
+      : `<div class="empty slempty"><h3>${C.at ? 'Niente da sistemare' : 'Ancora nessun controllo'}</h3><p>${C.at ? 'Al controllo del ' + quando + ' i brani erano a posto.' : '«Controlla la libreria» guarda durata, file troncati, qualità, tag, titoli e numeri di traccia di tutti i brani.'}</p></div>`}</section>
+    <h3 class="fedh">Altri controlli</h3>
+    ${altri('slDup', 'Doppioni', r.doppioni_tot, 'Lo stesso brano più volte (titolo, artista e durata uguali). Si tiene quello di qualità migliore, in cima.',
+      r.doppioni.map((gr, i) => `<div class="slgr">${gr.map((x, j) => `<div class="slrow"><span class="grow"><b>${esc(x.title)}</b><small>${esc(x.path)} · ${x.bitrate || '?'} kbps ${esc(x.suffix || '')}</small></span>${j ? '' : '<span class="tag ok">si tiene</span>'}</div>`).join('')}
         <button class="btn sm" data-sldup="${i}">${ic('trash')} Elimina ${gr.length === 2 ? 'l\'altro' : `gli altri ${gr.length - 1}`}</button></div>`).join(''))}
-    ${sec('slVuoti', 'Titolo o artista mancante', r.vuoti_tot, 'Brani con «NA», «Unknown» o niente al posto di titolo o artista.',
-      r.vuoti.map((x, i) => tr(x, `<br>${esc(x.path)}`) + `<button class="btn sm" data-slvuoto="${i}">${ic('pen')} Modifica</button></div>`).join(''))}
-    ${sec('slYt', 'Generi presi da YouTube', r.generi_yt_tot, 'Le categorie dei video («People & Blogs», «Gaming»…) finite nel genere dei brani scaricati.',
-      (r.generi_yt.length ? `<button class="btn sm primary" id="slYtFix">Togli questi generi da ${r.generi_yt.length} ${r.generi_yt.length === 1 ? 'brano' : 'brani'}</button>` : '') + r.generi_yt.map(x => tr(x, ` · ${esc(x.generi.join(', '))}`) + '</div>').join(''))}
-    ${sec('slSp', 'Album spezzati', r.spezzati.length, 'Lo stesso album diviso in più album perché anno o artista cambiano fra i brani. «Unisci» mette a tutti i valori più comuni.',
+    ${altri('slVu', 'Titolo o artista mancante', r.vuoti_tot, '«NA», «Unknown» o vuoto: «Modifica» per scriverli.',
+      r.vuoti.map((x, i) => `<div class="slrow"><span class="grow"><b>${esc(x.title || '(senza titolo)')}</b><small>${esc(x.artist || '(senza artista)')} · ${esc(x.path)}</small></span><button class="icon-btn" data-slvu="${i}" title="Modifica informazioni" aria-label="Modifica informazioni">${ic('pen')}</button></div>`).join(''))}
+    ${altri('slYt', 'Generi presi da YouTube', r.generi_yt_tot, 'Le categorie dei video («People & Blogs», «Gaming»…) finite nel genere dei brani scaricati.',
+      `<button class="btn sm primary" id="slYtFix">Togli questi generi da ${r.generi_yt.length} ${r.generi_yt.length === 1 ? 'brano' : 'brani'}</button>` + r.generi_yt.map(x => `<div class="slrow"><span class="grow"><b>${esc(x.title)}</b><small>${esc(x.artist)} · ${esc(x.generi.join(', '))}</small></span></div>`).join(''))}
+    ${altri('slSp', 'Album spezzati', r.spezzati.length, 'Lo stesso album diviso in più album perché anno o artista cambiano fra i brani. «Unisci» mette a tutti i valori più comuni.',
       r.spezzati.map((x, i) => `<div class="slrow"><span class="grow"><b>${esc(x.name)}</b><small>${esc(x.artist)} · ${x.parti} parti${x.anni.filter(Boolean).length ? ' · anni ' + x.anni.filter(Boolean).join(', ') : ''}</small></span><button class="btn sm" data-slsp="${i}">Unisci</button></div>`).join(''))}`;
-  $('#slTesti').onchange = async e => { try { await dlApi('/api/salute/testi', { method: 'PUT', body: JSON.stringify({ on: e.target.checked }) }); } catch (er) { toast(er.message); } refreshSalute(); };
+  const put = (p, on) => dlApi(p, { method: 'PUT', body: JSON.stringify({ on }) }).catch(e => toast(e.message)).then(refreshSalute);
+  $('#slAuto').onchange = e => put('/api/salute/auto', e.target.checked);
+  $('#slTesti').onchange = e => put('/api/salute/testi', e.target.checked);
+  $('#slGo') && ($('#slGo').onclick = () => saluteSheet(C));
+  $('#slStop') && ($('#slStop').onclick = () => dlApi('/api/salute/ferma', { method: 'POST' }).then(refreshSalute));
+  const slf = box.querySelector('.slf'), slc = slf?.querySelector('input:checked')?.parentElement;
+  if (slc) slf.scrollLeft += slc.getBoundingClientRect().left - slf.getBoundingClientRect().left - 16;
+  box.querySelectorAll('input[name="slf"]').forEach(i => i.onchange = () => { salF = i.value; salSel.clear(); refreshSalute(); });
+  $('#slAll') && ($('#slAll').onchange = e => { salSel = e.target.checked ? new Set(vis.slice(0, 300).map(x => x.id)) : new Set(); refreshSalute(); });
+  const voci = ids => items.filter(x => ids.includes(x.id)).flatMap(x => x.problemi.filter(p => salF === 'tutti' || p.c === salF).map(p => ({ id: x.id, c: p.c })));
+  const post = (p, body) => dlApi(p, { method: 'POST', body: JSON.stringify(body) });
+  $('#slBFix') && ($('#slBFix').onclick = async () => { const j = await post('/api/salute/sistema', { ids: [...salSel] }); toast(j.sistemati ? `${j.sistemati} titoli sistemati.` : 'Fra i selezionati non c\'erano titoli da sistemare.'); salSel.clear(); refreshSalute(); });
+  $('#slBIgn') && ($('#slBIgn').onclick = async () => { await post('/api/salute/ignora', { voci: voci([...salSel]) }); toast('Non verranno più segnalati.'); salSel.clear(); refreshSalute(); });
+  box.onchange = e => { const c = e.target.closest('[data-sel]'); if (!c) return; c.checked ? salSel.add(c.dataset.sel) : salSel.delete(c.dataset.sel); refreshSalute(); };
   box.onclick = async e => {
-    const b = e.target.closest('[data-sldup],[data-slvuoto],[data-slsp],#slYtFix'); if (!b) return;
+    const b = e.target.closest('[data-fix],[data-ver],[data-edit],[data-ign],[data-sldup],[data-slsp],[data-slvu],#slYtFix'); if (!b) return;
+    if (b.dataset.slvu) { const v = r.vuoti[+b.dataset.slvu]; return editTrack({ id: v.id, title: v.title, artist: v.artist, album: v.album, serverId: dlSrv()?.id }); }
+    const x = items.find(y => y.id === (b.dataset.fix || b.dataset.ver || b.dataset.edit || b.dataset.ign)), t = x && { id: x.id, title: x.title, artist: x.artist, album: x.album, duration: x.duration, serverId: dlSrv()?.id };
     try {
-      if (b.dataset.sldup) { const gr = r.doppioni[+b.dataset.sldup], via = gr.slice(1);
-        if (!confirm(`Eliminare dal server ${via.length === 1 ? 'questo file' : via.length + ' file'}?\n\n${via.map(x => x.path).join('\n')}\n\nSi tiene ${gr[0].path}.`)) return;
-        await dlApi('/api/tracks/delete', { method: 'POST', body: JSON.stringify({ ids: via.map(x => x.id) }) }); toast('Doppioni eliminati.'); }
-      else if (b.dataset.slvuoto) { const x = r.vuoti[+b.dataset.slvuoto]; return editTrack({ id: x.id, title: x.title, artist: x.artist, album: x.album, serverId: dlSrv()?.id }); }
-      else if (b.dataset.slsp) { const x = r.spezzati[+b.dataset.slsp], j = await dlApi('/api/salute/unisci', { method: 'POST', body: JSON.stringify({ album: x.ids }) });
-        toast(`«${x.name}»: ${j.brani} brani con artista ${j.artista}${j.anno ? ' e anno ' + j.anno : ''}. Navidrome li riunisce alla scansione.`, 5000); }
-      else if (b.id === 'slYtFix') { const j = await dlApi('/api/salute/generi', { method: 'POST', body: JSON.stringify({ ids: r.generi_yt.map(x => x.id) }) }); toast(`Generi sistemati in ${j.brani} brani.`); }
-      setTimeout(refreshSalute, 1500);
+      if (b.dataset.fix) { await post('/api/salute/sistema', { ids: [x.id] }); toast('Titolo sistemato.'); }
+      else if (b.dataset.ver) return versionSheet(t);
+      else if (b.dataset.edit) return editTrack(t);
+      else if (b.dataset.ign) { await post('/api/salute/ignora', { voci: voci([x.id]) }); }
+      else if (b.dataset.sldup) { const gr = r.doppioni[+b.dataset.sldup], via = gr.slice(1);
+        if (!confirm(`Eliminare dal server ${via.length === 1 ? 'questo file' : via.length + ' file'}?\n\n${via.map(y => y.path).join('\n')}\n\nSi tiene ${gr[0].path}.`)) return;
+        await post('/api/tracks/delete', { ids: via.map(y => y.id) }); toast('Doppioni eliminati.'); }
+      else if (b.dataset.slsp) { const y = r.spezzati[+b.dataset.slsp], j = await post('/api/salute/unisci', { album: y.ids });
+        toast(`«${y.name}»: ${j.brani} brani con artista ${j.artista}${j.anno ? ' e anno ' + j.anno : ''}. Navidrome li riunisce alla scansione.`, 5000); }
+      else if (b.id === 'slYtFix') { const j = await post('/api/salute/generi', { ids: r.generi_yt.map(y => y.id) }); toast(`Generi sistemati in ${j.brani} brani.`); }
+      setTimeout(refreshSalute, 800);
     } catch (er) { toast(er.message); }
   };
+  if (sc.on) salT = setTimeout(() => box.isConnected && refreshSalute(), 2000);
+}
+// cosa controllare (caselle) e dove (tutta la libreria o solo i brani nuovi dall'ultimo controllo)
+function saluteSheet(C) {
+  const d = $('#dlg'); d.className = 'sheet smart';
+  d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">Controlla la libreria</b><small style="color:var(--muted)">Il server guarda i brani in sottofondo: puoi chiudere la pagina, i risultati restano.</small></span></div>
+    <div class="smbody">
+      <div class="seg" role="radiogroup" aria-label="Quali brani"><label><input type="radio" name="slq" value="tutti" checked><span>Tutta la libreria</span></label><label><input type="radio" name="slq" value="nuovi" ${C.at ? '' : 'disabled'}><span>Solo i nuovi dall'ultimo controllo</span></label></div>
+      ${C.elenco.map(x => `<label class="check"><input type="checkbox" value="${x.c}" ${x.c === 'attesa' ? '' : 'checked'}><span>${esc(x.nome)}<small>${esc(x.desc)}${x.c === 'attesa' ? ' Lento: circa un secondo a brano.' : ''}</small></span></label>`).join('')}
+      <div class="row"><button class="btn primary" id="slOk">${ic('search')} Controlla</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div></div>`;
+  $('#slOk').onclick = async () => {
+    const controlli = [...d.querySelectorAll('.check input:checked')].map(i => i.value);
+    if (!controlli.length) return toast('Scegli almeno un controllo.');
+    try { await dlApi('/api/salute/scansiona', { method: 'POST', body: JSON.stringify({ controlli, solo_nuovi: d.querySelector('input[name="slq"]:checked').value === 'nuovi' }) }); d.close(); refreshSalute(); }
+    catch (e) { toast(e.message); }
+  };
+  closeOutside(d); d.showModal();
 }
 async function refreshFed() {
   const box = $('#fedBox'); if (!box) return;
@@ -6238,7 +6300,7 @@ const Phone = {
     if (this.out && this.ready && (!was || was.name !== this.out.name)) toast(this.out.kind === 'bluetooth' ? `Cuffie collegate: ${this.short()}` : `${this.label()}: la musica esce da lì.`, 2600);
     // cuffie staccate mentre suona qui: pausa, come ogni lettore (non deve partire dall'altoparlante)
     if (was && !this.out && !Engine.el.paused) { ctlToggle(); toast('Cuffie scollegate: musica in pausa.', 2600); }
-    Live.pill();
+    Live.pill(); updateNowPlaying();
   },
   short() { return this.out?.name || (this.out?.kind === 'usb' ? 'USB' : 'Cuffie'); },
   label() { const o = this.out; return !o ? '' : o.kind === 'bluetooth' ? `Cuffie Bluetooth${o.name ? ': ' + o.name : ''}` : o.kind === 'wired' ? 'Cuffie con filo' : `Audio USB${o.name ? ': ' + o.name : ''}`; }
@@ -6495,8 +6557,9 @@ const Live = {
   pill() {
     const pill = $('#livePill'); if (!pill) return;
     const remote = this.remote();
-    $('#bDev')?.classList.toggle('on', remote);  // telefono: l'icona del dispositivo nel mini lettore
     const hp = !remote && Phone.out;  // cuffie di questo telefono (solo app)
+    const bd = $('#bDev');  // telefono: l'icona del dispositivo nel mini lettore; nel lettore grande anche il nome delle cuffie
+    if (bd) { bd.classList.toggle('on', remote || !!hp); bd.innerHTML = ic(hp ? 'headphones' : 'speaker') + (hp ? `<span class="devn">${esc(Phone.short())}</span>` : ''); }
     pill.hidden = !this.devices.size && !hp;
     pill.classList.toggle('on', remote);
     pill.innerHTML = `${ic(hp ? 'headphones' : 'speaker')}<span>${esc(remote ? this.devices.get(this.target) || '…' : P.solo ? 'Per conto suo' : 'Qui')}${hp ? ` · <b class="hp">${esc(Phone.short())}</b>` : ''}</span>`;

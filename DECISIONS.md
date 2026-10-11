@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Controlli dei brani: regole locali, Deezer solo su richiesta, si sistema da solo solo il titolo
+**Contesto:** brani scaricati a metà, durate assurde, titoli con «(Official Video)» o «_256k», tag e numeri di traccia sbagliati restavano invisibili finché qualcuno non li ascoltava.
+**Scelta:** sette controlli in `server/libreria.py` sul DB di Navidrome (durata strana, file troncato da dimensione/bitrate, qualità sotto 128 kbps, tag mancanti, titolo sporco, numero di traccia doppio, durata diversa dall'originale). Il confronto con l'originale chiede a Deezer ed è spento nel controllo manuale (un secondo a brano); è acceso solo per i brani nuovi, che sono pochi. Il controllo automatico parte dal primo avvio: la libreria vecchia la controlla l'amministratore a mano. «Sistema» corregge da solo solo il titolo; il resto passa da «Modifica», «Scegli un'altra versione» o «Va bene così» (ricordato per brano e per controllo).
+**Alternative scartate:** analizzare l'audio con ffprobe/ffmpeg (silenzi, file corrotti): ffmpeg c'è già nell'immagine, ma decodificare migliaia di file tiene occupato il server per ore; correzioni automatiche di tag e durate: un falso positivo cambierebbe file buoni senza che nessuno se ne accorga.
+**Conseguenze:** un file troncato con dimensione plausibile sfugge; le soglie (30 s, 15 min, 15 s di scarto) sono fisse.
+**Da rivedere se:** i falsi positivi diventano tanti da far ignorare le notifiche, o se serve trovare file rovinati che hanno la dimensione giusta (allora ffprobe sui soli brani nuovi).
+
 ## 2026-10-11 — Una sola casa per le playlist: la Libreria
 **Contesto:** la sezione Playlist e la scheda Playlist della Libreria mostravano la stessa cosa, con in più i riquadri «Nuova playlist», «Playlist intelligente», «Importa da Spotify» e un «+» in testa alla Libreria («ridondanza inutile», dice l'utente).
 **Scelta:** resta la Libreria (ha anche Artisti, Album, Cronologia, Generi, come «La tua libreria» di Spotify); la voce Playlist esce dal menu del computer e dalla scelta della barra del telefono; `#/playlist` porta a `#/libreria`, le pagine delle singole playlist restano `#/playlist/<id>` (nel menu accendono Libreria). Creare, crearne una intelligente, una cartella e importare sono icone accanto alla ricerca delle playlist (sul telefono sotto la ricerca, a tutta riga); via i riquadri e il «+» col suo menu. «Su altri server» passa nella scheda Playlist della Libreria.

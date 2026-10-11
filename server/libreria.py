@@ -25,6 +25,7 @@ import re
 import threading
 import time
 import unicodedata
+import urllib.parse
 
 import requests
 from flask import Blueprint, g, jsonify, request
@@ -215,7 +216,9 @@ def salute():
         vuoti=vuoti[:200], vuoti_tot=len(vuoti),
         generi_yt=[{"id": k, "title": by_id[k][1], "artist": by_id[k][2], "generi": v} for k, v in yt.items()][:200], generi_yt_tot=len(yt),
         spezzati=[{"name": r[5], "artist": r[6], "ids": r[2].split(","), "anni": sorted({int(y) for y in r[3].split(",")}), "parti": r[4]} for r in split],
-        testi={"con": min(con_testo, len(songs)), "on": setting("testi_auto", "1") == "1", **giro})
+        testi={"con": min(con_testo, len(songs)), "on": setting("testi_auto", "1") == "1", **giro},
+        controlli={"elenco": [{"c": k, "nome": v[0], "desc": v[1]} for k, v in CONTROLLI.items()], "auto": setting("controlli_auto", "1") == "1",
+                   "scan": dict(scan), **json.loads(setting("scan", "{}") or "{}")})
 
 
 @bp.post("/api/salute/unisci")
@@ -376,6 +379,230 @@ def giro_testi():
             time.sleep(600)
 
 
+# ------------------------------------------------------------------ controllo dei brani (a mano e su ogni brano nuovo)
+# Discrepanze logiche sulle tracce, dal DB di Navidrome (veloce) e, a scelta, dalla durata attesa su Deezer (lento:
+# una richiesta per brano, al ritmo di metadati.deezer). I risultati restano sul server; «Ignora» li toglie per sempre.
+CONTROLLI = {
+    "durata": ("Durata strana", "Sotto i 30 secondi o sopra i 15 minuti (intro, interludi, mix e live esclusi)"),
+    "troncato": ("File troncato", "Più piccolo di quanto dovrebbe essere per la sua durata: probabilmente scaricato a metà"),
+    "qualita": ("Qualità bassa", "Bitrate sotto i 128 kbps"),
+    "tag": ("Tag mancanti", "Album, anno, numero di traccia o copertina"),
+    "titolo": ("Titolo sporco", "«Official Video», «Lyrics», «HD» o l'artista ripetuto nel titolo: si sistema da solo"),
+    "traccia": ("Numero di traccia doppio", "Due brani dello stesso album con lo stesso numero"),
+    "attesa": ("Durata diversa dall'originale", "Più di 15 secondi di differenza dalla versione su Deezer: una live, un edit, un'altra versione"),
+}
+CORTI_OK = re.compile(r"\b(intro|outro|interlude|interludio|skit|prelude|preludio|reprise|jingle)\b", re.I)
+LUNGHI_OK = re.compile(r"\b(mix|mixed|live|set|full album|continuous|dj|megamix|medley|suite|ambient)\b", re.I)
+SPORCO = re.compile(r"\s*[\(\[]\s*(?:official\s*(?:music\s*|lyrics?\s*)?(?:video|audio|visualizer|videoclip)|(?:lyrics?|testo)(?:\s*video)?|audio|hd|hq|4k|videoclip|video ufficiale|visualizer)\s*[\)\]]", re.I)
+LOSSY = {"mp3", "m4a", "aac", "ogg", "opus", "wma"}
+scan = {"on": False, "fatti": 0, "tot": 0, "ferma": False}
+
+
+def titolo_pulito(title, artist):
+    t = re.sub(r"_\d{2,3}k$", "", SPORCO.sub("", title or "")).strip()  # «_256k»: il bitrate rimasto dal nome del file
+    a = (artist or "").split(",")[0].strip()
+    if a and t.lower().startswith(a.lower() + " - "):
+        t = t[len(a) + 3:].strip()
+    return t
+
+
+def durata_attesa(title, artist):
+    a = (artist or "").split(",")[0].strip()
+    q = urllib.parse.quote(f'artist:"{a}" track:"{titolo_pulito(title, artist)}"')
+    d = A.metadati.deezer(f"search/track?q={q}&limit=5") or {}
+    want = chiave(titolo_pulito(title, artist))
+    for x in d.get("data") or []:
+        if chiave(x.get("title_short") or x.get("title")) == want:
+            return x.get("duration")
+    return None
+
+
+def righe(where="", args=()):
+    c = A.importa.nd()
+    try:
+        return c.execute(
+            "SELECT m.id, m.title, m.artist, m.album, m.album_id, m.duration, m.bit_rate, m.size, m.suffix, m.has_cover_art, m.year, "
+            "m.track_number, m.disc_number, m.path, coalesce(f.image_files, ''), m.created_at, "
+            "(SELECT count(*) FROM media_file x WHERE x.album_id = m.album_id AND x.missing = 0) "
+            "FROM media_file m LEFT JOIN folder f ON f.id = m.folder_id WHERE m.missing = 0 AND m.library_id = "
+            "(SELECT id FROM library WHERE rtrim(path, '/') = ?)" + where, (A.NAVIDROME_MUSIC, *args)).fetchall()
+    finally:
+        c.close()
+
+
+def controlla(rows, sel, deezer=False, progress=None):
+    ign = json.loads(setting("ignora", "{}") or "{}")
+    doppi = {}
+    if "traccia" in sel:
+        for r in rows:
+            if r[11]:
+                doppi.setdefault((r[4], r[12] or 1, r[11]), []).append(r[0])
+    out = []
+    for i, r in enumerate(rows):
+        if progress and not progress(i):
+            break
+        sid, title, artist, album, alb, dur, br, size, suf, cover, year, tn, dn, path, imgs, _, n_alb = r
+        dur, br, suf = dur or 0, br or 0, (suf or "").lower()
+        prob = []
+        if "durata" in sel and dur:
+            if dur < 30 and not CORTI_OK.search(title or ""):
+                prob.append(("durata", f"dura solo {int(dur)} secondi"))
+            elif dur > 900 and not LUNGHI_OK.search(f"{title} {album}"):
+                prob.append(("durata", f"dura {int(dur // 60)} minuti"))
+        if "troncato" in sel and suf in LOSSY and br and dur > 20 and size and size < br * 125 * dur * 0.55:
+            prob.append(("troncato", f"{size // 1024} KB invece di circa {int(br * 125 * dur) // 1024} KB"))
+        if "qualita" in sel and suf in LOSSY and 0 < br < 128:
+            prob.append(("qualita", f"{br} kbps"))
+        if "tag" in sel:
+            manca = [n for n, v in (("album", album), ("anno", year), ("numero di traccia", tn or n_alb <= 1),
+                                    ("copertina", cover or imgs not in ("", "[]"))) if not v]
+            if manca:
+                prob.append(("tag", "manca " + ", ".join(manca)))
+        if "titolo" in sel and title and titolo_pulito(title, artist) != title.strip():
+            prob.append(("titolo", f"«{titolo_pulito(title, artist)}»"))
+        if "traccia" in sel and tn and len(doppi.get((alb, dn or 1, tn), [])) > 1:
+            prob.append(("traccia", f"numero {tn} usato {len(doppi[(alb, dn or 1, tn)])} volte in «{album}»"))
+        if deezer and "attesa" in sel and dur and title:
+            want = durata_attesa(title, artist)
+            if want and abs(want - dur) > 15:
+                prob.append(("attesa", f"{int(dur // 60)}:{int(dur % 60):02d} invece di {want // 60}:{want % 60:02d}"))
+        prob = [p for p in prob if not ign.get(f"{sid}:{p[0]}")]
+        if prob:
+            out.append({"id": sid, "title": title, "artist": artist, "album": album, "path": path, "duration": dur, "bitrate": br,
+                        "problemi": [{"c": c, "msg": m} for c, m in prob]})
+    return out
+
+
+def salva_scan(items, sel, merge=False):
+    old = json.loads(setting("scan", "{}") or "{}")
+    if merge:  # brani nuovi: in cima, senza toccare gli altri risultati
+        ids = {x["id"] for x in items}
+        items = items + [x for x in old.get("items", []) if x["id"] not in ids]
+        sel = old.get("sel") or sel
+    set_setting("scan", json.dumps({"at": time.time() if not merge else old.get("at", 0), "sel": sel, "items": items[:3000],
+                                    "auto_at": time.time() if merge else old.get("auto_at", 0)}))
+
+
+def scansiona(sel, deezer, solo_nuovi):
+    try:
+        since = json.loads(setting("scan", "{}") or "{}").get("at", 0) if solo_nuovi else 0
+        rows = righe(" AND m.created_at > ?", (time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(since)),)) if since else righe()
+        scan.update(on=True, fatti=0, tot=len(rows), ferma=False)
+
+        def prog(i):
+            scan["fatti"] = i
+            return not scan["ferma"]
+        items = controlla(rows, sel, deezer, prog)
+        salva_scan(items, sel, merge=bool(since))
+    except Exception as e:  # noqa: BLE001
+        A.diagnosi.log("errore", "salute", f"controllo della libreria: {e}")
+    finally:
+        scan["on"] = False
+
+
+@bp.post("/api/salute/scansiona")
+def scansiona_api():
+    if scan["on"]:
+        return jsonify(error="Un controllo è già in corso"), 409
+    d = request.get_json(silent=True) or {}
+    sel = [c for c in d.get("controlli") or [] if c in CONTROLLI] or [c for c in CONTROLLI if c != "attesa"]
+    threading.Thread(target=scansiona, args=(sel, "attesa" in sel, bool(d.get("solo_nuovi"))), daemon=True).start()
+    return jsonify(ok=True)
+
+
+@bp.post("/api/salute/ferma")
+def ferma_api():
+    scan["ferma"] = True
+    return jsonify(ok=True)
+
+
+@bp.post("/api/salute/ignora")
+def ignora_api():
+    """{voci: [{id, c}]}: quei problemi non si segnalano più (una live che dura 20 minuti va bene così)."""
+    voci = [(str(v.get("id")), str(v.get("c"))) for v in (request.get_json(silent=True) or {}).get("voci") or [] if isinstance(v, dict)]
+    ign = json.loads(setting("ignora", "{}") or "{}")
+    ign.update({f"{i}:{c}": 1 for i, c in voci})
+    set_setting("ignora", json.dumps(ign))
+    togli(voci)
+    return jsonify(ok=True)
+
+
+def togli(voci):
+    old = json.loads(setting("scan", "{}") or "{}")
+    via = set(voci)
+    for x in old.get("items", []):
+        x["problemi"] = [p for p in x["problemi"] if (x["id"], p["c"]) not in via]
+    old["items"] = [x for x in old.get("items", []) if x["problemi"]]
+    set_setting("scan", json.dumps(old))
+
+
+@bp.post("/api/salute/sistema")
+def sistema_api():
+    """{ids}: sistema da solo quello che si può (il titolo sporco). Il resto si sistema a mano (Modifica, Scegli un'altra
+    versione)."""
+    ids = [str(x) for x in ((request.get_json(silent=True) or {}).get("ids") or [])[:500] if A.ID_RE.match(str(x))]
+    c = A.importa.nd()
+    try:
+        info = {r[0]: r[1:] for r in c.execute(f"SELECT id, title, artist FROM media_file WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else {}
+    finally:
+        c.close()
+    paths, _ = A.track_paths(ids)
+    fatti = []
+    for sid, p in paths.items():
+        t, a = info.get(sid, ("", ""))
+        nuovo = titolo_pulito(t, a)
+        if nuovo and nuovo != (t or "").strip():
+            try:
+                A.metadati.modifica(p, {"title": nuovo})
+                fatti.append((sid, "titolo"))
+            except Exception:  # noqa: BLE001
+                pass
+    togli(fatti)
+    if fatti:
+        A.federazione.nd_get("startScan")
+    return jsonify(ok=True, sistemati=len(fatti))
+
+
+@bp.put("/api/salute/auto")
+def auto_api():
+    on = bool((request.get_json(silent=True) or {}).get("on"))
+    set_setting("controlli_auto", "1" if on else "0")
+    return jsonify(ok=True, on=on)
+
+
+sveglia_c = threading.Event()
+
+
+def giro_controlli():
+    """Ogni brano nuovo (download, caricamento, copia dalla rete) si controlla appena Navidrome lo vede, con tutti i
+    controlli e anche la durata attesa (sono pochi). Se c'è qualcosa, un avviso agli amministratori."""
+    time.sleep(90)
+    if not setting("visto_al"):  # la prima volta si parte da adesso: la libreria vecchia la controlla l'utente a mano
+        set_setting("visto_al", time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+    while True:
+        sveglia_c.wait(3600)
+        sveglia_c.clear()
+        time.sleep(180)  # la scansione di Navidrome deve averli visti
+        try:
+            if setting("controlli_auto", "1") != "1":
+                continue
+            since = setting("visto_al")
+            rows = righe(" AND m.created_at > ?", (since,))
+            set_setting("visto_al", max([r[15] for r in rows] + [since]))
+            if not rows:
+                continue
+            items = controlla(rows, list(CONTROLLI), deezer=True)
+            if items:
+                salva_scan(items, list(CONTROLLI), merge=True)
+                n = len(items)
+                for u in db.all_("SELECT DISTINCT user FROM devices WHERE admin = 1 AND state = 'fidato'"):
+                    A.notifiche.notifica(u["user"], "sistema", f"{n} {'brano nuovo' if n == 1 else 'brani nuovi'} da controllare",
+                                         ", ".join(f"{x['title']}: {CONTROLLI[x['problemi'][0]['c']][0].lower()}" for x in items[:3]),
+                                         "#/impostazioni/salute", only_once=f"controlli:{int(time.time() // 600)}")
+        except Exception as e:  # noqa: BLE001
+            A.diagnosi.log("avviso", "salute", f"controllo dei brani nuovi: {e}")
+
+
 def init(flask_app, host):
     global A
     A = host
@@ -384,3 +611,4 @@ def init(flask_app, host):
 
 def start():
     threading.Thread(target=giro_testi, daemon=True, name="testi").start()
+    threading.Thread(target=giro_controlli, daemon=True, name="controlli").start()
