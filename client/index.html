@@ -1621,6 +1621,42 @@ dialog.profpop:not([open]){display:none}
    l'icona prendeva tutta l'altezza del lettore) */
 .np small .ondev{display:inline-flex;align-items:center;gap:4px;max-width:100%;color:var(--accent-text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np small .ondev svg{width:13px;height:13px;flex:none}
+/* === F: telefono come Spotify (0.41): lettore a tutto schermo senza scorrimento, mini lettore più grande === */
+.np-art{display:none}
+@media (max-width:860px){
+  /* mini lettore: copertina 48 px, testi più leggibili, tasti grandi e spaziati */
+  .np{padding:8px 0 10px 8px;gap:12px}
+  .disc{width:48px;height:48px;border-radius:6px}
+  .disc img,.disc .lbl{border-radius:6px}
+  .np b{font-size:.95rem;font-weight:700}
+  .np small{font-size:.86rem}
+  #bDev,#bStarM{width:44px;height:44px}
+  #bDev svg,#bStarM svg{width:24px;height:24px}
+  #bPlay{width:48px;height:48px;margin-right:4px}
+  #bPlay svg{width:28px;height:28px}
+  /* «In riproduzione»: tutto in una schermata, sfondo dal colore della copertina che sfuma al nero, testo bianco */
+  :root[data-r="ora"]{overflow:hidden;overscroll-behavior:none}
+  :root[data-r="ora"] body{overflow:hidden;overscroll-behavior:none;background:linear-gradient(180deg,var(--np-bg,#33364e) 0%,color-mix(in srgb,var(--np-bg,#33364e) 40%,#0e0e12) 58%,#0e0e12 100%)}
+  :root[data-r="ora"] #glow{display:none}
+  :root[data-r="ora"] :is(main,.player){--ink:#fff;--muted:rgb(255 255 255 / .7);--accent-text:#fff;color:#fff}
+  :root[data-r="ora"] .player{background:transparent}
+  :root[data-r="ora"] main{height:calc(100dvh - var(--player-h) - var(--sab));overflow:hidden;padding-bottom:0}
+  :root[data-r="ora"] .now{display:flex;flex-direction:column;align-items:stretch;height:100%;gap:0}
+  :root[data-r="ora"] .now>.np-head{flex:none;margin-bottom:var(--s3)}
+  :root[data-r="ora"] .now>div:nth-child(2){flex:1;min-height:0;display:flex;flex-direction:column}
+  :root[data-r="ora"] .now>div:nth-child(3),:root[data-r="ora"] .bigdisc{display:none}
+  :root[data-r="ora"] .np-art{display:flex;flex:1;min-height:0;align-items:center;justify-content:center;padding:var(--s2) 0 var(--s5)}
+  :root[data-r="ora"] .np-art img,:root[data-r="ora"] .np-art span{max-width:100%;max-height:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;box-shadow:0 18px 40px -16px rgb(0 0 0 / .7)}
+  :root[data-r="ora"] .np-art span{width:100%;display:grid;place-items:center;background:rgb(255 255 255 / .08)}
+  :root[data-r="ora"] .np-art span svg{width:30%;height:30%}
+  :root[data-r="ora"] .now-title{margin-top:0;flex:none}
+  :root[data-r="ora"] .now-title h1{font-size:1.45rem;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :root[data-r="ora"] .now-star svg{width:26px;height:26px}
+  :root[data-r="ora"] .now-meta{flex:none;margin:2px 0 var(--s2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :root[data-r="ora"] .now-meta a{font-weight:500}
+  :root[data-r="ora"] #bPlay{background:#fff;color:#0e0e12;box-shadow:none}
+  :root[data-r="ora"] #bShuf.on,:root[data-r="ora"] #bRep.on{color:var(--accent)}
+}
 /* sezione Video (video.js): griglia di anteprime, pagina del video, lettore che resta in piccolo cambiando pagina */
 .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:var(--s5) var(--s4);margin-bottom:var(--s6)}
 .vgrid.strip{grid-auto-flow:column;grid-auto-columns:minmax(240px,300px);grid-template-columns:none;overflow-x:auto;scrollbar-width:none;padding-bottom:var(--s2);overscroll-behavior-x:contain}
@@ -1669,8 +1705,8 @@ dialog.profpop:not([open]){display:none}
 dialog.notifpop{position:fixed;inset:auto;margin:0;width:min(420px,calc(100vw - 2 * var(--s4)));max-height:min(78vh,640px);padding:0;display:flex;flex-direction:column;border-radius:var(--r-l);overflow:hidden}
 dialog.notifpop:not([open]){display:none}
 dialog.notifpop::backdrop{background:transparent}
-.np-head{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s3) var(--s3) var(--s4);border-bottom:1px solid var(--line)}
-.np-head b{flex:1;font-size:1.05rem}
+.npo-head{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s3) var(--s3) var(--s4);border-bottom:1px solid var(--line)}
+.npo-head b{flex:1;font-size:1.05rem}
 .np-hint{display:flex;align-items:center;gap:var(--s2);margin:var(--s2) var(--s3) 0;padding:var(--s2) var(--s3);border-radius:var(--r-m);background:var(--accent-soft);color:inherit;text-decoration:none;font-size:.86rem;font-weight:600}
 .np-hint span{flex:1}
 .np-hint svg{width:18px;height:18px;flex:none}

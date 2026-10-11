@@ -2726,7 +2726,28 @@ async function vLyrics() {
   };
   tick();
 }
-addEventListener('hashchange', () => { if (!location.hash.startsWith('#/testo')) document.documentElement.style.removeProperty('--lyr-bg'); });
+addEventListener('hashchange', () => { if (!location.hash.startsWith('#/testo')) document.documentElement.style.removeProperty('--lyr-bg'); if (!location.hash.startsWith('#/ora')) document.documentElement.style.removeProperty('--np-bg'); });
+// telefono, «In riproduzione»: la pagina non scorre, e trascinandola verso il basso si chiude (come Spotify)
+(() => {
+  let y0 = null, x0 = 0, dy = 0;
+  const on = () => document.documentElement.dataset.r === 'ora' && matchMedia('(max-width:860px)').matches;
+  const reset = () => { view.style.transform = view.style.opacity = view.style.transition = ''; };
+  view.addEventListener('touchstart', e => { if (!on() || e.touches.length > 1 || e.target.closest('input,textarea,select')) return; y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; }, { passive: true });
+  view.addEventListener('touchmove', e => {
+    if (y0 == null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy <= 0 || Math.abs(e.touches[0].clientX - x0) > dy) { dy = 0; reset(); return; }
+    view.style.transition = 'none'; view.style.transform = `translateY(${Math.round(dy * .8)}px)`; view.style.opacity = String(1 - Math.min(.4, dy / 900));
+  }, { passive: true });
+  view.addEventListener('touchend', () => {
+    if (y0 == null) return; y0 = null;
+    if (dy > 110) {
+      view.style.transition = 'transform .2s var(--ease-out), opacity .2s'; view.style.transform = 'translateY(60vh)'; view.style.opacity = '0';
+      setTimeout(() => { reset(); Scene.back ? history.back() : (location.hash = '#/home'); }, 170);
+    } else if (dy) { view.style.transition = 'transform .25s var(--ease-out), opacity .25s'; view.style.transform = ''; view.style.opacity = ''; setTimeout(reset, 260); }
+    dy = 0;
+  });
+})();
 function lyrFit() {
   const pg = $('#lyrPage'); if (!pg) return;
   if (!matchMedia('(max-width:860px)').matches) { pg.style.height = ''; return; }
@@ -2739,12 +2760,15 @@ async function vNow() {
   const t = currentTrack();
   if (!t) { Glow.off(); view.innerHTML = '<div class="empty"><h3>Niente in riproduzione</h3><p>Scegli qualcosa da ascoltare.</p><a class="btn primary" href="#/home">Vai alla home</a></div>'; return; }
   Glow.show(t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 300, t.serverId) : '', 'ora');
+  // telefono, come Spotify: lo sfondo prende il colore della copertina (scuro, il testo resta bianco)
+  Glow.colors(t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 300, t.serverId) : '').then(c => { const v = lyrBg(c); if (v && sameTrack(currentTrack(), t) && location.hash.startsWith('#/ora')) document.documentElement.style.setProperty('--np-bg', v); });
   const tab = sessionStorage.getItem('armony:nowtab') || 'lyr';
   const cx = Live.remote() ? { kind: 'Su', name: Live.devices.get(Live.target) || '' } : Jam.role ? { kind: 'Jam', name: Jam.room?.name || '' } : Radio.st ? { kind: 'Radio', name: Radio.st.name } : S.ctx || store.get('qctx', null);
   view.innerHTML = `<div class="now"><div class="np-head mobile-only">
       <button class="icon-btn" data-act="npclose" aria-label="Chiudi il lettore">${ic('chev')}</button>
       <div class="np-ctx">${cx?.name ? `<small>${cx.kind ? 'In riproduzione da ' + esc(cx.kind.toLowerCase()) : 'In riproduzione'}</small>${cx.hash ? `<a href="${esc(cx.hash)}">${esc(cx.name)}</a>` : `<b>${esc(cx.name)}</b>`}` : '<small>In riproduzione</small>'}</div>
       <button class="icon-btn" data-act="nowtools" aria-label="Altre azioni">${ic('more')}</button></div><div>
+      <div class="np-art mobile-only">${t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 600, t.serverId))}" alt="">` : `<span>${ic('album')}</span>`}</div>
       <div class="bigdisc ${isPlaying() ? 'spin' : ''}" id="bigdisc"><canvas id="viz" width="640" height="640"></canvas>
         <div class="rec">${t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 600, t.serverId))}" alt="">` : '<div class="lbl"></div>'}</div></div>
       <div class="now-title"><h1>${esc(t.title)}</h1><button class="icon-btn now-star" id="nowStar" aria-label="Preferito"></button></div>
@@ -3865,7 +3889,7 @@ const NotifPop = {
   paint() {
     const d = $('#dlg'); if (!d.classList.contains('notifpop')) return;
     const top = d.querySelector('.np-list')?.scrollTop || 0;
-    d.innerHTML = `<div class="np-head"><b>Notifiche</b>${Notif.unread ? `<button class="btn sm" id="npAll">Segna tutte come lette</button>` : ''}
+    d.innerHTML = `<div class="npo-head"><b>Notifiche</b>${Notif.unread ? `<button class="btn sm" id="npAll">Segna tutte come lette</button>` : ''}
       <a class="icon-btn" href="#/impostazioni/notifiche" aria-label="Impostazioni delle notifiche" title="Impostazioni">${ic('gear')}</a></div>
       ${!P.notifOn ? `<a class="np-hint" href="#/impostazioni/notifiche">${ic('bell')}<span>Ricevile anche quando Armony non è in primo piano</span>${ic('chevr')}</a>` : ''}
       <div class="np-list">${notifBody()}</div>
