@@ -670,28 +670,32 @@ async function vJam(sub = '') {
   }
   if (!Jam.role) {
     const canRelay = SUBTLE && !!signalBase() && !!srv(), defNet = canRelay ? 'server' : 'lan';
-    view.innerHTML = `<h1>Jam</h1><p class="sub">Ascoltate la stessa musica nello stesso momento, ognuno dal suo telefono. Proponete brani, votate, chattate.</p>
-    <div class="grid2" style="align-items:start">
-      <div class="panel stack"><h3>Crea una Jam</h3>
-        <label class="f">Il tuo nome<input type="text" id="jName" value="${esc(P.nick)}" maxlength="30"></label>
-        <label class="f">Nome della Jam<input type="text" id="jRoom" placeholder="La Jam di ${esc(Jam.name())}" maxlength="60"></label>
-        <div class="seg jnet" role="radiogroup" aria-label="Collegamento">
-          <label><input type="radio" name="jnet" value="server" ${canRelay ? (defNet === 'server' ? 'checked' : '') : 'disabled'}><span>${ic('speaker')} Server</span></label>
-          <label><input type="radio" name="jnet" value="lan" ${defNet === 'lan' ? 'checked' : ''}><span>${ic('wifi')} Stessa rete</span></label>
-          <label><input type="radio" name="jnet" value="internet"><span>${ic('globe')} Internet</span></label></div>
-        <p class="small" style="color:var(--muted);margin:0">Server: il più affidabile, anche in 5G; ognuno ascolta dal server allineato all'host (serve un account sul server${canRelay ? '' : ' e Armony in HTTPS o l\'app'}). Stessa rete: collegamento diretto dentro casa o sul Wi-Fi del locale. Internet: diretto fra reti diverse, permette anche la trasmissione dall'host.</p>
+    // la pagina d'ingresso: avvia (sinistra), entra e Jam vicine (destra); i tre collegamenti come schede da scegliere
+    const NETS = [['server', 'speaker', 'Server', canRelay ? 'Il più affidabile, anche in 5G. Serve un account sul server' : 'Serve Armony in HTTPS (o l\'app) e un account sul server'],
+      ['lan', 'wifi', 'Stessa rete', 'Diretto, in casa o sullo stesso Wi-Fi'], ['internet', 'globe', 'Internet', 'Diretto fra reti diverse; l\'host può anche trasmettere l\'audio']];
+    view.innerHTML = `<div class="jlobby">
+    <header class="jhero"><div class="jhero-art" aria-hidden="true"><i></i><i></i><i></i>${ic('jam')}</div>
+      <div><h1>Jam</h1><p class="sub">Ascoltate la stessa musica nello stesso momento, ognuno dal suo telefono. Proponete brani, votate, chattate.</p>
+      <p class="jsecure">${secureNote}</p></div></header>
+    <div class="jcols">
+      <section class="panel jcard"><h2>Avvia una Jam</h2><p class="jcard-sub">Scegli tu la musica: gli altri si collegano con un link o un QR.</p>
+        <div class="jfields"><label class="f">Il tuo nome<input type="text" id="jName" value="${esc(P.nick)}" maxlength="30" placeholder="Come ti chiami?"></label>
+          <label class="f">Nome della Jam<input type="text" id="jRoom" placeholder="La Jam di ${esc(Jam.name())}" maxlength="60"></label></div>
+        <fieldset class="jnets" role="radiogroup" aria-label="Collegamento"><legend>Come vi collegate</legend>
+          ${NETS.map(([v, i, t, d]) => `<label class="jnet-opt${v === 'server' && !canRelay ? ' off' : ''}"><input type="radio" name="jnet" value="${v}" ${v === defNet ? 'checked' : ''} ${v === 'server' && !canRelay ? 'disabled' : ''}>
+            <span class="jnet-ic">${ic(i)}</span><span class="grow"><b>${t}</b><small>${d}</small></span></label>`).join('')}</fieldset>
         <label class="check"><input type="checkbox" id="jVis" checked><span>Visibile a chi è sulla mia rete<small>Chi è vicino può chiedere di entrare senza link. Entra solo se lo accetti.</small></span></label>
-        <button class="btn primary" data-act="jamcreate">${ic('jam')} Crea</button>
+        <button class="btn primary jgo" data-act="jamcreate">${ic('jam')} Avvia la Jam</button>
+      </section>
+      <div class="jside">
+        <section class="panel jcard"><h2>Entra in una Jam</h2><p class="jcard-sub">Incolla il link d'invito o il codice che ti hanno mandato.</p>
+          <div class="jjoin"><input type="text" id="jCode" placeholder="Link o codice AM1…" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Link d'invito o codice"><button class="btn primary" data-act="jamjoinlink">Entra</button></div>
+          <div class="jmode"><small>Come ascolti</small>${joinModeSeg()}</div></section>
+        <section class="panel jcard"><div class="jcard-h"><h2>Jam vicine</h2><button class="icon-btn" onclick="vJam()" aria-label="Cerca di nuovo" title="Cerca di nuovo">${ic('repeat')}</button></div>
+          <div id="jNear"><p class="jcard-sub">Cerco sulla rete…</p></div></section>
       </div>
-      <div><div class="panel stack"><h3>Entra con un link o un codice</h3>
-        <textarea id="jCode" placeholder="Incolla qui il link d'invito o il codice AM1…" style="min-height:70px"></textarea>
-        ${joinModeSeg()}
-        <button class="btn" data-act="jamjoinlink">Entra</button></div>
-        <div class="panel"><div class="row between"><h3 style="margin:0">Jam vicine</h3><button class="btn sm" onclick="vJam()">Aggiorna</button></div><div id="jNear"><p class="sub">Cerco sulla rete…</p></div></div>
-      </div>
-    </div>
-    <p class="small" style="color:var(--muted)">${secureNote}</p>`;
-    Jam.nearby().then(js => { const b = $('#jNear'); if (b) b.innerHTML = js.length ? js.map(j => `<div class="list-item" data-act="jamknock" data-id="${esc(j.id)}" data-base="${esc(j.base || '')}"><span class="grow"><b>${esc(j.name)}</b><small>di ${esc(j.hostName || '?')}${j.server ? ', server ' + esc(j.server) : ''}</small></span><span class="btn sm">Chiedi di entrare</span></div>`).join('') : '<p class="sub" style="margin:8px 0 0">Nessuna Jam aperta sulla tua rete.</p>'; });
+    </div></div>`;
+    Jam.nearby().then(js => { const b = $('#jNear'); if (b) b.innerHTML = js.length ? js.map(j => `<div class="list-item" data-act="jamknock" data-id="${esc(j.id)}" data-base="${esc(j.base || '')}"><span class="grow"><b>${esc(j.name)}</b><small>di ${esc(j.hostName || '?')}${j.server ? ', server ' + esc(j.server) : ''}</small></span><span class="btn sm">Chiedi di entrare</span></div>`).join('') : `<div class="jnone">${ic('wifi')}<span><b>Nessuna Jam qui vicino</b><small>Quando qualcuno sulla tua rete ne apre una visibile, compare qui.</small></span></div>`; });
     return;
   }
   const host = Jam.role === 'host';

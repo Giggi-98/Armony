@@ -113,6 +113,8 @@ const I = {
   artist: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
   list: '<path d="M4 6h12M4 12h12M4 18h8"/><circle cx="19" cy="17" r="2"/><path d="M21 17V8"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   queue: '<path d="M4 6h16M4 12h16M4 18h10"/>',
@@ -3027,9 +3029,10 @@ async function refreshSosp() {
     return pick ? `<label class="sall"><input type="checkbox" id="sospAll"${n && n === live.filter(x => x.prop).length ? ' checked' : ''}> Tutte le proposte</label>
       <small>${wait ? `Cerco ancora ${wait} ${wait === 1 ? 'proposta' : 'proposte'}…` : ''}</small>
       <button class="btn sm primary" id="sospGo"${n ? '' : ' disabled'}>${ic('repeat')} Sostituisci${n ? n === 1 ? ' 1 brano' : ` ${n} brani` : ''}</button>` : ''; };
-  box.innerHTML = list.length ? `<details class="panel sosp"${list.length < 8 || list.some(x => x.sost) ? ' open' : ''}><summary><b>Da controllare</b> <span class="tag acc" data-n>${list.length}</span><small>Brani forse sbagliati: una live, un videoclip con l'introduzione, un'altra versione. Per ognuno cerco la versione con la durata giusta: spunta quelle che vanno bene e sostituiscile insieme.</small></summary>
+  box.innerHTML = list.length ? `<details class="panel sosp"${list.some(x => x.sost) || sessionStorage.getItem('armony:sosp') === '1' ? ' open' : ''}><summary><b>Da controllare</b> <span class="tag acc" data-n>${list.length}</span><small>Brani forse sbagliati: una live, un videoclip con l'introduzione, un'altra versione. Per ognuno cerco la versione con la durata giusta: spunta quelle che vanno bene e sostituiscile insieme.</small></summary>
     <div class="sosp-bar"></div>${list.map(row).join('')}</details>` : '';
   const paintBar = () => { const b = box.querySelector('.sosp-bar'); if (b) b.innerHTML = bar(); };
+  box.querySelector('details.sosp')?.addEventListener('toggle', e => sessionStorage.setItem('armony:sosp', e.target.open ? '1' : '0'));  // aperto o chiuso, come l'hai lasciato
   const paint = i => { const el = box.querySelector(`[data-row="${i}"]`); if (el) el.outerHTML = row(list[i], i); paintBar(); };
   paintBar();
   const gone = i => {
@@ -3219,32 +3222,40 @@ function dlOptions() {
 async function vDownload(sub = '') {
   const [tab, ...rest] = (sub || '').split('/'); const q0 = rest.join('/');
   const t = ['cerca', 'carica'].includes(tab) ? tab : 'link';
-  const tabs = `<div class="tabs"><a href="#/scarica" class="${t === 'link' ? 'on' : ''}">Da un link</a><a href="#/scarica/cerca" class="${t === 'cerca' ? 'on' : ''}">Cerca online</a><a href="#/scarica/carica" class="${t === 'carica' ? 'on' : ''}">Dal dispositivo</a></div>`;
+  const tabs = `<div class="lpills dltabs" role="navigation" aria-label="Da dove scaricare">${[['link', '', 'link', 'Da un link'], ['cerca', '/cerca', 'search', 'Cerca online'], ['carica', '/carica', 'upload', 'Dal dispositivo']]
+    .map(([k, h, i, l]) => `<a href="#/scarica${h}" class="${t === k ? 'on' : ''}"${t === k ? ' aria-current="page"' : ''}>${ic(i)}${l}</a>`).join('')}</div>`;
   if (t === 'carica') return vUpload(tabs);
   if (S.dl.url && !access().download) { view.innerHTML = `<h1>Scarica</h1>${tabs}<div class="empty">I download non sono abilitati per il tuo utente. Chiedilo a chi gestisce il server.</div>`; return; }
-  view.innerHTML = `<h1>Scarica</h1><p class="sub">Da YouTube, SoundCloud, Bandcamp, Vimeo e centinaia di altri siti. L'audio entra nella libreria, i video restano qui sotto.</p>
+  // a sinistra cosa scaricare (link o ricerca, audio o video, formato e qualità); a destra l'attività. I video vanno nella
+  // sezione Video (video.js): qui resta solo il collegamento
+  view.innerHTML = `<h1>Scarica</h1><p class="sub">Da YouTube, SoundCloud, Bandcamp, Vimeo e centinaia di altri siti.</p>
   <div id="sosp"></div>${tabs}
-  <div class="svc"><div class="svc-main">
-  <div class="panel">
-    ${t === 'link' ? `<label class="f">Link, uno per riga<textarea id="dUrl" placeholder="https://www.youtube.com/watch?v=..."></textarea></label>`
-      : `<div class="row" style="flex-wrap:nowrap"><input type="search" id="ySearch" placeholder="Artista e titolo" value="${esc(q0)}"><select id="ySrc" style="width:auto"><option value="yt">YouTube</option><option value="sc">SoundCloud</option></select><button class="btn primary" id="yGo">${ic('search')}</button></div>`}
-    <div class="row" style="margin:14px 0 0">
-      <div class="seg" role="radiogroup" aria-label="Tipo"><label><input type="radio" name="mode" value="audio" checked><span>Solo audio</span></label><label><input type="radio" name="mode" value="video"><span>Video</span></label></div>
-      <select id="dFmt" style="width:auto" aria-label="Formato"></select><select id="dQ" style="width:auto" aria-label="Qualità"></select>
-    </div>
-    <details style="margin-top:12px"><summary class="small" style="cursor:pointer;color:var(--muted)">Altre opzioni</summary>
-      <div class="stack" style="margin-top:10px">
+  <div class="dlgrid"><div class="dlmain">
+  <section class="panel dlcard">
+    ${t === 'link' ? `<label class="dl-in"><span class="dl-in-h">${ic('link')}Incolla uno o più link<small>uno per riga</small></span>
+        <textarea id="dUrl" rows="3" placeholder="https://www.youtube.com/watch?v=…" spellcheck="false" autocapitalize="none"></textarea></label>
+        ${navigator.clipboard?.readText ? `<button type="button" class="btn sm dl-paste" id="dPaste">${ic('down')} Incolla dagli appunti</button>` : ''}`
+      : `<div class="dl-search"><label class="ordq">${ic('search')}<input type="search" id="ySearch" placeholder="Artista e titolo" value="${esc(q0)}" aria-label="Cerca online" enterkeyhint="search"></label>
+        <select id="ySrc" aria-label="Dove cercare"><option value="yt">YouTube</option><option value="sc">SoundCloud</option></select><button class="btn primary" id="yGo">${ic('search')} Cerca</button></div>`}
+    <div class="dl-kind" role="radiogroup" aria-label="Cosa scaricare">
+      <label class="jnet-opt"><input type="radio" name="mode" value="audio" checked><span class="jnet-ic">${ic('headphones')}</span><span class="grow"><b>Audio</b><small>Entra nella libreria, con copertina e dati</small></span></label>
+      <label class="jnet-opt"><input type="radio" name="mode" value="video"><span class="jnet-ic">${ic('film')}</span><span class="grow"><b>Video</b><small>Lo trovi nella sezione Video</small></span></label></div>
+    <div class="dl-opts"><label class="f">Formato<select id="dFmt"></select></label><label class="f">Qualità<select id="dQ"></select></label></div>
+    <details class="dl-more"><summary>${ic('sliders')} Altre opzioni</summary>
+      <div class="stack">
         <label class="f">Cartella nella libreria<input type="text" id="dDir" value="${esc(store.get('dlDir', 'Scaricati'))}"></label>
         <label class="check"><input type="checkbox" id="dPl"><span>Scarica l'intera playlist o canale<small>Se il link fa parte di una playlist, scarica tutti i brani.</small></span></label>
         <label class="check"><input type="checkbox" id="dSb" ${store.get('dlSb', true) ? 'checked' : ''}><span>Togli parti parlate e sponsor<small>Usa SponsorBlock per tagliare intro, outro e parti non musicali dei video.</small></span></label>
       </div></details>
-    ${t === 'link' ? `<div class="row" style="margin-top:14px"><button class="btn primary" id="dGo">${ic('down')} Scarica</button></div>` : ''}
-  </div>
+    ${t === 'link' ? `<button class="btn primary dl-go" id="dGo">${ic('down')} Scarica</button>` : ''}
+  </section>
   ${t === 'cerca' ? '<div id="yRes"></div>' : ''}
-  </div><div class="svc-side">
-  <div class="row between"><h2>Download</h2><button class="btn sm" data-act="clearjobs">Rimuovi conclusi</button></div>
-  <div id="jobs"><p class="sub">Caricamento…</p></div>
-  <h2>Video</h2><div id="vids"></div></div></div>`;
+  </div><div class="dlside">
+    <div class="dl-sh"><h2>Attività</h2><button class="btn sm" data-act="clearjobs">Rimuovi conclusi</button></div>
+    <div id="jobs"><p class="sub">Caricamento…</p></div>
+    <a class="panel dl-vids" href="#/video">${ic('film')}<span class="grow"><b>I tuoi video</b><small id="vids">…</small></span>${ic('chevr')}</a>
+  </div></div>`;
+  $('#dPaste')?.addEventListener('click', async () => { try { const v = (await navigator.clipboard.readText()).trim(); if (v) { const ta = $('#dUrl'); ta.value = ta.value.trim() ? ta.value.trim() + '\n' + v : v; ta.focus(); } else toast('Gli appunti sono vuoti.'); } catch { toast('Il browser non mi lascia leggere gli appunti: incolla con Ctrl+V.'); } });
   const setOpts = () => {
     const m = $('[name=mode]:checked').value;
     $('#dFmt').innerHTML = m === 'audio' ? '<option value="mp3">MP3</option><option value="m4a">M4A (AAC)</option><option value="opus">Opus</option><option value="flac">FLAC</option>' : '<option value="mp4">MP4</option>';
@@ -3309,7 +3320,7 @@ async function refreshJobs() {
         <small style="color:var(--muted)">${j.mode === 'audio' ? 'Audio ' + esc(j.format.toUpperCase()) : 'Video'}, ${esc(j.quality === 'best' ? 'qualità massima' : j.quality)}</small>
         ${err ? `<p style="color:var(--danger);margin:6px 0 0;font-size:.88rem">${esc(j.error)}</p>` : done ? '' : `<div class="bar"><i style="width:${j.progress || 0}%"></i></div>`}
       </div>`;
-    }).join('') : groups.length ? '' : '<div class="empty">Nessun download.</div>');
+    }).join('') : groups.length ? '' : `<div class="dl-empty">${ic('down')}<b>Nessun download in corso</b><small>Quello che scarichi compare qui, con l'avanzamento.</small></div>`);
     let audioDone = grew, changed = false;
     for (const j of jobs) if (j.status.startsWith('completato') && !scanned.has(j.id)) { scanned.add(j.id); changed = true; if (j.mode === 'audio') audioDone = true; else refreshVideos(); }
     if (changed) store.set('scanned', [...scanned].slice(-400));
@@ -3321,14 +3332,8 @@ async function refreshJobs() {
 }
 async function refreshVideos() {
   const box = $('#vids'); if (!box) return;
-  try {
-    const v = await dlApi('/api/videos');
-    box.innerHTML = v.length ? v.map(x => `<div class="list-item" data-act="playvideo" data-path="${esc(x.path)}" data-name="${esc(x.name)}">
-      <span class="pic" style="display:grid;place-items:center">${ic('film')}</span><span class="grow"><b>${esc(x.name)}</b><small>${esc(x.folder)}, ${bytes(x.size)}</small></span>
-      <a class="icon-btn" href="${esc(videoUrl(x.path, true))}"${NATIVE ? ' target="_blank" rel="noopener"' : ''} aria-label="Scarica sul dispositivo" onclick="event.stopPropagation()">${ic('down')}</a>
-      <button class="icon-btn" data-act="delvideo" data-path="${esc(x.path)}" aria-label="Elimina">${ic('trash')}</button></div>`).join('')
-      : '<div class="empty">Nessun video. Scegli "Video" per scaricarne uno.</div>';
-  } catch { box.innerHTML = ''; }
+  try { const v = await dlApi('/api/videos'); box.textContent = v.length ? `${v.length} ${v.length === 1 ? 'video' : 'video'} · guardali nella sezione Video` : 'Scegli «Video» per scaricarne uno'; }
+  catch { box.textContent = 'Apri la sezione Video'; }
 }
 
 /* ================= caricamento dal dispositivo nella libreria del server ================= */
