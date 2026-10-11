@@ -59,6 +59,8 @@ Armony - server di supporto.
                         aggiornamento la esegue l'host (deploy/armony-update.sh), non il container
   /fed/hello, /fed/v1/*  federazione fra server (federazione.py): richieste firmate Ed25519 dai nodi collegati
   /api/fed/*            collegamenti fra server, solo amministratori (federazione.py)
+  /api/playlist/intelligente   playlist che si aggiornano da sole (regole di Navidrome); /api/salute: doppioni,
+                        tag mancanti, album spezzati, testi cercati dal server (libreria.py, solo amministratori)
   /api/trasferimento/*  trasferimento del server a un altro, solo amministratori; /trasf/v1/* fra i due server,
                         firmate con una chiave usa e getta (trasferimento.py, docs/TRASFERIMENTO.md)
   /api/rete/*           ricerca, ascolto e mappa delle librerie collegate; /api/rete/copia col permesso "download";
@@ -126,6 +128,7 @@ import federazione
 import metadati
 import radio
 import trasferimento
+import libreria
 
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
 VIDEO_DIR = os.environ.get("VIDEO_DIR", "/videos")
@@ -158,10 +161,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento", "intelligenti", "salute"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/trasferimento", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/intelligente", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/trasferimento", "admin"), ("/api/salute", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -2059,6 +2062,7 @@ def lib_arrivo(path, album=None, artist=None, jid=None):
     x = {"path": path, "album": album, "artist": artist, "job": jid, "at": time.time(), "scan": nd_last_scan()}
     with jlock:
         lnew.append(x)
+    libreria.sveglia.set()  # il giro dei testi guarda anche lui
 
 
 def nd_last_scan():
@@ -2775,6 +2779,7 @@ def delete_video(p):
 # federazione fra server: rotte /fed e /api/fed, /api/rete (usano da qui http, credenziali Navidrome, lavori)
 federazione.init(app, sys.modules[__name__])
 trasferimento.init(app, sys.modules[__name__])
+libreria.init(app, sys.modules[__name__])
 dispositivi.init(app, sys.modules[__name__])
 radio.init(app, sys.modules[__name__])
 diagnosi.init(app, sys.modules[__name__])
@@ -2816,6 +2821,7 @@ if __name__ == "__main__":
     threading.Thread(target=lib_loop, daemon=True).start()
     threading.Thread(target=gc_rooms, daemon=True).start()
     federazione.start()
+    libreria.start()  # il giro dei testi in sottofondo
     trasferimento.start()  # dopo un trasferimento appena applicato: indirizzi nuovi e annuncio ai collegati
     radio.start()
     diagnosi.start()

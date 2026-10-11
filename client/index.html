@@ -313,6 +313,26 @@ label.check small{display:block;color:var(--muted)}
 .trcheck li>svg{flex:none;width:18px;height:18px;margin-top:1px;padding:2px;border-radius:50%;color:#fff;background:var(--sage)}
 .trcheck li.no>svg{background:var(--danger)}.trcheck li.warn>svg{background:var(--accent);color:var(--on-accent)}
 .trcheck b{font-weight:600}.trcheck small{display:block;color:var(--muted);font-size:.84rem}
+.lcard.special.smart .lcover{background:linear-gradient(135deg,#3b2fbd,#b38bff);color:#fff}
+/* playlist intelligente: righe campo · condizione · valore */
+@media (min-width:861px){dialog.sheet.smart{width:min(680px,calc(100vw - 2 * var(--s5)));max-width:none}}
+dialog.smart .smbody{display:flex;flex-direction:column;gap:var(--s3);padding:0 14px 14px}
+.smchips{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.smrow{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1.1fr) minmax(0,1fr) auto;gap:var(--s2);align-items:center}
+.smval{display:flex;gap:var(--s1);min-width:0}.smval input{min-width:0;flex:1}
+@media (max-width:560px){.smrow{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto}.smval{grid-column:1 / 3;grid-row:2}.smrow .smx{grid-row:1 / 3;grid-column:3}}
+/* salute della libreria */
+.slhead{display:flex;flex-direction:column;gap:var(--s3)}
+.slsec{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);margin-bottom:var(--s3)}
+.slsec>summary{display:flex;align-items:center;gap:var(--s3);padding:var(--s4);cursor:pointer;list-style:none}
+.slsec>summary::-webkit-details-marker{display:none}
+.slsec>summary small{display:block;color:var(--muted);font-size:.86rem;margin-top:2px}
+.slsec[disabled]>summary{cursor:default}
+.slbody{display:flex;flex-direction:column;gap:var(--s2);padding:0 var(--s4) var(--s4);max-height:60vh;overflow:auto}
+.slrow{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0;border-top:1px solid var(--line)}
+.slrow .grow{min-width:0}.slrow small{display:block;color:var(--muted);font-size:.84rem;overflow-wrap:anywhere}
+.slgr{display:flex;flex-direction:column;gap:var(--s1);padding:var(--s2) 0 var(--s3);border-top:1px solid var(--line)}
+.slgr>.btn{align-self:flex-start}.slgr .slrow{border:0;padding:var(--s1) 0}
 .trbar{height:10px;border-radius:99px;background:var(--surface2);overflow:hidden}
 .trbar i{display:block;height:100%;background:var(--accent);border-radius:inherit;transition:width .6s var(--ease-out)}
 .linkb{background:none;border:0;padding:0;font:inherit;color:var(--accent-text);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px}

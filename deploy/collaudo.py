@@ -119,8 +119,9 @@ def aspetta(fn, sec, ogni=5):
     return None
 
 
-def canzone(n, cartella, titolo, artista, freq=440, dur=20):
-    dx(n, f"docker exec armony-app sh -c {sh_q(f'mkdir -p \"/music/{cartella}\" && ffmpeg -loglevel error -y -f lavfi -i sine=frequency={freq}:duration={dur} -metadata title=\"{titolo}\" -metadata artist=\"{artista}\" -metadata album=\"{cartella}\" -q:a 6 \"/music/{cartella}/{titolo}.mp3\"')}")
+def canzone(n, cartella, titolo, artista, freq=440, dur=20, anno=None, album=None, file=None):
+    extra = f' -metadata date={anno}' if anno else ''
+    dx(n, f"docker exec armony-app sh -c {sh_q(f'mkdir -p \"/music/{cartella}\" && ffmpeg -loglevel error -y -f lavfi -i sine=frequency={freq}:duration={dur} -metadata title=\"{titolo}\" -metadata artist=\"{artista}\" -metadata album=\"{album or cartella}\"{extra} -q:a 9 \"/music/{cartella}/{file or titolo}.mp3\"')}")
     sub(n, "startScan")
 
 
@@ -248,6 +249,29 @@ def prove():
         x = api("b", "POST", f"/api/rete/collab/{lst[0]['node']}/{pid}", {"ids": [sb["id"]]}, tok=utente("b"))
         dentro = aspetta(lambda: (sub("a", "getPlaylist", f"id={pid}").get("playlist") or {}).get("songCount") == 2, 180, 10)
         esito("il brano di B si copia su A ed entra nella playlist", bool(dentro), f"copia: {x.get('copia')}, errore: {x.get('error')}")
+
+    print("\nLibreria: playlist intelligenti, salute, testi")
+    canzone("a", "Anni 80", "Brano del 1985", "Retro", 600, anno=1985)
+    canzone("a", "Anni 90", "Brano del 1995", "Retro", 620, anno=1995)
+    canzone("a", "Doppio", "Brano di casa", "Casa", 330, file="Brano di casa (copia)")  # lo stesso brano due volte
+    canzone("a", "Senza nome", "NA", "Qualcuno", 700)
+    canzone("a", "Queen", "Bohemian Rhapsody", "Queen", 200, dur=354, album="A Night at the Opera")
+    aspetta(lambda: cerca("a", "1995") and cerca("a", "Bohemian"), 90)
+    j = api("a", "POST", "/api/playlist/intelligente", {"name": "Anni 80", "rules": {"all": [{"inTheRange": {"year": [1980, 1989]}}], "sort": "title"}}, tok=utente("a"))
+    spid = j.get("id")
+    pl = aspetta(lambda: (sub("a", "getPlaylist", f"id={spid}").get("playlist") or {}) if spid else None, 30, 3) or {}
+    esito("playlist intelligente creata, dell'utente e solo con il brano del 1985", [e["title"] for e in pl.get("entry", [])] == ["Brano del 1985"] and pl.get("owner") == "admin",
+          f"{[e['title'] for e in pl.get('entry', [])]} · di {pl.get('owner')} · {j.get('error') or ''}")
+    rr = api("a", "GET", f"/api/playlist/intelligente/{spid}", tok=utente("a"))
+    ok = api("a", "PUT", f"/api/playlist/intelligente/{spid}", {"name": "Anni 80 e 90", "rules": {"any": [{"inTheRange": {"year": [1980, 1999]}}]}}, tok=utente("a"))
+    pl = aspetta(lambda: (lambda p: p if len(p.get("entry", [])) == 2 else None)(sub("a", "getPlaylist", f"id={spid}").get("playlist") or {}), 30, 3) or {}
+    esito("le regole si rileggono e si modificano", bool(rr.get("rules")) and ok.get("ok") is True and len(pl.get("entry", [])) == 2, ok.get("error") or pl.get("name", ""))
+    sal = api("a", "GET", "/api/salute")
+    esito("salute: trova il doppione e il titolo «NA»", sal.get("doppioni_tot", 0) >= 1 and sal.get("vuoti_tot", 0) >= 1,
+          f"doppioni {sal.get('doppioni_tot')}, senza titolo {sal.get('vuoti_tot')}, spezzati {len(sal.get('spezzati', []))}")
+    api("a", "PUT", "/api/salute/testi", {"on": True})  # sveglia il giro: il brano è appena arrivato
+    lrc = aspetta(lambda: dx("a", "ls '/root/armony/musica/Queen/' 2>/dev/null | grep -c lrc", check=False).strip() not in ("", "0"), 360, 10)
+    esito("il server trova il testo di «Bohemian Rhapsody» e lo salva (.lrc)", bool(lrc), (api("a", "GET", "/api/salute").get("testi") or {}).get("fermo", ""))
 
     print("\nAttività fra server")
     p = api("c", "GET", "/api/rete/presenza", tok=utente("c"))

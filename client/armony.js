@@ -1744,6 +1744,7 @@ async function playlistsInto(box, n) {
     const l = pls.filter(p => Q ? cleanTxt(`${p.name} ${p.owner || ''}`).includes(Q) : open ? open.ids.includes(p.id) : !inDir.has(p.id))
       .sort({ recent: (a, b) => cmp(b.changed || b.created, a.changed || a.created), alpha: (a, b) => cmp(a.name, b.name), owner: (a, b) => (a.owner !== me) - (b.owner !== me) || cmp(a.owner, b.owner) || cmp(a.name, b.name) }[o.by]);
     const special = can('playlist') && !Q ? `<button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
+        ${smartOk() ? `<button class="lcard special smart" data-act="smartpl"><div class="lcover">${ic('sliders')}</div><b>Playlist intelligente</b><small>Con regole, si aggiorna da sola</small></button>` : ''}
         <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>` : '';
     $('#plCards').className = 'lcards ' + mode;
     $('#plDirHead').innerHTML = open ? `<button class="icon-btn" data-dir="" aria-label="Tutte le playlist">${ic('chevl')}</button>${ic('folder')}<b>${esc(open.n)}</b>
@@ -1776,13 +1777,13 @@ async function vPlaylist(id) {
   const ok = 'pl:' + id, popts = { empty: 'Playlist vuota. Aggiungi brani dal menu ⋯ accanto a ogni canzone.', sortable: true };
   // modificarla: è mia (o sono l'amministratore) e posso gestire playlist
   const owner = can('playlist') && (access().admin || srv().local || !p.owner || p.owner === srv().user);
-  const mine = owner || (can('playlist') && Amici.collab.has(id));  // chi collabora modifica come il proprietario
+  const mine = !p.readonly && (owner || (can('playlist') && Amici.collab.has(id)));  // chi collabora modifica come il proprietario; le intelligenti si cambiano con le regole
   const addB = mine && !srv().local;  // «Aggiungi brani» (addSongsSheet): cerca e spunta dalla libreria
   if (addB) popts.empty = `Playlist vuota.<br><button class="btn primary" data-act="addsongs" data-id="${esc(id)}" data-name="${esc(p.name)}" style="margin-top:var(--s3)">${ic('plus')} Aggiungi brani</button>`;
   const count = q => { const k = arr(q.entry).length; return `${k} ${k === 1 ? 'brano' : 'brani'}, ${fmtLong(q.duration || 0)}`; };
   const empty = { empty: 'Playlist vuota. Aggiungi brani dal menu ⋯ accanto a ogni canzone.' };
   Glow.show(coverUrl(p.coverArt, 300), 'album');
-  view.innerHTML = lPhero({ kind: p.public ? 'Playlist condivisa' : 'Playlist', title: p.name, ph: p.coverArt, art: p.songCount ? imgTag(p.coverArt, 500) : ic('list'),
+  view.innerHTML = lPhero({ kind: p.readonly ? 'Playlist intelligente' : p.public ? 'Playlist condivisa' : 'Playlist', title: p.name, ph: p.coverArt, art: p.songCount ? imgTag(p.coverArt, 500) : ic('list'),
       meta: `${p.comment ? `<span class="phero-desc">${esc(p.comment)}</span>` : ''}${p.owner ? `<b>${esc(p.owner)}</b> · ` : ''}<span id="lCount">${count(p)}</span>` }) +
     lActionBar({ offline: false, extra: (addB ? `<button class="icon-btn ab" data-act="addsongs" data-id="${esc(id)}" data-name="${esc(p.name)}" aria-label="Aggiungi brani" title="Aggiungi brani">${ic('plus')}</button>` : '') + (srv().local ? '' : pinBtn(id)), more: [
       addB && { act: 'addsongs', label: 'Aggiungi brani', icon: 'plus', data: { id, name: p.name } },
@@ -1790,6 +1791,7 @@ async function vPlaylist(id) {
       !srv().local && can('condividi') && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: p.name } },
       { act: 'exportpl', label: 'Esporta (M3U, JSON, CSV)', icon: 'down', data: { id } },
       mine && { act: 'editpl', label: 'Modifica nome e descrizione', icon: 'pen', data: { id } },
+      p.readonly && owner && smartOk() && { act: 'smartedit', label: 'Modifica regole', icon: 'sliders', data: { id } },
       mine && !srv().local && srv().me?.caps?.includes('plordina') && { act: 'reorderpl', label: 'Riordina i brani', icon: 'grip', data: { id } },
       owner && !srv().local && Amici.on() && { act: 'collabpl', label: 'Collaboratori', icon: 'friends', data: { id } },
       owner && fedCollabOk() && { act: 'fedcollabpl', label: 'Collaboratori federazione', icon: 'globe', data: { id } },
@@ -4759,6 +4761,7 @@ function vSettings(id = location.hash.split('/')[2]) {
     <p class="small" style="color:var(--muted);margin:0">Quello con cui gli altri raggiungono Armony (Tailscale, dominio). Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati lo usano al posto dell'indirizzo di casa.</p>
     <div class="row"><button class="btn" id="pubSave">Salva</button></div></div>`] : null,
   adm && caps.includes('youtube') ? ['srv', 'youtube', 'YouTube', 'film', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>'] : null,
+  adm && dlSrv()?.me?.caps?.includes('salute') ? ['srv', 'salute', 'Salute della libreria', 'check', 'salute libreria doppioni copertine tag generi album spezzati testi lrclib pulizia', '<div id="saluteBox"><p class="sub">Controllo la libreria…</p></div>'] : null,
   adm && dlSrv()?.me?.caps?.includes('trasferimento') ? ['srv', 'trasferimento', 'Trasferimento', 'send', 'trasferimento trasloco sposta server nuovo casa migrazione identità', '<div id="trBox"><p class="sub">Caricamento…</p></div>'] : null,
   adm ? ['srv', 'aggiornamenti', 'Aggiornamenti', 'repeat', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>'] : null,
   // stato del server (diagnosi.js) con dentro lo spazio del disco; sui server che non lo conoscono, solo lo spazio
@@ -4809,7 +4812,7 @@ function vSettings(id = location.hash.split('/')[2]) {
       ds.me = { ...ds.me, public: r.public }; persistServers(); toast(r.public ? `Fatto: i link useranno ${r.public}.` : 'Indirizzo tolto: i link useranno quello di ogni dispositivo.');
     } catch (e) { toast(e.message); }
   });
-  if (adm) { refreshUpdate(); refreshUsers(); refreshReg(); refreshYt(); refreshTrasf(); }
+  if (adm) { refreshUpdate(); refreshUsers(); refreshReg(); refreshYt(); refreshTrasf(); refreshSalute(); }
   if (window.ARMONY_APP) { AppUpdate.paint(); NetDns.paint(); }
   Local.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); applyTheme(); });
@@ -5211,6 +5214,112 @@ async function refreshTrasf() {
   $('#trCopy') && ($('#trCopy').onclick = async () => { if (await copyText(store.get('trCode', ''))) toast('Codice copiato.'); });
   const busy = ['aperto', 'agganciato', 'ricezione', 'applicazione', 'invio', 'congelato', 'errore'].includes(t.stage) || t.vivo;
   trT = setTimeout(() => box.isConnected && refreshTrasf(), busy ? 2000 : 15000);
+}
+/* ================= playlist intelligenti (capacità "intelligenti", server/libreria.py) =================
+   Le regole le valuta Navidrome: si aggiornano da sole e le vedono anche le app Subsonic. Qui un costruttore a righe:
+   campo, condizione, valore; «tutte» o «almeno una»; ordine e quanti brani al massimo. */
+const smartOk = () => !!srv()?.me?.caps?.includes('intelligenti') && !srv().local && can('playlist');
+const SM_CAMPI = [['title', 'Titolo', 'testo'], ['artist', 'Artista', 'testo'], ['albumartist', 'Artista dell\'album', 'testo'], ['album', 'Album', 'testo'],
+  ['genre', 'Genere', 'testo'], ['year', 'Anno', 'numero'], ['dateadded', 'Aggiunto', 'data'], ['lastplayed', 'Ultimo ascolto', 'data'],
+  ['playcount', 'Ascolti', 'numero'], ['loved', 'Nei preferiti', 'vero'], ['dateloved', 'Messo nei preferiti', 'data'], ['rating', 'Valutazione (1-5)', 'numero'],
+  ['duration', 'Durata (secondi)', 'numero'], ['bitrate', 'Bitrate (kbps)', 'numero'], ['filetype', 'Formato (mp3, flac…)', 'testo']];
+const SM_OPS = { testo: [['contains', 'contiene'], ['notContains', 'non contiene'], ['is', 'è'], ['isNot', 'non è'], ['startsWith', 'inizia con'], ['endsWith', 'finisce con']],
+  numero: [['is', 'è'], ['isNot', 'non è'], ['gt', 'più di'], ['lt', 'meno di'], ['inTheRange', 'fra']],
+  data: [['inTheLast', 'negli ultimi … giorni'], ['notInTheLast', 'non negli ultimi … giorni'], ['before', 'prima del'], ['after', 'dopo il']],
+  vero: [['is', 'sì'], ['isNot', 'no']] };
+const SM_ORD = [['random', 'A caso'], ['title', 'Titolo'], ['artist', 'Artista'], ['album', 'Album'], ['year', 'Anno'], ['dateadded', 'Aggiunti'], ['lastplayed', 'Ultimo ascolto'], ['playcount', 'Ascolti'], ['rating', 'Valutazione']];
+const SM_MODELLI = [
+  ['Mai ascoltati', { all: [{ is: { playcount: 0 } }], sort: 'random', limit: 100 }],
+  ['Aggiunti di recente', { all: [{ inTheLast: { dateadded: 30 } }], sort: 'dateadded', order: 'desc' }],
+  ['I più ascoltati del mese', { all: [{ inTheLast: { lastplayed: 30 } }], sort: 'playcount', order: 'desc', limit: 50 }],
+  ['Preferiti dimenticati', { all: [{ is: { loved: true } }, { notInTheLast: { lastplayed: 90 } }], sort: 'random', limit: 100 }],
+  ['Anni \'80', { all: [{ inTheRange: { year: [1980, 1989] } }], sort: 'random' }]];
+async function smartSheet(pid) {
+  let cur = { name: '', rules: { all: [{ contains: { title: '' } }], sort: 'random', limit: 100 } };
+  if (pid) { try { cur = await srvApi(srv(), '/api/playlist/intelligente/' + encodeURIComponent(pid)); } catch (e) { return toast(e.message); } }
+  const d = $('#dlg'); d.className = 'sheet smart';
+  const tipo = 'any' in cur.rules ? 'any' : 'all';
+  const row = (c = { contains: { title: '' } }) => {
+    const [op, kv] = Object.entries(c)[0], [campo, v] = Object.entries(kv)[0], t = (SM_CAMPI.find(x => x[0] === campo) || SM_CAMPI[0])[2];
+    const val = t === 'vero' ? '' : op === 'inTheRange' ? `<input type="number" class="smv" value="${esc(v?.[0] ?? '')}" aria-label="Da"><input type="number" class="smv2" value="${esc(v?.[1] ?? '')}" aria-label="A">`
+      : `<input type="${t === 'numero' || (t === 'data' && /InTheLast|inTheLast/.test(op)) ? 'number' : t === 'data' ? 'date' : 'text'}" class="smv" value="${esc(v ?? '')}" aria-label="Valore">`;
+    return `<div class="smrow"><select class="smc" aria-label="Campo">${SM_CAMPI.map(([k, l]) => `<option value="${k}" ${k === campo ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select class="smo" aria-label="Condizione">${SM_OPS[t].map(([k, l]) => `<option value="${k}" ${k === op ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <span class="smval">${val}</span><button type="button" class="icon-btn smx" aria-label="Togli la regola">${ic('close')}</button></div>`;
+  };
+  d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">${pid ? 'Modifica le regole' : 'Playlist intelligente'}</b><small style="color:var(--muted)">Si aggiorna da sola: i brani che rispettano le regole entrano ed escono senza che tu faccia niente.</small></span></div>
+    <div class="smbody">
+      <label class="f">Nome<input type="text" id="smName" value="${esc(cur.name)}" placeholder="Es. Rock anni '90" maxlength="120"></label>
+      ${pid ? '' : `<div class="smchips">${SM_MODELLI.map(([l], i) => `<button type="button" class="chip" data-smm="${i}">${esc(l)}</button>`).join('')}</div>`}
+      <div class="seg" role="radiogroup" aria-label="Quali regole"><label><input type="radio" name="smt" value="all" ${tipo === 'all' ? 'checked' : ''}><span>Tutte le regole</span></label><label><input type="radio" name="smt" value="any" ${tipo === 'any' ? 'checked' : ''}><span>Almeno una</span></label></div>
+      <div id="smRows">${cur.rules[tipo].map(row).join('')}</div>
+      <button type="button" class="btn sm" id="smAdd">${ic('plus')} Aggiungi una regola</button>
+      <div class="grid2"><label class="f">In ordine di<select id="smSort">${SM_ORD.map(([k, l]) => `<option value="${k}" ${k === (cur.rules.sort || 'random') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="f">Al massimo<input type="number" id="smLim" min="1" max="5000" value="${esc(cur.rules.limit || '')}" placeholder="tutti"></label></div>
+      <label class="check"><input type="checkbox" id="smDesc" ${cur.rules.order === 'desc' ? 'checked' : ''}><span>Dal più grande o più recente</span></label>
+      <div class="row"><button class="btn primary" id="smOk">${ic('check')} ${pid ? 'Salva' : 'Crea'}</button><button class="btn" onclick="this.closest('dialog').close()">Annulla</button></div></div>`;
+  const rows = $('#smRows');
+  // cambiando campo o condizione la riga si ridisegna con il valore giusto (numero, data, testo, niente)
+  rows.addEventListener('change', e => { const r = e.target.closest('.smrow'); if (!r || !e.target.matches('.smc,.smo')) return;
+    const campo = r.querySelector('.smc').value, t = SM_CAMPI.find(x => x[0] === campo)[2], ops = SM_OPS[t].map(x => x[0]);
+    const op = e.target.matches('.smo') && ops.includes(r.querySelector('.smo').value) ? r.querySelector('.smo').value : ops[0];
+    r.outerHTML = row({ [op]: { [campo]: t === 'vero' ? true : '' } }); });
+  rows.addEventListener('click', e => { const x = e.target.closest('.smx'); if (x && rows.children.length > 1) x.closest('.smrow').remove(); });
+  $('#smAdd').onclick = () => rows.insertAdjacentHTML('beforeend', row());
+  d.querySelectorAll('[data-smm]').forEach(b => b.onclick = () => { const [l, r] = SM_MODELLI[+b.dataset.smm];
+    if (!$('#smName').value.trim()) $('#smName').value = l;
+    const t = 'any' in r ? 'any' : 'all'; d.querySelector(`input[name="smt"][value="${t}"]`).checked = true;
+    rows.innerHTML = r[t].map(row).join(''); $('#smSort').value = r.sort || 'random'; $('#smLim').value = r.limit || ''; $('#smDesc').checked = r.order === 'desc'; });
+  $('#smOk').onclick = async () => {
+    const name = $('#smName').value.trim(); if (!name) return toast('Dai un nome alla playlist.');
+    const conds = [...rows.children].map(r => { const campo = r.querySelector('.smc').value, op = r.querySelector('.smo').value, t = SM_CAMPI.find(x => x[0] === campo)[2];
+      const v = t === 'vero' ? true : op === 'inTheRange' ? [+r.querySelector('.smv').value, +r.querySelector('.smv2').value] : t === 'testo' || (t === 'data' && /^(before|after)$/.test(op)) ? r.querySelector('.smv').value : +r.querySelector('.smv').value;
+      return { [op]: { [campo]: v } }; });
+    const t = d.querySelector('input[name="smt"]:checked').value, rules = { [t]: conds, sort: $('#smSort').value, order: $('#smDesc').checked ? 'desc' : 'asc' };
+    if (+$('#smLim').value) rules.limit = +$('#smLim').value;
+    try {
+      const r = await srvApi(srv(), '/api/playlist/intelligente' + (pid ? '/' + encodeURIComponent(pid) : ''), { method: pid ? 'PUT' : 'POST', body: JSON.stringify({ name, rules }) });
+      d.close(); emit('playlists'); toast(pid ? 'Regole salvate: la playlist si aggiorna.' : `«${name}» creata: si aggiorna da sola.`);
+      if (!pid) location.hash = '#/playlist/' + encodeURIComponent(r.id); else route();
+    } catch (e) { toast(e.message); }
+  };
+  closeOutside(d); d.showModal();
+}
+
+/* ================= salute della libreria (capacità "salute", solo amministratori) ================= */
+async function refreshSalute() {
+  const box = $('#saluteBox'); if (!box) return;
+  let r; try { r = await dlApi('/api/salute'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  if (!box.isConnected) return;
+  const tr = (x, extra = '') => `<div class="slrow"><span class="grow"><b>${esc(x.title || '(senza titolo)')}</b><small>${esc([x.artist || '(senza artista)', x.album].filter(Boolean).join(' · '))}${extra}</small></span>`;
+  const sec = (id, titolo, n, sub, body) => `<details class="slsec"${n ? '' : ' disabled'}><summary><span class="grow"><b>${titolo}</b><small>${sub}</small></span><span class="tag ${n ? 'acc' : 'ok'}">${n || ic('check')}</span></summary><div class="slbody" id="${id}">${body}</div></details>`;
+  const T = r.testi, pct = r.brani ? Math.round(T.con * 100 / r.brani) : 0;
+  box.innerHTML = `<div class="panel slhead"><b>${r.brani} brani in libreria</b>
+      <div class="trbar" title="Brani con il testo"><i style="width:${pct}%"></i></div>
+      <label class="check"><input type="checkbox" id="slTesti" ${T.on ? 'checked' : ''}><span>Testi: ${T.con} su ${r.brani} (${pct}%)<small>${T.on ? esc(T.fermo || (T.corrente ? `Cerco su LRCLIB: ${T.corrente} · trovati ${T.trovati} su ${T.fatti} provati` : 'Il server cerca i testi che mancano, un brano ogni 2 secondi, e li salva accanto al brano (.lrc): li leggono anche le altre app.')) : 'Spento: il server non cerca i testi che mancano.'}</small></span></label></div>
+    ${sec('slDup', 'Doppioni', r.doppioni_tot, 'Lo stesso brano più volte (titolo, artista e durata uguali). Si tiene quello di qualità migliore, in cima.',
+      r.doppioni.map((gr, i) => `<div class="slgr">${gr.map((x, j) => tr(x, `<br>${esc(x.path)} · ${x.bitrate || '?'} kbps ${esc(x.suffix || '')}`) + (j ? '' : '<span class="tag ok">si tiene</span>') + '</div>').join('')}
+        <button class="btn sm" data-sldup="${i}">${ic('trash')} Elimina ${gr.length === 2 ? 'l\'altro' : `gli altri ${gr.length - 1}`}</button></div>`).join(''))}
+    ${sec('slVuoti', 'Titolo o artista mancante', r.vuoti_tot, 'Brani con «NA», «Unknown» o niente al posto di titolo o artista.',
+      r.vuoti.map((x, i) => tr(x, `<br>${esc(x.path)}`) + `<button class="btn sm" data-slvuoto="${i}">${ic('pen')} Modifica</button></div>`).join(''))}
+    ${sec('slYt', 'Generi presi da YouTube', r.generi_yt_tot, 'Le categorie dei video («People & Blogs», «Gaming»…) finite nel genere dei brani scaricati.',
+      (r.generi_yt.length ? `<button class="btn sm primary" id="slYtFix">Togli questi generi da ${r.generi_yt.length} ${r.generi_yt.length === 1 ? 'brano' : 'brani'}</button>` : '') + r.generi_yt.map(x => tr(x, ` · ${esc(x.generi.join(', '))}`) + '</div>').join(''))}
+    ${sec('slSp', 'Album spezzati', r.spezzati.length, 'Lo stesso album diviso in più album perché anno o artista cambiano fra i brani. «Unisci» mette a tutti i valori più comuni.',
+      r.spezzati.map((x, i) => `<div class="slrow"><span class="grow"><b>${esc(x.name)}</b><small>${esc(x.artist)} · ${x.parti} parti${x.anni.filter(Boolean).length ? ' · anni ' + x.anni.filter(Boolean).join(', ') : ''}</small></span><button class="btn sm" data-slsp="${i}">Unisci</button></div>`).join(''))}`;
+  $('#slTesti').onchange = async e => { try { await dlApi('/api/salute/testi', { method: 'PUT', body: JSON.stringify({ on: e.target.checked }) }); } catch (er) { toast(er.message); } refreshSalute(); };
+  box.onclick = async e => {
+    const b = e.target.closest('[data-sldup],[data-slvuoto],[data-slsp],#slYtFix'); if (!b) return;
+    try {
+      if (b.dataset.sldup) { const gr = r.doppioni[+b.dataset.sldup], via = gr.slice(1);
+        if (!confirm(`Eliminare dal server ${via.length === 1 ? 'questo file' : via.length + ' file'}?\n\n${via.map(x => x.path).join('\n')}\n\nSi tiene ${gr[0].path}.`)) return;
+        await dlApi('/api/tracks/delete', { method: 'POST', body: JSON.stringify({ ids: via.map(x => x.id) }) }); toast('Doppioni eliminati.'); }
+      else if (b.dataset.slvuoto) { const x = r.vuoti[+b.dataset.slvuoto]; return editTrack({ id: x.id, title: x.title, artist: x.artist, album: x.album, serverId: dlSrv()?.id }); }
+      else if (b.dataset.slsp) { const x = r.spezzati[+b.dataset.slsp], j = await dlApi('/api/salute/unisci', { method: 'POST', body: JSON.stringify({ album: x.ids }) });
+        toast(`«${x.name}»: ${j.brani} brani con artista ${j.artista}${j.anno ? ' e anno ' + j.anno : ''}. Navidrome li riunisce alla scansione.`, 5000); }
+      else if (b.id === 'slYtFix') { const j = await dlApi('/api/salute/generi', { method: 'POST', body: JSON.stringify({ ids: r.generi_yt.map(x => x.id) }) }); toast(`Generi sistemati in ${j.brani} brani.`); }
+      setTimeout(refreshSalute, 1500);
+    } catch (er) { toast(er.message); }
+  };
 }
 async function refreshFed() {
   const box = $('#fedBox'); if (!box) return;
@@ -5749,6 +5858,8 @@ view.addEventListener('click', async e => {
         toast(Object.keys(by).length > 1 ? 'Salvata: una playlist per ogni server.' : `Playlist "${name}" salvata.`); break;
       }
       case 'exportqueue': exportTracks('Coda', S.queue); break;
+      case 'smartpl': smartSheet(); break;
+      case 'smartedit': smartSheet(id); break;
       case 'newpl': { const name = await ask('Nuova playlist', '', 'Nome'); if (name) { await api('createPlaylist', { name }); route(); } break; }
       case 'importpl': importPlaylist(); break;
       case 'libplus': libPlus(); break;
