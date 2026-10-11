@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Installatore: porte provate collegandosi, amministratore creato da dentro il container
+**Contesto:** su un PC con WSL un'altra installazione lato Windows rispondeva su 127.0.0.1:4533 e 8080 senza comparire in `ss`: la creazione dell'amministratore è finita sul Navidrome sbagliato («Cannot create another first admin»), e al rilancio il database del nostro, ormai esistente ma vuoto, ha fatto saltare la domanda. Il nostro Navidrome è rimasto senza amministratore.
+**Scelta:** una porta TCP è occupata anche se ci si riesce a collegare (`/dev/tcp`). `createAdmin` e il controllo di Navidrome partono con `docker exec` dentro `armony-navidrome`, quindi rispondono per forza il nostro. L'amministratore si chiede finché la tabella `user` di Navidrome è vuota, non finché manca il database; la password vuota tiene quella già in `.env`. Armony è «accesa» solo se risponde e la sua porta ascolta in questo sistema.
+**Alternative scartate:** chiamare Navidrome dall'host sulla porta pubblicata: è proprio quello che ha sbagliato server. Riconoscere Armony da `/api/info`: due installazioni rispondono uguale.
+**Conseguenze:** un servizio che accetta la connessione ma non è in ascolto qui fa scegliere un'altra porta anche quando non serviva.
+**Da rivedere se:** l'immagine di Navidrome perde `wget` (busybox), o cambia il nome della tabella `user`.
+
 ## 2026-10-11 — Installatore: porte occupate scoperte all'avvio; disinstallazione che tiene i dati
 **Contesto:** su un PC con Docker sotto WSL la 4416 risultava libera a `ss` ma Docker non riusciva a usarla: le porte di Windows (o riservate da Hyper-V, o di Docker Desktop) da Linux non si vedono. Serviva anche un modo per togliere tutto.
 **Scelta:** se `docker compose up` fallisce con una porta occupata (tre forme del messaggio di Docker), o Armony (rete host) scrive «Address already in use», l'installatore sposta quella variabile di `.env` alla porta libera successiva e riprova, fino a 10 volte. Con Docker Desktop avvisa che la rete host va attivata nelle sue impostazioni. `--disinstalla` chiede sempre (anche con `--si`), toglie container, immagini (anche le `prima-…`), servizio di aggiornamento e regole ufw; la cartella con musica e dati resta di base, e per eliminarla serve scrivere `ELIMINA`.

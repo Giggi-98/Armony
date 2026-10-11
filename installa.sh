@@ -59,7 +59,11 @@ occupata() {  # occupata porta tcp|udp
   local p=$1
   case "$PRESE" in *" $p "*) return 0;; esac
   if [ "$2" = udp ]; then [ -n "$(ss -Hlun "sport = :$p" 2>/dev/null)" ] && return 0
-  else [ -n "$(ss -Hltn "sport = :$p" 2>/dev/null)" ] && return 0; fi
+  else
+    [ -n "$(ss -Hltn "sport = :$p" 2>/dev/null)" ] && return 0
+    # chi risponde da fuori da questo sistema (Windows sotto WSL, Docker Desktop) "ss" non lo vede: ci si prova a collegare
+    timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/$p" 2>/dev/null && return 0
+  fi
   case " $DOCKER_PORTE " in *" $p "*) return 0;; esac
   return 1
 }
@@ -181,12 +185,16 @@ cd "$DIR"
 [ -f "$ENVF" ] || { cp .env.example "$ENVF"; NUOVO=1; }
 chown "$UTENTE": "$ENVF"; chmod 600 "$ENVF"
 NOME=$(chiedi "Nome del server (lo vedono gli amici)" "$( [ "${NUOVO:-0}" = 1 ] && hostname || env_get ARMONY_NAME)")
+# l'amministratore si chiede finché Navidrome non ha utenti (non basta che esista il database: un'installazione
+# interrotta lo lascia vuoto)
+ND_UTENTI=$(python3 -c 'import sqlite3,sys; print(sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True).execute("SELECT count(*) FROM user").fetchone()[0])' data/navidrome/navidrome.db 2>/dev/null || echo 0)
 NUOVO_ND=0
-if [ ! -f data/navidrome/navidrome.db ]; then
+if [ "$ND_UTENTI" = 0 ]; then
   NUOVO_ND=1
   ND_USER=$(chiedi "Nome dell'amministratore di Navidrome (sarà anche amministratore di Armony)" "$(env_get NAVIDROME_ADMIN_USER | grep . || echo admin)")
-  ND_PASS=$(chiedi "Password dell'amministratore (vuota = ne genero una)" "" segreta)
-  [ -n "$ND_PASS" ] || ND_PASS=$(casuale 16)
+  ND_VECCHIA=$(env_get NAVIDROME_ADMIN_PASS)
+  ND_PASS=$(chiedi "Password dell'amministratore (vuota = $([ -n "$ND_VECCHIA" ] && echo "tengo quella già in .env" || echo "ne genero una"))" "" segreta)
+  [ -n "$ND_PASS" ] || ND_PASS=${ND_VECCHIA:-$(casuale 16)}
 fi
 DOMINIO=$(chiedi "HTTPS con un nome tuo (es. armony.ddns.net), con la 443 del router inoltrata qui. Vuoto = niente HTTPS diretto" "$(env_get ARMONY_DOMAIN)")
 PROFILI=$(env_get COMPOSE_PROFILES)
@@ -285,7 +293,11 @@ done
 printf 'Attendo che Armony risponda'
 OK=0
 for _ in $(seq 1 60); do
-  curl -fs "http://127.0.0.1:$ARMONY_PORT/api/info" >/dev/null 2>&1 && { OK=1; break; }
+  if curl -fs "http://127.0.0.1:$ARMONY_PORT/api/info" >/dev/null 2>&1; then
+    # deve rispondere la nostra: un'altra Armony (per esempio lato Windows) risponderebbe senza ascoltare in questo sistema
+    [ -n "$(ss -Hltn "sport = :$ARMONY_PORT" 2>/dev/null)" ] && { OK=1; break; }
+    sposta "$ARMONY_PORT" && docker compose up -d armony >/dev/null 2>&1
+  fi
   # Armony usa la rete host: una porta occupata la fa ripartire in errore invece di fermare docker compose
   if docker logs --since 1m armony-app 2>&1 | grep -q "Address already in use"; then
     sposta "$ARMONY_PORT" && docker compose up -d armony >/dev/null 2>&1
@@ -297,10 +309,11 @@ echo
 
 ND_ESITO=""
 if [ "$NUOVO_ND" = 1 ]; then
-  for _ in $(seq 1 30); do curl -fs "http://127.0.0.1:$NAVIDROME_PORT/ping" >/dev/null 2>&1 && break; sleep 2; done
+  # le richieste partono da dentro il container: così risponde di sicuro il nostro Navidrome, non un altro sulla stessa porta
+  for _ in $(seq 1 30); do docker exec armony-navidrome wget -qO- http://127.0.0.1:4533/ping >/dev/null 2>&1 && break; sleep 2; done
   R=$(ND_USER="$ND_USER" ND_PASS="$ND_PASS" python3 -c 'import json,os; print(json.dumps({"username": os.environ["ND_USER"], "password": os.environ["ND_PASS"]}))' \
-      | curl -s -X POST -H 'Content-Type: application/json' --data-binary @- "http://127.0.0.1:$NAVIDROME_PORT/auth/createAdmin" || true)
-  case "$R" in *'"isAdmin":true'*) ND_ESITO="Amministratore Navidrome: $ND_USER  ·  password: $ND_PASS";;
+      | docker exec -i armony-navidrome wget -qO- --header 'Content-Type: application/json' --post-file /dev/stdin http://127.0.0.1:4533/auth/createAdmin 2>&1 || true)
+  case "$R" in *'"isAdmin":true'*) ND_ESITO="Amministratore Navidrome (e di Armony): $ND_USER  ·  password: $ND_PASS";;
     *) ND_ESITO="Amministratore Navidrome NON creato ($R): crealo dalla pagina di Navidrome (vedi sotto)";; esac
 fi
 
