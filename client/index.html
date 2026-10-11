@@ -1656,6 +1656,25 @@ dialog.profpop:not([open]){display:none}
   :root[data-r="ora"] .now-meta a{font-weight:500}
   :root[data-r="ora"] #bPlay{background:#fff;color:#0e0e12;box-shadow:none}
   :root[data-r="ora"] #bShuf.on,:root[data-r="ora"] #bRep.on{color:var(--accent)}
+  /* comandi come Spotify: barra a tutta larghezza con i tempi sotto agli estremi, casuale e ripeti ai bordi,
+     in fondo il dispositivo a sinistra e testo e coda a destra; margini più ampi */
+  :root:is([data-r="ora"],[data-r="testo"]){--player-h:216px}
+  :root:is([data-r="ora"],[data-r="testo"]) .player{grid-template-columns:repeat(5,minmax(0,1fr));grid-template-areas:"seek seek seek seek seek" "shuf prev play next rep" "dev . . lyr qm";row-gap:var(--s3);padding:var(--s2) var(--s5) calc(var(--sab) + var(--s4))}
+  :root:is([data-r="ora"],[data-r="testo"]) .seek{display:grid;grid-template-columns:1fr auto;grid-template-areas:"bar bar" "cur dur";row-gap:6px;padding:0}
+  :root:is([data-r="ora"],[data-r="testo"]) .seek .wave{grid-area:bar;width:100%;margin:0}
+  :root:is([data-r="ora"],[data-r="testo"]) #tCur{grid-area:cur;justify-self:start;font-size:.78rem;color:var(--muted)}
+  :root:is([data-r="ora"],[data-r="testo"]) #tDur{grid-area:dur;justify-self:end;font-size:.78rem;color:var(--muted)}
+  :root:is([data-r="ora"],[data-r="testo"]) #bShuf{justify-self:start;margin-left:calc(-1 * var(--s2))}
+  :root:is([data-r="ora"],[data-r="testo"]) #bRep{justify-self:end;margin-right:calc(-1 * var(--s2))}
+  :root:is([data-r="ora"],[data-r="testo"]) :is(#bShuf,#bRep) svg{width:26px;height:26px}
+  :root:is([data-r="ora"],[data-r="testo"]) :is(#bPrev,#bNext) svg{width:34px;height:34px}
+  :root:is([data-r="ora"],[data-r="testo"]) #bPlay{width:72px;height:72px;margin:0;justify-self:center}
+  :root:is([data-r="ora"],[data-r="testo"]) :is(#bPrev,#bNext){justify-self:center}
+  :root:is([data-r="ora"],[data-r="testo"]) #bPlay svg{width:32px;height:32px}
+  :root:is([data-r="ora"],[data-r="testo"]) #bDev{justify-self:start;margin-left:calc(-1 * var(--s2))}
+  :root:is([data-r="ora"],[data-r="testo"]) #bLyrM{justify-self:end}
+  :root:is([data-r="ora"],[data-r="testo"]) #bQueueM{justify-self:end;margin-right:calc(-1 * var(--s2))}
+  :root:is([data-r="ora"],[data-r="testo"]) :is(#bDev,#bLyrM,#bQueueM) svg{width:24px;height:24px}
 }
 /* «Aggiungi brani» a una playlist (addSongsSheet): ricerca in alto, elenco che scorre, scelta e tasto sempre in fondo */
 dialog.addsongs{display:flex;flex-direction:column;padding:0;width:min(560px,100vw);height:min(80dvh,720px);max-height:none}

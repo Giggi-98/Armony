@@ -788,12 +788,19 @@ async function vHome() {
     ${secHead('Da riscoprire', 'random')}${albumGrid(L(rnd), { strip: true })}<div id="newRel"></div>`;
   newReleases(n);
   if (Radio.ok()) { window.autoAnimate?.($('#radioRow')); Radio.paintAll(); if (!Live.es) Radio.load(); }
+  // «Riprendi»: solo quando un altro tuo dispositivo si è fermato da un po' (riapri l'app ore dopo) e adesso non suona
+  // niente, né qui né altrove: se un dispositivo sta suonando c'è «Dove suona», non serve riprendere
   QSync.check().then(q => {
     if (!q || !$('#resume')) return;
+    if (isPlaying() || [...Live.states.values()].some(x => x.playing) || Date.now() - q.at < 15 * 60000) return;
+    const name = Live.devices.get(q.cid) || Live.gone?.[q.cid] || '';
+    const done = () => { store.set('qsyncSeen', q.at); $('#resume').innerHTML = ''; };
     $('#resume').innerHTML = `<div class="hbanner">${q.current.coverArt ? `<span class="hb-art">${imgTag(q.current.coverArt, 96, q.current.serverId)}</span>` : ''}
-      <span class="grow"><small>Su un altro dispositivo${q.by ? ` (${esc(q.by)})` : ''}</small><b>${esc(q.current.title)}</b></span>
-      <button class="btn sm primary" id="resumeBtn">${ic('play', true)} Riprendi da ${fmt(q.position)}</button></div>`;
-    $('#resumeBtn').onclick = () => { S.queue = q.tracks; playIndex(q.index, { startAt: q.position }); $('#resume').innerHTML = ''; };
+      <span class="grow"><small>Ti eri fermato ${ago(q.at)}${name ? ` · su ${esc(name)}` : ' su un altro dispositivo'}</small><b>${esc(q.current.title)}</b></span>
+      <button class="btn sm primary" id="resumeBtn">${ic('play', true)} Riprendi da ${fmt(q.position)}</button>
+      <button class="icon-btn" id="resumeX" aria-label="Non ora">${ic('close')}</button></div>`;
+    $('#resumeBtn').onclick = () => { S.queue = q.tracks; playIndex(q.index, { startAt: q.position }); done(); };
+    $('#resumeX').onclick = done;
   });
   friendsNow().then(list => {
     const box = $('#friendsStrip'); if (!box || !list.length || Presence.on()) return;  // con la presenza ci sono le storie
@@ -2537,8 +2544,8 @@ const QSync = {
       if (pq.changedBy === S.device || changed <= store.get('qsyncSeen', 0) || changed <= store.get('qsyncSaved', 0)) return null;
       const tracks = arr(pq.entry).map(x => norm(x)); const index = Math.max(0, tracks.findIndex(x => x.id === pq.current));
       if (S.queue[S.index] && S.queue[S.index].id === pq.current) return null;
-      store.set('qsyncSeen', changed);
-      return { tracks, index, current: tracks[index], position: (pq.position || 0) / 1000, by: (pq.changedBy || '').replace(/^armony-/, 'dispositivo ') };
+      // «visto» lo segna chi la mostra, quando la si usa o la si chiude: se ora non è il momento, resta per dopo
+      return { tracks, index, current: tracks[index], position: (pq.position || 0) / 1000, at: changed, cid: pq.changedBy || '' };
     } catch { return null; }
   }
 };
