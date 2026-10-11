@@ -4833,7 +4833,7 @@ function inviteSheet(code) {
 const fedBase = () => pubBase(srv());
 const fedLoop = /^https?:\/\/(127\.|localhost|\[::1\])/;
 const fedAgo = t => { const s = (Date.now() / 1000 - t) | 0; return !t ? 'mai' : s < 10 ? 'adesso' : s < 60 ? `${s} s fa` : ago(t * 1000); };
-let fedT = 0;
+let fedT = 0, fedMyUrl = '';
 // il botta e risposta di un collegamento, in tre passi: richiesta → conferma → in linea
 function fedSteps(x) {
   const out = x.state === 'attesa', inc = x.state === 'richiesta';
@@ -4845,7 +4845,7 @@ function fedCard(x) {
   const id = esc(x.id), nm = esc(x.name), recv = x.dir === 'entrambi' || x.dir === 'ricevo';
   const via = { canale: 'dal suo canale', uscita: 'dal tuo canale', diretto: 'diretto', lui: 'ci contatta lui' }[x.reach] || '';
   // senza indirizzo, fra l'accettazione e il primo giro del suo canale passa un minuto: è un'attesa, non un errore
-  const quiet = x.state === 'attivo' && !x.online && !x.url && (!x.contatto || Date.now() / 1000 - x.contatto < 300);
+  const quiet = x.state === 'attivo' && !x.online && !x.url && x.dir !== 'offro' && (!x.contatto || Date.now() / 1000 - x.contatto < 300);
   const stat = x.state === 'attivo'
     ? x.online ? `<span class="feddot ok"></span>In linea · ${via} · ultimo contatto ${fedAgo(x.contatto)}`
       : quiet ? `<span class="feddot wait"></span>Collegato · aspetto il suo canale` : `<span class="feddot err"></span>Non risponde · ultimo contatto ${fedAgo(x.contatto)}`
@@ -4863,11 +4863,16 @@ function fedCard(x) {
       <small>Le playlist che scegli si copiano su questo server, brani compresi, e restano uguali alle sue. Tutto il resto della sua libreria lo cerchi e lo ascolti in streaming attraverso il collegamento, senza copiare niente.</small>
       <div class="row"><button class="btn primary" data-act="fedpl" data-id="${id}" data-name="${nm}">${ic('list')} Scegli le playlist</button><button class="btn" data-act="fedstream" data-id="${id}">No, ascolto in streaming</button></div></div>`;
   const meta = x.state === 'attivo' ? `<p class="fedmeta">${[`${x.songs} brani, ${x.albums} album${x.app ? ' · Armony ' + esc(x.app) : ''}${x.synced ? ' · catalogo ' + fedAgo(x.synced) : ''}`,
-    !recv ? 'Lui vede la tua libreria; tu non cerchi nella sua.' : x.sync === 'playlist' ? `Copi le playlist che scegli, il resto in streaming. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Playlist</button>`
+    // il canale: chi lo apre e perché, così nessuno deve chiedersi cosa fare
+    !x.url && x.dir === 'offro' ? `Non apre un canale: con «Solo lui vede me» non ti serve. Se vuoi vedere la sua libreria scegli «Ci vediamo a vicenda» qui sotto e il canale lo apre lui da solo.`
+      : !x.url && x.reach === 'canale' ? `Non si raggiunge da fuori: tiene aperto lui un canale verso questo server, da cui passa la sua libreria.`
+      : x.reach === 'uscita' ? `Questo server non si raggiunge da fuori: tiene aperto un canale verso ${nm}, da cui passa la tua libreria. Non devi fare niente.`
+      : !fedMyUrl && x.dir === 'ricevo' ? `${nm} ha scelto di non vedere la tua libreria: vedi la sua, e il canale non serve.` : '',
+    !recv ? (x.url ? 'Lui vede la tua libreria; tu non cerchi nella sua.' : '') : x.sync === 'playlist' ? `Copi le playlist che scegli, il resto in streaming. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Playlist</button>`
       : x.sync === 'stream' ? `Ascolti in streaming, senza copiare. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Copia delle playlist</button>` : '',
     `Codice di sicurezza <span class="safety sm">${esc(x.safety)}</span>`].filter(Boolean).join('<br>')}</p>` : '';
   const foot = x.state === 'attivo' ? `<div class="fedfoot">${x.dir ? `<select class="fedverso" data-id="${id}" aria-label="Verso del collegamento con ${nm}">${[['entrambi', 'Ci vediamo a vicenda'], ['offro', 'Solo lui vede me'], ['ricevo', 'Solo io vedo lui']].map(([v, l]) => `<option value="${v}" ${x.dir === v ? 'selected' : ''}>${l}</option>`).join('')}</select>` : ''}
-      <button class="icon-btn" data-act="fedsync" data-id="${id}" aria-label="Riscarica il catalogo" title="Riscarica il catalogo">${ic('repeat')}</button><button class="icon-btn" data-act="fedrm" data-id="${id}" data-name="${nm}" aria-label="Scollega" title="Scollega">${ic('trash')}</button></div>`
+      ${recv ? `<button class="icon-btn" data-act="fedsync" data-id="${id}" aria-label="Riscarica il catalogo" title="Riscarica il catalogo">${ic('repeat')}</button>` : ''}<button class="icon-btn" data-act="fedrm" data-id="${id}" data-name="${nm}" aria-label="Scollega" title="Scollega">${ic('trash')}</button></div>`
     : x.state !== 'richiesta' ? `<div class="fedfoot"><button class="btn sm" data-act="fedrm" data-id="${id}" data-name="${nm}">${x.state === 'attesa' ? 'Annulla la richiesta' : 'Togli'}</button></div>` : '';
   return `<div class="fedcard${x.state === 'richiesta' || (x.state === 'attivo' && recv && !x.sync && x.online) ? ' ask' : ''}">
     <div class="fedcard-head"><span class="fedav">${esc((x.name || '?')[0].toUpperCase())}</span><span class="grow"><b>${nm}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><span class="fedstat">${stat}</span></span></div>
@@ -4878,6 +4883,7 @@ async function refreshFed() {
   clearTimeout(fedT);
   let f; try { f = await dlApi('/api/fed'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
   if (!box.isConnected) return;  // nel frattempo si è cambiata pagina
+  fedMyUrl = f.settings.url;
   const head = `<span class="fedav">${ic('home')}</span><span class="grow"><b>${esc(f.me.nome)}</b><small>${f.me.songs} brani · ${f.me.albums} album · impronta <code>${esc(f.me.short)}</code></small></span>
     <span class="tag ${f.settings.url ? 'ok' : ''}">${f.settings.url ? 'Raggiungibile da fuori' : 'Senza indirizzo'}</span>`;
   if (!box.dataset.on) {

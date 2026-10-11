@@ -1116,8 +1116,10 @@ def fed_info(sid):
 
 # ------------------------------------------------------------------ gestione (solo amministratori)
 def node_out(n):
-    # senza indirizzo lui ci parla, ma noi lo raggiungiamo solo dal suo canale: in linea vuol dire canale aperto
-    online = n["state"] == "attivo" and not n["error"] and n["seen"] and time.time() - n["seen"] < 3 * REFRESH_S and n["url"]
+    # senza indirizzo lui ci parla, ma noi lo raggiungiamo solo dal suo canale: in linea vuol dire canale aperto. Tranne
+    # con «offro» (non prendo niente da lui, il canale non si apre): basta che si faccia sentire, scaricando il mio catalogo
+    seen_ok = n["state"] == "attivo" and n["seen"] and time.time() - n["seen"] < 3 * REFRESH_S
+    online = seen_ok and (n["url"] and not n["error"] or not n["url"] and n.get("dir") == "offro")
     canale = time.time() - chan_last.get(n["id"], 0) < CHAN_POLL + 30  # (foglia) il mio canale verso di lui gira
     return {k: n[k] for k in ("id", "name", "owner", "url", "state", "created", "seen", "app", "songs", "albums", "error", "synced", "dir")} | {
         "transitive": bool(n["transitive"]), "online": bool(online or chan_ok(n["id"]) or canale and n["state"] == "attivo"), "safety": safety(PUB, n["pub"]),

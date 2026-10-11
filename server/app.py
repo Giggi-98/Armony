@@ -2323,8 +2323,9 @@ def semver(v):
 
 
 def check_latest(force=False):
-    # 6 ore: l'API GitHub senza token concede 60 richieste l'ora per IP
-    if not REPO or (not force and time.time() - latest["checked"] < 6 * 3600):
+    # al più una volta l'ora (il giro orario): l'API GitHub senza token concede 60 richieste l'ora per IP. Con 6 ore
+    # l'avviso di una versione nuova arrivava anche 7 ore dopo il rilascio
+    if not REPO or (not force and time.time() - latest["checked"] < 3300):
         return
     try:
         r = http.get(f"https://api.github.com/repos/{REPO}/tags?per_page=100", timeout=10)
@@ -2343,10 +2344,28 @@ def avvisa_versione():
     if cur and new and new > cur:
         if latest["tag"] != latest.get("detto") and not db.one("SELECT 1 FROM notifiche WHERE once = ?", "versione:" + latest["tag"]):
             latest["detto"] = latest["tag"]
-            diagnosi.fuori(f"versione {latest['tag'].lstrip('v')} disponibile", "Aggiorna da Impostazioni → Server")
+            diagnosi.fuori(f"versione {latest['tag'].lstrip('v')} disponibile", "Aggiorna da Impostazioni → Aggiornamenti")
         for r in db.all_("SELECT DISTINCT user FROM devices WHERE admin = 1 AND state = 'fidato'"):
-            notifiche.notifica(r["user"], "sistema", f"Armony {latest['tag'].lstrip('v')} disponibile", "Aggiorna da Impostazioni → Server",
-                               "#/impostazioni", only_once="versione:" + latest["tag"])
+            notifiche.notifica(r["user"], "sistema", f"Armony {latest['tag'].lstrip('v')} disponibile", "Aggiorna da Impostazioni → Aggiornamenti",
+                               "#/impostazioni/aggiornamenti", only_once="versione:" + latest["tag"])
+
+
+def avvisa_aggiornamento():
+    """All'avvio: com'è finito l'ultimo «Aggiorna» (lo scrive deploy/armony-update.sh in updates/status.json). Il server
+    si riavvia con la versione nuova, o con quella di prima se la nuova non partiva: in tutti e due i casi lo dice agli
+    amministratori, una volta sola."""
+    st = read_json(os.path.join(UPDATE_DIR, "status.json")) or {}
+    ts = int(st.get("ts") or 0)
+    if time.time() - ts > 86400:
+        return  # esito vecchio: già visto, o di prima che esistesse questo avviso
+    if st.get("state") == "fatto" and st.get("msg") == "v" + VERSION:
+        title, body = f"Armony {VERSION} installata", "L'aggiornamento è andato a buon fine."
+    elif st.get("state") == "errore":
+        title, body = "Aggiornamento non riuscito", str(st.get("msg") or "")[:300]
+    else:
+        return
+    for r in db.all_("SELECT DISTINCT user FROM devices WHERE admin = 1 AND state = 'fidato'"):
+        notifiche.notifica(r["user"], "sistema", title, body, "#/impostazioni/aggiornamenti", only_once=f"aggiornamento:{ts}")
 
 
 def pota_lavori():
@@ -2793,6 +2812,7 @@ if __name__ == "__main__":
     federazione.start()
     radio.start()
     diagnosi.start()
+    threading.Timer(15, avvisa_aggiornamento).start()
     if MULTICAST:
         threading.Thread(target=mcast_sender, daemon=True).start()
         threading.Thread(target=mcast_listener, daemon=True).start()
