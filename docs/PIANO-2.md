@@ -167,7 +167,7 @@ quindi le notifiche viaggiano sul canale dal vivo che i dispositivi tengono già
 - **0.31.0 (2026-10-11)**: 6.9 (artisti ospiti), 8.4 (elenco dei download calcolato una volta e con ETag; «Da controllare» resta com'è: si chiede solo mentre si aspettano proposte), 8.5.
 - **0.32.0 (2026-10-11)**: 4.7 (ARMONY_AVVISI: ntfy o Telegram), 5.10, cartelle di playlist (resto di 6.10).
 - **0.33.0 (2026-10-11)**: 3.12 (gettone del dispositivo al posto della sessione per canale dal vivo e video; `/api/lan/servers` e le Jam vicine solo da casa), 7.8.
-- **0.39.0 (2026-10-11)**: 9.6 (notifiche ad app Android chiusa, WorkManager ogni 15 minuti con un gettone solo per le notifiche).
+- **0.39.1 (2026-10-11)**: 9.6 (notifiche ad app Android chiusa, WorkManager ogni 15 minuti con un gettone solo per le notifiche).
 - In più, fuori piano: telecomando con testi, dettagli e bande; utenti eliminati che ricomparivano.
 
 ## Ordine proposto
