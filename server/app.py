@@ -1552,8 +1552,23 @@ def run_job(jid, j):
             {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
             {"key": "FFmpegMetadata", "add_metadata": True}, {"key": "EmbedThumbnail"}]
     try:
-        with yt_dlp.YoutubeDL(opts) as y:
-            code = y.download([j["url"]])
+        # ─── PERCHÉ altri due tentativi ───
+        # YouTube a volte rifiuta (403) l'indirizzo di un flusso appena ottenuto, e poco dopo lo stesso video si scarica:
+        # yt-dlp non ripete i 403. Si rifà l'estrazione (indirizzi nuovi); al terzo tentativo, per i video, senza i formati
+        # "super resolution" (-sr), i più recenti
+        for tent in range(3):
+            try:
+                with yt_dlp.YoutubeDL(opts) as y:
+                    code = y.download([j["url"]])
+                break
+            except yt_dlp.utils.DownloadError as e:
+                if "403" not in str(e) or tent == 2 or yt_bloccato(e):
+                    raise
+                diagnosi.avviso("download", f"YouTube ha rifiutato il flusso (403): riprovo, tentativo {tent + 2}", f"{j['url']}\n{str(e)[:300]}", user=jobs[jid].get("by"))
+                jupdate(jid, status="riprovo", progress=0)
+                time.sleep(5)
+                if tent == 1 and not audio:
+                    opts["format"] = f"bestvideo[format_id!*=-sr]{h}+bestaudio/best{h}"
         jupdate(jid, status="completato" if code == 0 else "completato con errori", progress=100, finished=time.time())
         if audio:
             lib_arrivo(None, meta.get("album"), meta.get("artist"), jid)
