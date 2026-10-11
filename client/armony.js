@@ -1512,12 +1512,15 @@ async function vPlaylist(id) {
   // modificarla: è mia (o sono l'amministratore) e posso gestire playlist
   const owner = can('playlist') && (access().admin || srv().local || !p.owner || p.owner === srv().user);
   const mine = owner || (can('playlist') && Amici.collab.has(id));  // chi collabora modifica come il proprietario
+  const addB = mine && !srv().local;  // «Aggiungi brani» (addSongsSheet): cerca e spunta dalla libreria
+  if (addB) popts.empty = `Playlist vuota.<br><button class="btn primary" data-act="addsongs" data-id="${esc(id)}" data-name="${esc(p.name)}" style="margin-top:var(--s3)">${ic('plus')} Aggiungi brani</button>`;
   const count = q => { const k = arr(q.entry).length; return `${k} ${k === 1 ? 'brano' : 'brani'}, ${fmtLong(q.duration || 0)}`; };
   const empty = { empty: 'Playlist vuota. Aggiungi brani dal menu ⋯ accanto a ogni canzone.' };
   Glow.show(coverUrl(p.coverArt, 300), 'album');
   view.innerHTML = lPhero({ kind: p.public ? 'Playlist condivisa' : 'Playlist', title: p.name, ph: p.coverArt, art: p.songCount ? imgTag(p.coverArt, 500) : ic('list'),
       meta: `${p.comment ? `<span class="phero-desc">${esc(p.comment)}</span>` : ''}${p.owner ? `<b>${esc(p.owner)}</b> · ` : ''}<span id="lCount">${count(p)}</span>` }) +
-    lActionBar({ offline: false, extra: srv().local ? '' : pinBtn(id), more: [
+    lActionBar({ offline: false, extra: (addB ? `<button class="icon-btn ab" data-act="addsongs" data-id="${esc(id)}" data-name="${esc(p.name)}" aria-label="Aggiungi brani" title="Aggiungi brani">${ic('plus')}</button>` : '') + (srv().local ? '' : pinBtn(id)), more: [
+      addB && { act: 'addsongs', label: 'Aggiungi brani', icon: 'plus', data: { id, name: p.name } },
       { act: 'enqueueall', label: 'Aggiungi alla coda', icon: 'queue' },
       !srv().local && can('condividi') && { act: 'shareitem', label: 'Condividi un link', icon: 'share', data: { id, name: p.name } },
       { act: 'exportpl', label: 'Esporta (M3U, JSON, CSV)', icon: 'down', data: { id } },
@@ -3672,6 +3675,52 @@ async function addToPlaylistDialog(tracks) {
     $('#npGo').onclick = async () => { const name = $('#npName').value.trim(); if (!name) return; try { await createPlaylist(name, ids, sid); d.close(); toast(`Playlist "${name}" creata.`); } catch (e) { toast(e.message); } };
   } catch (e) { d.innerHTML = `<h3>Errore</h3><p>${esc(e.message)}</p><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button>`; }
 }
+// «Aggiungi brani» dentro una playlist, come Spotify: cerca nella libreria (senza scrivere niente: ascoltati di recente
+// e Preferiti), spunta quanti brani vuoi (la scelta resta cambiando ricerca) e «Aggiungi». Quelli che ci sono già sono
+// segnati; le collaborative passano dal server (/api/collab/aggiungi), come in «Aggiungi a playlist»
+async function addSongsSheet(pid, name) {
+  const s = srv(); if (!s || s.local) return;
+  const d = $('#dlg'); d.className = 'sheet addsongs';
+  let there = new Set(); try { there = new Set(arr((await api('getPlaylist', { id: pid })).playlist.entry).map(x => x.id)); } catch {}
+  const sel = new Map(); let shown = [], tok = 0, timer = null;
+  d.innerHTML = `<div class="as-head"><span class="grow"><b>Aggiungi brani</b><small>a «${esc(name)}»</small></span><button class="icon-btn" id="asX" aria-label="Chiudi">${ic('close')}</button></div>
+    <label class="ordq as-q">${ic('search')}<input type="search" id="asQ" placeholder="Cerca brani, artisti, album" aria-label="Cerca brani da aggiungere" autocomplete="off" enterkeyhint="search"></label>
+    <div class="as-list" id="asList"></div>
+    <div class="as-foot"><span class="grow" id="asN">Nessun brano scelto</span><button class="btn primary" id="asGo" disabled>Aggiungi</button></div>`;
+  const row = (t, i) => `<label class="as-row${there.has(t.id) ? ' in' : ''}"><input type="checkbox" data-i="${i}" ${sel.has(t.id) ? 'checked' : ''}>
+    <span class="pic">${imgTag(t.coverArt, 80, t.serverId)}</span><span class="grow"><b>${esc(t.title)}</b><small>${there.has(t.id) ? '<em>già nella playlist</em> · ' : ''}${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</small></span><small class="as-d">${fmt(t.duration)}</small></label>`;
+  const paint = parts => {
+    shown = []; const box = $('#asList'); if (!box) return;
+    box.innerHTML = parts.filter(([, l]) => l.length).map(([h, l]) => `${h ? `<p class="nsec-h">${h}</p>` : ''}${l.map(t => row(t, shown.push(t) - 1)).join('')}`).join('') || '<p class="sub as-none">Nessun brano trovato.</p>';
+  };
+  const count = () => { const n = sel.size; $('#asN').textContent = n ? `${n} ${n === 1 ? 'brano scelto' : 'brani scelti'}` : 'Nessun brano scelto'; $('#asGo').disabled = !n; $('#asGo').textContent = n ? `Aggiungi ${n}` : 'Aggiungi'; };
+  const sugg = async () => {
+    const n = ++tok; $('#asList').innerHTML = '<p class="sub as-none">Carico…</p>';
+    let fav = []; try { fav = arr((await api('getStarred2')).starred2?.song).map(x => norm(x)).sort((a, b) => String(b.starredAt || '').localeCompare(String(a.starredAt || ''))); } catch {}
+    const seen = new Set(), rec = [];
+    for (const x of (await Stats.since(60)).sort((a, b) => b.ts - a.ts)) if (x.serverId === s.id && x.id && !seen.has(x.id)) { seen.add(x.id); rec.push({ ...x, serverId: s.id }); if (rec.length >= 25) break; }
+    if (n === tok) paint([['Ascoltati di recente', rec], ['Dai tuoi Preferiti', fav.slice(0, 60)]]);
+  };
+  const search = async q => {
+    const n = ++tok;
+    let r = []; try { r = arr((await api('search3', { query: q, songCount: 60, artistCount: 0, albumCount: 0 })).searchResult3?.song).map(x => norm(x)); } catch (e) { if (n === tok) $('#asList').innerHTML = `<p class="sub as-none">${esc(e.message)}</p>`; return; }
+    if (n === tok) paint([['', r]]);
+  };
+  $('#asQ').oninput = e => { clearTimeout(timer); const q = e.target.value.trim(); timer = setTimeout(() => q ? search(q) : sugg(), q ? 250 : 0); };
+  $('#asList').onchange = e => { const c = e.target.closest('input[data-i]'); if (!c) return; const t = shown[+c.dataset.i]; c.checked ? sel.set(t.id, t) : sel.delete(t.id); count(); };
+  $('#asX').onclick = () => d.close();
+  $('#asGo').onclick = async () => {
+    const ids = [...sel.keys()]; $('#asGo').disabled = true;
+    try {
+      if (Amici.collab.has(pid)) await srvApi(s, '/api/collab/aggiungi', { method: 'POST', body: JSON.stringify({ pid, ids }) });
+      else await addSongsToPlaylist(pid, ids, s.id);
+      d.close(); toast(ids.length === 1 ? 'Brano aggiunto.' : `${ids.length} brani aggiunti.`); emitSoon('playlists'); route();
+    } catch (e) { $('#asGo').disabled = false; toast(e.message); }
+  };
+  d.onclose = () => { d.className = ''; d.onclose = null; tok++; };
+  d.showModal(); sugg();
+  if (matchMedia('(pointer:fine)').matches) $('#asQ').focus();
+}
 async function shareItem(id, name, sid = S.active) {
   const s = srv(sid);
   try {
@@ -5229,6 +5278,7 @@ view.addEventListener('click', async e => {
         toast(on ? 'Non più offerta ai server collegati.' : 'Offerta ai server collegati.'); break;
       }
       case 'dirpl': { const r = $('[data-act="lmore"]')?.getBoundingClientRect(); PlDir.pick(id, r ? [r.left, r.bottom + 4] : [innerWidth / 2, innerHeight / 3]); break; }  // dal menu ⋯: vicino al suo tasto
+      case 'addsongs': addSongsSheet(el.dataset.id || id, el.dataset.name || ''); break;
       case 'delpl': if (confirm('Eliminare questa playlist? I brani restano in libreria.')) { await api('deletePlaylist', { id }); location.hash = '#/playlist'; } break;
       case 'upforce': { const u = Up.list[+el.dataset.i]; if (u) { u.force = true; u.status = 'in coda'; upRun(); } break; }
       case 'upclear': Up.list = Up.list.filter(u => ['in coda', 'in corso'].includes(u.status)); upRender(); break;
