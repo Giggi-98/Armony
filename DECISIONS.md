@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Radio da internet: salvate sul server, ascoltate passando dal server, solo indirizzi pubblici
+
+**Contesto:** l'utente vuole aggiungere radio esterne e lasciarle pronte nella pagina Radio.
+**Scelta:** `server/webradio.py` (migrazione 15, tabella `webradio`): stazioni condivise fra gli utenti del server (le aggiunge chi ha il permesso «radio», le toglie chi le ha aggiunte o un amministratore); ricerca nel catalogo Radio Browser fatta dal server; ascolto da `/api/webradio/<id>/ascolta`, che apre la diretta (anche da .m3u/.pls) e la passa com'è. Nel client una radio è un brano della coda con `t.web`: niente durata («Diretta»), cache, cronologia, scrobble, testi, coda salvata. Il server apre solo indirizzi globali, controllati a ogni ascolto e a ogni redirect (seguiti a mano).
+**Alternative scartate:** suonare la diretta direttamente dal browser (le radio in http sono bloccate da Armony in https, e senza CORS l'equalizzatore resta muto); HLS (.m3u8) con hls.js (una libreria in più e un proxy che riscrive le playlist: le radio quasi sempre hanno anche un MP3/AAC); radio salvate per utente (l'utente le vuole «pronte», come le Jam Radio del server).
+**Conseguenze:** ogni ascoltatore tiene aperto un flusso e un thread di waitress (come i brani); i loghi delle radio arrivano dai loro siti (solo https).
+**Da rivedere se:** serve HLS, o i titoli in onda (metadati ICY).
+
 ## 2026-10-11 — Sezione Video con un lettore che sopravvive al cambio di pagina; notifiche lette solo su azione
 
 **Contesto:** i video scaricati stavano in un elenco della pagina Scarica e si guardavano in una finestra che si chiudeva cambiando pagina. La campanella apriva una pagina che segnava tutto come letto dopo 1,5 secondi.

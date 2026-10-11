@@ -1703,6 +1703,27 @@ dialog.addsongs:not([open]){display:none}
 .as-foot{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4) calc(var(--s3) + var(--sab));border-top:1px solid var(--line);font-weight:600}
 @media (hover:hover) and (pointer:fine){.as-row:hover{background:var(--surface2)}}
 @media (max-width:860px){dialog.addsongs{height:88dvh;width:100%}}
+/* Radio da internet (radio.js, WebRadio) */
+.wrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--s2);margin-bottom:var(--s6)}
+.wr-card{position:relative;display:flex;align-items:center;gap:var(--s3);padding:var(--s3);border-radius:var(--r-l);background:var(--surface);border:1px solid var(--line);cursor:pointer;touch-action:manipulation;transition:border-color .15s,background .15s}
+.wr-card.on{border-color:var(--accent);background:var(--accent-soft)}
+.wr-card .grow{flex:1;min-width:0}
+.wr-card b,.wr-card small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wr-card small{color:var(--muted);font-size:.84rem}
+.wr-logo{position:relative;width:48px;height:48px;flex:none;border-radius:var(--r-m);overflow:hidden;display:grid;place-items:center;background:var(--pav);color:#fff;font-weight:800}
+.wr-logo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#fff}
+.wr-play{width:36px;height:36px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:var(--on-accent)}
+.wr-play svg{width:16px;height:16px;margin-left:2px}
+.wr-more{flex:none;color:var(--muted)}
+.wr-card:active{transform:scale(.99)}
+.wr-man{margin:0 var(--s4) var(--s4)}
+.wr-man summary{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--muted);font-weight:600;font-size:.9rem;list-style:none;padding:var(--s2) 0}
+.wr-man summary::-webkit-details-marker{display:none}
+.wr-man summary svg{width:16px;height:16px}
+.wr-form{display:grid;grid-template-columns:1fr 1.6fr auto;gap:var(--s2);margin-top:var(--s2)}
+.as-row .wr-logo{width:44px;height:44px}
+@media (hover:hover) and (pointer:fine){.wr-card:hover{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}}
+@media (max-width:860px){.wrgrid{grid-template-columns:minmax(0,1fr)}.wr-form{grid-template-columns:minmax(0,1fr)}}
 /* Scarica: schede, riquadro di download a sinistra, attività a destra */
 details.sosp:not([open]) summary small{display:none}  /* «Da controllare» chiuso: solo titolo e numero */
 .dltabs{margin:var(--s4) 0 var(--s4)}

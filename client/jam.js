@@ -66,7 +66,7 @@ function stereoOpus(sdp) {
   const pt = sdp.match(/a=rtpmap:(\d+) opus\/48000/i)?.[1]; if (!pt) return sdp;
   return sdp.replace(new RegExp(`a=fmtp:${pt} ([^\\r\\n]*)`), (m, p) => `a=fmtp:${pt} ${p.replace(/;?(stereo|sprop-stereo|maxaveragebitrate)=[^;]*/g, '')};stereo=1;sprop-stereo=1;maxaveragebitrate=192000`);
 }
-const wire = t => t && ({ id: t.id, title: t.title, artist: t.artist, album: t.album, albumId: t.albumId, artistId: t.artistId, duration: t.duration, coverArt: t.coverArt, rg: t.rg, genre: t.genre, jamBy: t.jamBy, fed: t.fed, serverUrl: t.serverUrl || absUrl(srv(t.serverId)?.url || ''), pub: t.pub || srv(t.serverId)?.me?.public || undefined });
+const wire = t => t && ({ id: t.id, web: t.web, title: t.title, artist: t.artist, album: t.album, albumId: t.albumId, artistId: t.artistId, duration: t.duration, coverArt: t.coverArt, rg: t.rg, genre: t.genre, jamBy: t.jamBy, fed: t.fed, serverUrl: t.serverUrl || absUrl(srv(t.serverId)?.url || ''), pub: t.pub || srv(t.serverId)?.me?.public || undefined });
 // lo stesso server si raggiunge con indirizzi diversi (in casa, Tailscale): si riconosce anche dall'indirizzo pubblico.
 // near: il server da cui arriva il brano quando è certo (i propri dispositivi collegati allo stesso server)
 const localize = (w, near) => {

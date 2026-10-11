@@ -340,7 +340,9 @@ const coverUrl = (coverArt, size = 300, sid) => {
 // lo stesso brano anche se l'oggetto è un altro: da telecomando currentTrack() ne crea uno nuovo a ogni stato ricevuto,
 // e il confronto per identità faceva credere che il brano fosse cambiato (testi e dettagli non arrivavano mai)
 const sameTrack = (a, b) => !!a && !!b && key(a) === key(b);
-const streamUrl = (t, q = activeQuality()) => srv(t.serverId)?.local ? Local.stream(t.id)
+// t.web: una radio da internet (radio.js, WebRadio): la diretta passa dal server
+const streamUrl = (t, q = activeQuality()) => t.web ? `${absUrl(srv(t.serverId)?.url || S.dl.url)}/api/webradio/${encodeURIComponent(t.web)}/ascolta?${authQ(srv(t.serverId) || dlSrv(), S.dl.token)}`
+  : srv(t.serverId)?.local ? Local.stream(t.id)
   : t.fed ? reteUrl(srv(t.serverId), 'stream', { r: t.fed.r, id: t.fed.id, ...QUALITIES[q].params })
   : apiUrl(srv(t.serverId), 'stream', { id: t.id, ...QUALITIES[q].params, ...(Sost.bust[key(t)] ? { b: Sost.bust[key(t)] } : {}) });
 const imgTag = (coverArt, size, sid) => { const u = coverUrl(coverArt, size, sid); return u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : ''; };
@@ -1790,7 +1792,7 @@ const ACache = {
   k: (t, q) => `${key(t)}@${q}`,
   max: () => (P.cacheMB ?? 1024) * 1e6,
   size() { return Object.values(this.idx).reduce((n, x) => n + x.size, 0); },
-  ok(t) { return !!t && P.cacheMB !== 0 && !Offline.has(t) && !srv(t.serverId)?.local && !t.fed && !!srv(t.serverId); },
+  ok(t) { return !!t && !t.web && P.cacheMB !== 0 && !Offline.has(t) && !srv(t.serverId)?.local && !t.fed && !!srv(t.serverId); },
   has(t, q = activeQuality()) { return !!this.idx[this.k(t, q)]; },
   // la qualità da usare: quella attiva se c'è, altrimenti la migliore già in cache (in Wi-Fi si salva a 192k, in 5G
   // con "qualità in rete mobile" diversa quei brani valgono lo stesso: niente dati spesi per riscaricarli)
@@ -1841,6 +1843,7 @@ const ACache = {
 /* ================= storico e statistiche ================= */
 const Stats = {
   async add(t) {
+    if (t?.web) return;  // una diretta non è un ascolto da contare
     t = Local.orig(t);
     const ts = Date.now();
     try { await DB.put('history', { ts, hid: `${S.device}:${ts}`, synced: false, key: key(t), id: t.id, serverId: t.serverId, title: t.title, artist: t.artist, artistId: t.artistId, album: t.album, albumId: t.albumId, coverArt: t.coverArt, duration: t.duration || 0, genre: t.genre || '' }); } catch {}
@@ -1932,6 +1935,7 @@ function parseLrc(text) {
 const Lyrics = {
   cache: new Map(),
   async get(t) {
+    if (t?.web) return null;  // radio da internet: niente testo
     const k = key(t); if (this.cache.has(k)) return this.cache.get(k);
     // salvato offline insieme al brano: senza rete il testo c'è lo stesso
     if (Offline.has(t)) { try { const r = await DB.get('offline', key(t)); if (r?.lyr) { this.cache.set(k, r.lyr); return r.lyr; } } catch {} }
@@ -2248,7 +2252,7 @@ const Engine = {
     const a = this.el, t = currentTrack(); if (!t) return;
     if (this.scrobbled !== key(t) + '@' + S.index && a.currentTime > Math.min(240, (t.duration || 60) / 2)) {
       this.scrobbled = key(t) + '@' + S.index;
-      if (srv(t.serverId) && !t.fed) { const at = Date.now(); api('scrobble', { id: t.id, submission: true }, srv(t.serverId)).catch(() => Scrob.keep(t, at)); }
+      if (srv(t.serverId) && !t.fed && !t.web) { const at = Date.now(); api('scrobble', { id: t.id, submission: true }, srv(t.serverId)).catch(() => Scrob.keep(t, at)); }
       Stats.add(t);
     }
     if (Radio.st) return;  // la radio la manda avanti radio.js, secondo l'orario del server
@@ -2353,7 +2357,7 @@ async function playIndex(i, o = {}) {
 function trackChanged(t) {
   updateNowPlaying();
   $$('.song').forEach(el => { const x = S.lastList[+el.dataset.i]; el.classList.toggle('now', !!x && !!t && key(x) === key(t)); });
-  if (t && srv(t.serverId) && !t.fed && Jam.role !== 'guest') api('scrobble', { id: t.id, submission: false }, srv(t.serverId)).catch(() => {});
+  if (t && srv(t.serverId) && !t.fed && !t.web && Jam.role !== 'guest') api('scrobble', { id: t.id, submission: false }, srv(t.serverId)).catch(() => {});
   QSync.schedule(); emit('track', t); ACache.ahead();
   if (location.hash.startsWith('#/ora')) vNow();
   else if (location.hash.startsWith('#/testo')) vLyrics();
@@ -2511,7 +2515,7 @@ function paintTime() {
   }
   if (!seeking) { $('#seek').value = d ? p / d * 1000 : 0; $('#tCur').textContent = fmt(p); }
   rangeFill($('#seek'));
-  $('#tDur').textContent = fmt(d);
+  $('#tDur').textContent = currentTrack()?.web ? 'Diretta' : fmt(d);
   if ('mediaSession' in navigator && d && navigator.mediaSession.setPositionState) {
     try { navigator.mediaSession.setPositionState({ duration: d, position: Math.min(p, d), playbackRate: P.speed }); } catch {}
   }
@@ -2526,7 +2530,7 @@ const QSync = {
   schedule() { if (!P.syncQueue || Jam.role === 'guest' || Radio.st || Live.target) return; clearTimeout(this.t); this.t = setTimeout(() => this.push(), 4000); },
   // last: l'app si sta chiudendo (pagehide): keepalive, così la richiesta parte anche a pagina chiusa
   async push(last) {
-    const cur = S.queue[S.index]; if (!cur || !srv(cur.serverId) || srv(cur.serverId).local || Live.target) return;
+    const cur = S.queue[S.index]; if (!cur || cur.web || !srv(cur.serverId) || srv(cur.serverId).local || Live.target) return;
     const ids = S.queue.filter(x => x.serverId === cur.serverId).slice(0, 1000).map(x => x.id);
     const params = { id: ids, current: cur.id, position: Math.floor(Engine.time() * 1000) };
     this.at = Date.now();
@@ -4196,6 +4200,7 @@ function songMenu(t, ctx = {}) {
 
 // preferito come su Spotify: dal menu, dal lettore, da "In riproduzione"; le righe a schermo si aggiornano
 async function toggleStar(t) {
+  if (t?.web) return toast('Le radio da internet stanno nella pagina Radio, non nei Preferiti.');
   try { await api(t.starred ? 'unstar' : 'star', { id: t.id }, srv(t.serverId)); } catch (e) { return toast(e.message); }
   t.starred = !t.starred;
   [...S.queue, ...S.lastList].forEach(x => { if (x && key(x) === key(t)) x.starred = t.starred; });

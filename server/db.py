@@ -139,6 +139,11 @@ MIGRATIONS = [
     CREATE TABLE notif_gettoni (token TEXT PRIMARY KEY, dev TEXT NOT NULL, user TEXT NOT NULL, created REAL NOT NULL);
     CREATE INDEX notif_gettoni_dev ON notif_gettoni(dev);
     """,
+    # 15: radio da internet salvate sul server (webradio.py)
+    """
+    CREATE TABLE webradio (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL UNIQUE, favicon TEXT, homepage TEXT, tags TEXT,
+                           country TEXT, codec TEXT, bitrate INTEGER, added_by TEXT, created REAL NOT NULL);
+    """,
 ]
 
 _local = threading.local()

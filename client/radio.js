@@ -309,14 +309,78 @@ document.addEventListener('click', e => {
   e.stopPropagation(); Radio.act(el.dataset.ract, st);
 }, true);
 
+/* ---------------- radio da internet (server/webradio.py, capacità "webradio") ----------------
+   Stazioni in diretta salvate sul server e pronte per tutti: si cercano nel catalogo Radio Browser o si incolla
+   l'indirizzo dello stream. Si ascoltano come un brano della coda (t.web), con la diretta che passa dal server */
+const WebRadio = {
+  items: [],
+  ok() { return !!dlSrv()?.session && !!dlSrv()?.me?.caps?.includes('webradio'); },
+  async load() { try { this.items = (await dlApi('/api/webradio')).items; } catch { this.items = []; } this.paint(); },
+  sub: st => [st.country, (st.tags || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 2).join(', '), st.bitrate ? `${st.codec || ''} ${st.bitrate} kbps`.trim() : st.codec].filter(Boolean).join(' · '),
+  track(st) { return { id: 'web:' + st.id, web: st.id, title: st.name, artist: this.sub(st) || 'Radio da internet', album: 'Radio da internet', duration: 0, serverId: dlSrv().id }; },
+  async play(st) { if (Radio.st) await Radio.leave(true); setQueue([this.track(st)], 0); },
+  logo: st => `<span class="wr-logo" style="--pav:${tileColor(st.name)}">${st.favicon ? `<img src="${esc(st.favicon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<b>${esc([...st.name][0] || '?')}</b></span>`,
+  paint() {
+    const box = $('#wrList'); if (!box) return;
+    const now = currentTrack()?.web, on = isPlaying();
+    box.innerHTML = this.items.length ? this.items.map(st => `<div class="wr-card${now === st.id ? ' on' : ''}" data-wr="${esc(st.id)}" role="button" tabindex="0" aria-label="Ascolta ${esc(st.name)}">
+        ${this.logo(st)}<span class="grow"><b>${esc(st.name)}</b><small>${esc(this.sub(st) || 'In diretta')}</small></span>
+        <span class="wr-play" aria-hidden="true">${now === st.id && on ? ic('pause', true) : ic('play', true)}</span>
+        ${can('radio') ? `<button class="icon-btn wr-more" data-wrmore="${esc(st.id)}" aria-label="Altro">${ic('more')}</button>` : ''}</div>`).join('')
+      : `<p class="rempty">Nessuna radio da internet${can('radio') ? ': aggiungine una, resterà pronta per tutti.' : '.'}</p>`;
+  },
+  // cerca nel catalogo o incolla l'indirizzo dello stream
+  sheet() {
+    const d = $('#dlg'); d.className = 'sheet addsongs'; let tok = 0, timer = null, found = [];
+    d.innerHTML = `<div class="as-head"><span class="grow"><b>Aggiungi una radio</b><small>Resta pronta per tutti, in Radio</small></span><button class="icon-btn" id="wrX" aria-label="Chiudi">${ic('close')}</button></div>
+      <label class="ordq as-q">${ic('search')}<input type="search" id="wrQ" placeholder="Cerca fra migliaia di radio: nome, città…" aria-label="Cerca una radio" autocomplete="off" enterkeyhint="search"></label>
+      <div class="as-list" id="wrRes"><p class="sub as-none">Scrivi il nome di una radio: la cerco nel catalogo pubblico Radio Browser.</p></div>
+      <details class="wr-man"><summary>${ic('link')} Ho l'indirizzo dello stream</summary>
+        <div class="wr-form"><input type="text" id="wrN" placeholder="Nome della radio" maxlength="80"><input type="url" id="wrU" placeholder="https://…/stream.mp3 o .m3u, .pls" spellcheck="false" autocapitalize="none"><button class="btn primary" id="wrGo">Aggiungi</button></div></details>`;
+    const add = async (x, b) => {
+      if (b) b.disabled = true;
+      try { await dlApi('/api/webradio', { method: 'POST', body: JSON.stringify(x) }); toast(`«${x.name}» aggiunta alle radio.`); if (b) { b.textContent = 'Aggiunta'; b.classList.remove('primary'); } this.load(); return true; }
+      catch (e) { if (b) b.disabled = false; toast(e.message); return false; }
+    };
+    const search = async q => {
+      const n = ++tok; $('#wrRes').innerHTML = '<p class="sub as-none">Cerco…</p>';
+      let r; try { r = await dlApi('/api/webradio/cerca?q=' + encodeURIComponent(q)); } catch (e) { if (n === tok) $('#wrRes').innerHTML = `<p class="sub as-none">${esc(e.message)}</p>`; return; }
+      if (n !== tok) return; found = r.items;
+      $('#wrRes').innerHTML = found.length ? found.map((x, i) => `<div class="as-row">${this.logo(x)}<span class="grow"><b>${esc(x.name)}</b><small>${esc(this.sub(x))}</small></span>
+          <button class="btn sm${x.saved ? '' : ' primary'}" data-i="${i}" ${x.saved ? 'disabled' : ''}>${x.saved ? 'Già aggiunta' : 'Aggiungi'}</button></div>`).join('') : '<p class="sub as-none">Nessuna radio con questo nome.</p>';
+    };
+    $('#wrQ').oninput = e => { clearTimeout(timer); const q = e.target.value.trim(); if (q.length >= 2) timer = setTimeout(() => search(q), 350); };
+    $('#wrRes').onclick = e => { const b = e.target.closest('[data-i]'); if (b) add(found[+b.dataset.i], b); };
+    $('#wrGo').onclick = async () => { const name = $('#wrN').value.trim(), url = $('#wrU').value.trim(); if (!name || !url) return toast('Scrivi nome e indirizzo.'); if (await add({ name, url })) d.close(); };
+    $('#wrX').onclick = () => d.close();
+    d.onclose = () => { d.className = ''; d.onclose = null; tok++; };
+    d.showModal(); if (matchMedia('(pointer:fine)').matches) $('#wrQ').focus();
+  },
+  menu(id, at) {
+    const st = this.items.find(x => x.id === id); if (!st) return;
+    ctxMenuOrPick(at, [['play', 'Ascolta', () => this.play(st)], st.homepage ? ['globe', 'Sito della radio', () => open(st.homepage, '_blank', 'noopener')] : null,
+      ['trash', 'Togli dalle radio', async () => { try { await dlApi('/api/webradio/' + encodeURIComponent(id), { method: 'DELETE' }); toast('Radio tolta.'); this.load(); } catch (e) { toast(e.message); } }, 'danger']].filter(Boolean), st.name);
+  }
+};
+document.addEventListener('click', e => {
+  const m = e.target.closest('[data-wrmore]'); if (m) { e.stopPropagation(); const r = m.getBoundingClientRect(); return WebRadio.menu(m.dataset.wrmore, [r.left, r.bottom + 4]); }
+  if (e.target.closest('[data-wradd]')) return WebRadio.sheet();
+  const c = e.target.closest('[data-wr]'); if (!c) return;
+  const st = WebRadio.items.find(x => x.id === c.dataset.wr); if (!st) return;
+  currentTrack()?.web === st.id ? ctlToggle() : WebRadio.play(st);
+});
+Bus.addEventListener('play', () => WebRadio.paint()); Bus.addEventListener('track', () => WebRadio.paint());
+
 async function vRadio() {
   if (!srv()) return noServer();
-  view.innerHTML = `<div class="rhead"><div><h1>Radio</h1><p class="sub">Stazioni che suonano senza fermarsi sul server. Ti sintonizzi e senti lo stesso punto degli altri, come in diretta.</p></div>
-      ${can('radio') ? `<button class="btn primary" data-act="rnew">${ic('plus')} Crea una radio</button>` : ''}</div>
-    <div class="hsec"><h2>Su questo server</h2></div><div class="rlist" id="rHere"></div>
+  view.innerHTML = `<div class="rhead"><div><h1>Radio</h1><p class="sub">Le radio da internet, sempre pronte, e le Jam Radio del server: stazioni con la tua musica che suonano senza fermarsi, e tutti sentono lo stesso punto.</p></div>
+      ${can('radio') ? `<button class="btn primary" data-act="rnew">${ic('plus')} Crea una Jam Radio</button>` : ''}</div>
+    ${WebRadio.ok() ? `<div class="hsec"><h2>Radio da internet</h2>${can('radio') ? `<button class="btn sm" data-wradd>${ic('plus')} Aggiungi una radio</button>` : ''}</div><div class="wrgrid" id="wrList"><p class="rempty">…</p></div>` : ''}
+    <div class="hsec"><h2>Jam Radio del server</h2></div><div class="rlist" id="rHere"></div>
     ${netOk() ? `<div class="hsec"><h2>Dalla rete</h2><small class="netms">dai server collegati</small></div><div class="rlist" id="rNet"></div>` : ''}`;
   [$('#rHere'), $('#rNet')].forEach(b => b && window.autoAnimate?.(b));
   // senza "me" l'accesso non è ancora finito: la pagina si ridisegna dopo (boot)
+  if (WebRadio.ok()) WebRadio.load();
   if (!Radio.ok()) { if (dlSrv()?.me) $('#rHere').innerHTML = '<p class="rempty">Questo server non ha ancora la Jam Radio: serve una versione più nuova di Armony.</p>'; return; }
   Radio.clock();
   Radio.paintAll(); Radio.load();
