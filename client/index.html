@@ -1606,6 +1606,17 @@ dialog.profpop:not([open]){display:none}
   :root[data-r="testo"] #bLyrM{color:#fff;background:rgb(255 255 255 / .18);border-radius:50%}
 }
 /* === fine E === */
+/* Stato del server → Indirizzo pubblico (diagnosi.js) */
+.dom{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s4)}
+.dom.warn{border-color:color-mix(in srgb,var(--danger) 55%,var(--line))}
+.dom-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.05rem}
+.dom-row{display:grid;grid-template-columns:150px minmax(0,1fr);gap:var(--s3);align-items:baseline;font-size:.92rem}
+.dom-row>small{color:var(--muted)}
+.dom-row span small{display:block;color:var(--muted);font-size:.8rem}
+.dom-row.bad span{color:var(--danger);font-weight:600}
+.dom-prob{margin:0;padding-left:1.2em;color:var(--danger);font-size:.9rem}
+.dom #domGo{align-self:flex-start}
+@media (max-width:520px){.dom-row{grid-template-columns:minmax(0,1fr);gap:2px}}
 /* trasloco: barra «Armony si è spostato» (dispositivi.js) */
 .movebar{position:fixed;left:50%;transform:translateX(-50%);top:calc(var(--sat) + var(--s3));z-index:40;display:flex;align-items:center;gap:var(--s3);width:min(560px,calc(100% - 2 * var(--s4)));padding:var(--s2) var(--s2) var(--s2) var(--s4);border-radius:var(--r-l);background:var(--surface2);border:1px solid var(--line);box-shadow:var(--shadow-float);animation:pin .2s var(--ease-out)}
 .movebar>svg{width:22px;height:22px;flex:none;color:var(--accent-text)}

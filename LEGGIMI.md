@@ -55,6 +55,8 @@ In alternativa, con un nome tuo (anche un DynDNS gratuito, es. `armony.ddns.net`
 2. Sul router/firewall inoltra la **443** da internet alla porta **8460** del server, **senza mascherare l'indirizzo d'origine** (solo DNAT, niente SNAT/masquerade): Armony riconosce "da casa" chi ha un indirizzo privato, e con l'origine mascherata chiunque da internet lo sembrerebbe.
 3. `docker compose --profile https up -d https`. Nel giro di un minuto il certificato arriva (`docker logs armony-https`: «certificate obtained successfully»). Non serve la porta 80.
 
+**Ogni giorno Armony controlla il nome e il certificato**: che il nome punti ancora al server (un DynDNS gratuito come No-IP va confermato ogni 30 giorni, e se il tuo indirizzo cambia va aggiornato) e che il certificato sia valido e lontano dalla scadenza. L'esito è in Impostazioni → Stato del server → Indirizzo pubblico, con «Controlla ora»; se qualcosa non va gli amministratori ricevono un avviso (anche su ntfy o Telegram con `ARMONY_AVVISI`). Per sapere da quale indirizzo esce il server, Armony lo chiede una volta al giorno ad api.ipify.org.
+
 Rispetto a Tailscale Funnel la strada è diretta: niente nodi intermedi (dai registri di sessione, con il Funnel le risposte a volte restavano ferme decine di secondi). Oppure: Cloudflare Tunnel.
 
 Poi, in Armony, **Impostazioni → Server musicali → Indirizzo pubblico di questo server** (solo l'amministratore): scrivi l'indirizzo HTTPS, per esempio `https://armony.nome-rete.ts.net`. Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati usano quello, anche se in casa apri Armony con un altro indirizzo.

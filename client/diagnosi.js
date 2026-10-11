@@ -83,12 +83,30 @@ const Stato = {
         ${tile('Navidrome', d.navidrome_ms == null ? 'non risponde' : `${d.navidrome_ms} ms`, 'tempo di risposta', null, 0, d.navidrome_ms == null || d.navidrome_ms > 1000)}
         ${tile('Disco', `${Math.round(d.disk.used / d.disk.total * 100)}%`, `liberi ${bytes(d.disk.free)}`, null, 0, d.disk.free < d.disk.total * .05)}
       </div>
+      ${d.dominio ? this.dominio(d.dominio) : ''}
       <h3>Ascolti in corso</h3>${streams.length ? `<div class="stlist">${streams.map(s => `<div class="list-item" style="cursor:default"><span class="pav" style="--pav:${tileColor(s.user || '?')}" aria-hidden="true">${esc((s.user || '?')[0].toUpperCase())}</span>
         <span class="grow"><b>${esc(s.title || 'Brano')}${s.artist ? ` <small>· ${esc(s.artist)}</small>` : ''}</b><small>${esc(s.user || '?')} · ${s.fmt === 'raw' ? 'originale' : esc(s.fmt)} · ${s.kbps} kbps · da ${dur(s.since)} · ${bytes(s.bytes)}</small></span></div>`).join('')}</div>`
         : '<p class="sub">Nessuno sta scaricando audio dal server in questo momento. Un brano occupa la rete solo finché il telefono non ne ha abbastanza in memoria.</p>'}
       <h3>Dispositivi collegati</h3>${d.live.length ? `<div class="stlist">${d.live.sort((a, b) => a.user.localeCompare(b.user)).map(x => `<div class="list-item" style="cursor:default"><span class="grow"><b>${esc(x.name)}</b><small>${esc(x.user)} · ${x.net === 'locale' ? 'da casa' : x.net === 'tailscale' ? 'da Tailscale' : 'da internet'} · collegato da ${dur(x.since)}</small></span></div>`).join('')}</div>` : '<p class="sub">Nessun dispositivo collegato.</p>'}
       <p class="small" style="color:var(--muted)">Ogni dispositivo collegato e ogni brano che sta scaricando tengono occupato un thread del server (sono ${d.threads}). Sopra l'80% conviene aumentarli o capire chi ne tiene tanti; gli avvisi finiscono anche nel registro eventi.</p>`;
     box.querySelectorAll('[name=stSpan]').forEach(r => r.onchange = () => { this.span = r.value; this.paint(); });
+    const go = $('#domGo'); if (go) go.onclick = async () => {
+      go.disabled = true; go.textContent = 'Controllo…';
+      try { await srvApi(dlSrv(), '/api/stato/dominio', { method: 'POST' }); } catch (e) { toast(e.message); }
+      this.paint();
+    };
+  },
+  // l'indirizzo pubblico (profilo "https"): nome, a chi punta, certificato; controllato ogni giorno dal server (diagnosi.py)
+  dominio(x) {
+    const ok = !x.problemi?.length, row = (k, v, bad) => `<div class="dom-row${bad ? ' bad' : ''}"><small>${k}</small><span>${v}</span></div>`;
+    const dnsOk = x.dns?.length && (!x.ip || x.dns.includes(x.ip));
+    return `<h3>Indirizzo pubblico</h3><div class="panel dom${ok ? '' : ' warn'}">
+      <div class="row between" style="flex-wrap:nowrap;gap:var(--s3)"><b class="dom-name">${esc(x.domain)}</b><span class="tag ${ok ? 'ok' : 'err'}">${ok ? 'tutto a posto' : 'da sistemare'}</span></div>
+      ${row('Il nome punta a', x.dns?.length ? esc(x.dns.join(', ')) + (x.ip ? (dnsOk ? ' · è questo server' : ` · il server esce da ${esc(x.ip)}`) : '') : 'non si risolve', !dnsOk)}
+      ${row('Certificato', x.until ? `${esc(x.issuer || '')} · scade il ${new Date(x.until * 1000).toLocaleDateString('it-IT')} (fra ${x.days} giorni)<small>Caddy lo rinnova da solo prima della scadenza</small>` : 'non letto', !x.until || x.days < 14)}
+      ${row('Ultimo controllo', `${ago(x.at * 1000)} · il server lo rifà ogni giorno`)}
+      ${ok ? '' : `<ul class="dom-prob">${x.problemi.map(p => `<li>${esc(p)}</li>`).join('')}</ul>`}
+      <button class="btn sm" id="domGo">Controlla ora</button></div>`;
   }
 };
 

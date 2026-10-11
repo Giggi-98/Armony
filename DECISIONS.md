@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Controllo giornaliero di nome e certificato
+
+**Contesto:** con un DynDNS gratuito (No-IP: conferma ogni 30 giorni) e un inoltro sul firewall, Armony può sparire da internet senza che nessuno se ne accorga finché un amico non resta fuori.
+**Scelta:** `diagnosi.controlla_dominio`, una volta al giorno dal giro orario: risoluzione del nome contro l'indirizzo d'uscita del server (api.ipify.org) e certificato servito da Caddy sulla porta locale, verificato come un browser (scadenza, emittente). Problemi → registro eventi, notifica agli amministratori (una al giorno) e `ARMONY_AVVISI`. L'esito sta in settings e compare in Stato del server.
+**Alternative scartate:** chiamare il nome pubblico dal server stesso (dal server la 443 pubblica non torna indietro: niente NAT reflection per la sua rete); leggere i file del certificato di Caddy (dipende dal suo formato interno, e non dice cosa vede davvero un browser).
+**Conseguenze:** una richiesta al giorno a un servizio esterno (ipify) che vede l'indirizzo del server; senza risposta il confronto si salta.
+**Da rivedere se:** l'indirizzo pubblico diventa fisso (basta il controllo del certificato).
+
 ## 2026-10-11 — Trasloco: i dispositivi seguono il nuovo indirizzo pubblico
 
 **Contesto:** passando dal Funnel (`…ts.net:10000`) a `armony-net.ddns.net`, app e browser degli amici restano sull'indirizzo vecchio.

@@ -6,7 +6,8 @@ Armony - diagnosi: registro degli eventi e stato del server (solo amministratori
                   GET: il registro, con filtri; GET /api/log/testo: lo stesso in testo semplice, da incollare;
                   DELETE: svuota (amministratore, con le regole delle impostazioni del server)
   /api/stato      risorse del server: CPU, memoria, carico, disco, rete, thread di waitress, flussi audio in corso,
-                  dispositivi collegati, coda dei download. Ultima ora a 5 s, ultime 24 ore a 1 minuto
+                  dispositivi collegati, coda dei download. Ultima ora a 5 s, ultime 24 ore a 1 minuto. Con ARMONY_DOMAIN
+                  anche l'ultimo controllo dell'indirizzo pubblico (dominio); POST /api/stato/dominio lo rifà subito
 
 ─── PERCHÉ un registro nostro e non i log del container ───
 I log di Docker si leggono solo dal server, si perdono a ogni ricreazione e non vedono gli errori dei telefoni.
@@ -19,6 +20,8 @@ import hashlib
 import json
 import os
 import shutil
+import socket
+import ssl
 import sys
 import threading
 import time
@@ -386,6 +389,66 @@ def _titles(ids):
         return {}
 
 
+# ─── indirizzo pubblico: nome e certificato (profilo "https", deploy/Caddyfile) ───
+# Una volta al giorno (giro orario di dispositivi.pulizia): il nome risolve all'indirizzo da cui esce il server? Il
+# certificato che Caddy serve è valido e lontano dalla scadenza? Un DynDNS gratuito (No-IP) va confermato ogni 30
+# giorni, e se il firewall perde la regola della 443 Caddy non rinnova: meglio saperlo prima degli amici
+DOMINIO = os.environ.get("ARMONY_DOMAIN", "").strip()
+HTTPS_PORT = int(os.environ.get("ARMONY_HTTPS_PORT") or 8460)
+
+
+def dominio_ultimo():
+    r = db.one("SELECT value FROM settings WHERE key = 'dominio'")
+    return json.loads(r["value"]) if r else None
+
+
+def controlla_dominio(force=False):
+    if not DOMINIO:
+        return None
+    last = dominio_ultimo() or {}
+    if not force and time.time() - last.get("at", 0) < 20 * 3600:
+        return last
+    r, prob = {"at": time.time(), "domain": DOMINIO, "port": HTTPS_PORT}, []
+    try:
+        r["dns"] = sorted({a[4][0] for a in socket.getaddrinfo(DOMINIO, 443, proto=socket.IPPROTO_TCP)})
+    except OSError as e:
+        r["dns"] = []
+        prob.append(f"il nome non si risolve ({e.strerror or e}): controlla che sia ancora attivo (No-IP gratuito va confermato ogni 30 giorni)")
+    try:
+        r["ip"] = A.http.get("https://api.ipify.org", timeout=10).text.strip()  # l'indirizzo pubblico da cui esce il server
+    except Exception:  # noqa: BLE001
+        r["ip"] = None
+    if r["dns"] and r["ip"] and r["ip"] not in r["dns"]:
+        prob.append(f"il nome punta a {', '.join(r['dns'])} ma il server esce da {r['ip']}: aggiorna il DynDNS")
+    try:  # il certificato che Caddy serve davvero, verificato come farebbe un browser
+        with socket.create_connection(("127.0.0.1", HTTPS_PORT), timeout=10) as s, ssl.create_default_context().wrap_socket(s, server_hostname=DOMINIO) as t:
+            c = t.getpeercert()
+        r["until"] = ssl.cert_time_to_seconds(c["notAfter"])
+        r["issuer"] = dict(x[0] for x in c.get("issuer", ())).get("organizationName")
+        r["days"] = int((r["until"] - time.time()) // 86400)
+        if r["days"] < 14:
+            prob.append(f"il certificato scade fra {r['days']} giorni e Caddy non l'ha ancora rinnovato: controlla la regola 443 → {HTTPS_PORT} del firewall e «docker logs armony-https»")
+    except ssl.SSLCertVerificationError as e:
+        prob.append(f"il certificato non è valido ({e.verify_message})")
+    except OSError as e:
+        prob.append(f"Caddy non risponde sulla porta {HTTPS_PORT} ({e.strerror or e}): «docker compose --profile https up -d https»")
+    r["problemi"] = prob
+    db.run("INSERT INTO settings (key, value) VALUES ('dominio', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", json.dumps(r))
+    if prob:
+        log("errore", "dominio", f"{DOMINIO}: {prob[0]}", "\n".join(prob))
+        for u in db.all_("SELECT DISTINCT user FROM devices WHERE admin = 1 AND state = 'fidato'"):
+            A.notifiche.notifica(u["user"], "sistema", f"Problema con {DOMINIO}", prob[0], "#/impostazioni/stato",
+                                 only_once="dominio:" + time.strftime("%Y%m%d"))
+    return r
+
+
+@bp.post("/api/stato/dominio")
+def dominio_ora():
+    if not DOMINIO:
+        return jsonify(error="Nessun nome configurato (ARMONY_DOMAIN in .env)"), 404
+    return jsonify(controlla_dominio(force=True))
+
+
 @bp.get("/api/stato")
 def stato():
     now = time.time()
@@ -416,7 +479,7 @@ def stato():
         streams=[{"user": f["user"], "title": (names.get(f["id"]) or (None,))[0], "artist": (names.get(f["id"]) or (None, None))[1], "fmt": f["fmt"],
                   "since": round(now - f["t0"]), "bytes": f["bytes"], "kbps": round(f["bytes"] * 8 / 1000 / max(1, now - f["t0"]))} for f in fl],
         jobs={"queue": A.jq.qsize(), "byStatus": dict(st), "ytPause": max(0, round(A.yt["pausa"] - now))},
-        fast=list(fast), slow=list(slow))
+        fast=list(fast), slow=list(slow), dominio=dominio_ultimo() if DOMINIO else None)
 
 
 def init(flask_app, host):

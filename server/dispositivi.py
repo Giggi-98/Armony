@@ -776,6 +776,10 @@ def pulizia():
         except Exception as e:  # noqa: BLE001
             A.diagnosi.log("avviso", "dispositivi", f"ricontrollo degli utenti non riuscito: {e}")
         try:
+            A.diagnosi.controlla_dominio()
+        except Exception as e:  # noqa: BLE001
+            A.diagnosi.log("avviso", "dominio", f"controllo dell'indirizzo pubblico non riuscito: {e}")
+        try:
             A.avvisa_versione()
         except Exception as e:  # noqa: BLE001
             A.diagnosi.log("avviso", "aggiornamento", f"controllo della nuova versione non riuscito: {e}")
