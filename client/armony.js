@@ -113,6 +113,8 @@ const I = {
   artist: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
   list: '<path d="M4 6h12M4 12h12M4 18h8"/><circle cx="19" cy="17" r="2"/><path d="M21 17V8"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/>',
+  timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M10 2h4"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
@@ -1644,6 +1646,60 @@ function vQueue() {
   if (S.queue[i]) head(i, S.ctx?.name ? `Prossimi da: ${esc(S.ctx.name)}` : 'Prossimi');
   $('.song.now')?.scrollIntoView?.({ block: 'center' });
 }
+// la coda come Spotify, dal lettore a tutto schermo del telefono: il brano in corso, i prossimi (si riordinano con la
+// maniglia, un tocco li suona) e in fondo equalizzatore, casuale, ripeti e timer. Da telecomando: la coda dell'altro
+// dispositivo, senza riordino
+const QSheet = {
+  open() {
+    if (Jam.role === 'guest') { location.hash = '#/coda'; return; }
+    const d = $('#dlg'); d.className = 'sheet qsheet'; this.paint(); closeOutside(d); d.showModal();
+  },
+  paint() {
+    const d = $('#dlg'); if (!d.classList.contains('qsheet')) return;
+    const remote = Live.remote(), cur = currentTrack(), base = S.index + 1;
+    const up = remote ? arr(Live.st()?.next).map(w => Live.loc(w)).filter(Boolean) : S.queue.slice(base, base + 80);
+    const from = remote ? `Su ${esc(Live.devices.get(Live.target) || 'un altro dispositivo')}` : S.ctx?.name ? `In riproduzione da ${S.ctx.kind ? esc(S.ctx.kind.toLowerCase()) + ' ' : ''}<b>${esc(S.ctx.name)}</b>` : 'In riproduzione';
+    const rs = remote ? Live.st() || {} : null, shuf = rs ? !!rs.shuffle : S.shuffle, rep = rs ? rs.repeat || 'off' : S.repeat;
+    const top = d.querySelector('.qs-list')?.scrollTop || 0;
+    d.innerHTML = `<div class="qs-head"><span class="grow"><b>Coda</b><small>${from}</small></span><a class="btn sm" href="#/coda" id="qsAll">Tutta la coda</a></div>
+      ${cur ? `<div class="qs-cur"><span class="pic">${imgTag(cur.coverArt, 100, cur.serverId)}</span><span class="grow"><b>${isPlaying() ? peq(true) : ''}${esc(cur.title)}</b><small>${esc(cur.artist)}</small></span>
+        <button class="qs-pp" id="qsPP" aria-label="${isPlaying() ? 'Pausa' : 'Riproduci'}">${isPlaying() ? ic('pause') : ic('play', true)}</button></div>` : ''}
+      <p class="qs-sub">${up.length ? (S.queue[base]?._q && !remote ? 'Prossimi in coda' : 'Prossimi') : 'Non c\'è altro in coda'}</p>
+      <div class="qs-list" id="qsList">${up.map((t, i) => `<div class="qs-row" data-qi="${base + i}"${remote ? '' : ' role="button" tabindex="0"'}><span class="pic">${imgTag(t.coverArt, 80, t.serverId)}</span>
+        <span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></span>${remote ? '' : `<span class="qs-grip" aria-label="Trascina per spostare «${esc(t.title)}»">${ic('grip')}</span>`}</div>`).join('')}</div>
+      <div class="qs-tools">
+        <button data-qs="eq">${ic('sliders')}<span>Equalizzatore</span></button>
+        <button data-qs="shuf" class="${shuf ? 'on' : ''}" aria-pressed="${shuf}">${ic('shuffle')}<span>Casuale</span></button>
+        <button data-qs="rep" class="${rep !== 'off' ? 'on' : ''}" aria-pressed="${rep !== 'off'}">${ic('repeat')}<span>${rep === 'one' ? 'Ripeti uno' : 'Ripeti'}</span></button>
+        <button data-qs="timer">${ic('timer')}<span>Timer</span></button></div>`;
+    const list = $('#qsList'); list.scrollTop = top;
+    $('#qsPP')?.addEventListener('click', () => { ctlToggle(); setTimeout(() => this.paint(), 150); });
+    $('#qsAll').onclick = () => d.close();
+    d.querySelector('.qs-tools').onclick = e => {
+      const b = e.target.closest('[data-qs]'); if (!b) return;
+      if (b.dataset.qs === 'eq') { d.close(); eqDialog(); } else if (b.dataset.qs === 'timer') { d.close(); sleepDialog(); }
+      else { $(b.dataset.qs === 'shuf' ? '#bShuf' : '#bRep').click(); setTimeout(() => this.paint(), 200); }
+    };
+    if (remote) return;
+    list.onclick = e => { if (e.target.closest('.qs-grip')) return; const r = e.target.closest('[data-qi]'); if (r) { playIndex(+r.dataset.qi); setTimeout(() => this.paint(), 300); } };
+    // riordino trascinando la maniglia (come «Riordina» delle playlist); al rilascio la coda prende il nuovo ordine
+    let row = null, y0 = 0;
+    list.onpointerdown = e => { const h = e.target.closest('.qs-grip'); if (!h) return; e.preventDefault(); row = h.closest('.qs-row'); y0 = e.clientY; row.classList.add('drag'); h.setPointerCapture(e.pointerId); };
+    list.onpointermove = e => {
+      if (!row) return; const half = row.offsetHeight / 2; let dy = e.clientY - y0;
+      for (let n = row.nextElementSibling; n && dy > half; n = row.nextElementSibling) { list.insertBefore(n, row); y0 += n.offsetHeight; dy = e.clientY - y0; }
+      for (let n = row.previousElementSibling; n && dy < -half; n = row.previousElementSibling) { list.insertBefore(row, n); y0 -= n.offsetHeight; dy = e.clientY - y0; }
+      row.style.transform = `translateY(${dy}px)`;
+    };
+    list.onpointerup = list.onpointercancel = () => {
+      if (!row) return; row.style.transform = ''; row.classList.remove('drag'); row = null;
+      const order = [...list.children].map(r => S.queue[+r.dataset.qi]);
+      if (order.every((t, i) => t === S.queue[base + i])) return;
+      S.queue.splice(base, order.length, ...order); persistQueue(); emit('queue'); this.paint();
+    };
+  }
+};
+Bus.addEventListener('track', () => QSheet.paint()); Bus.addEventListener('play', () => QSheet.paint());
 function vKeys() {
   const k = [['Spazio', 'Riproduci o pausa'], ['Maiusc + →', 'Brano successivo'], ['Maiusc + ←', 'Brano precedente'], ['→ / ←', 'Avanti o indietro di 10 secondi'],
     ['↑ / ↓', 'Volume'], ['M', 'Silenzia'], ['L', 'Testi'], ['Q', 'Coda'], ['S', 'Ordine casuale'], ['R', 'Ripeti'], ['F', 'Preferito'], ['/', 'Cerca'], ['?', 'Questa pagina']];
@@ -2747,20 +2803,21 @@ addEventListener('hashchange', () => { if (!location.hash.startsWith('#/testo'))
 (() => {
   let y0 = null, x0 = 0, dy = 0;
   const on = () => document.documentElement.dataset.r === 'ora' && matchMedia('(max-width:860px)').matches;
-  const reset = () => { view.style.transform = view.style.opacity = view.style.transition = ''; };
+  const els = () => [view, $('#player')];
+  const reset = () => els().forEach(el => { el.style.transform = el.style.opacity = el.style.transition = ''; });
   view.addEventListener('touchstart', e => { if (!on() || e.touches.length > 1 || e.target.closest('input,textarea,select')) return; y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; }, { passive: true });
   view.addEventListener('touchmove', e => {
     if (y0 == null) return;
     dy = e.touches[0].clientY - y0;
     if (dy <= 0 || Math.abs(e.touches[0].clientX - x0) > dy) { dy = 0; reset(); return; }
-    view.style.transition = 'none'; view.style.transform = `translateY(${Math.round(dy * .8)}px)`; view.style.opacity = String(1 - Math.min(.4, dy / 900));
+    els().forEach(el => { el.style.transition = 'none'; el.style.transform = `translateY(${Math.round(dy * .8)}px)`; el.style.opacity = String(1 - Math.min(.4, dy / 900)); });
   }, { passive: true });
   view.addEventListener('touchend', () => {
     if (y0 == null) return; y0 = null;
     if (dy > 110) {
-      view.style.transition = 'transform .2s var(--ease-out), opacity .2s'; view.style.transform = 'translateY(60vh)'; view.style.opacity = '0';
+      els().forEach(el => { el.style.transition = 'transform .2s var(--ease-out), opacity .2s'; el.style.transform = 'translateY(60vh)'; el.style.opacity = '0'; });
       setTimeout(() => { reset(); Scene.back ? history.back() : (location.hash = '#/home'); }, 170);
-    } else if (dy) { view.style.transition = 'transform .25s var(--ease-out), opacity .25s'; view.style.transform = ''; view.style.opacity = ''; setTimeout(reset, 260); }
+    } else if (dy) { els().forEach(el => { el.style.transition = 'transform .25s var(--ease-out), opacity .25s'; el.style.transform = ''; el.style.opacity = ''; }); setTimeout(reset, 260); }
     dy = 0;
   });
 })();
@@ -2787,7 +2844,7 @@ async function vNow() {
       <div class="np-art mobile-only">${t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 600, t.serverId))}" alt="">` : `<span>${ic('album')}</span>`}</div>
       <div class="bigdisc ${isPlaying() ? 'spin' : ''}" id="bigdisc"><canvas id="viz" width="640" height="640"></canvas>
         <div class="rec">${t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 600, t.serverId))}" alt="">` : '<div class="lbl"></div>'}</div></div>
-      <div class="now-title"><h1>${esc(t.title)}</h1><button class="icon-btn now-star" id="nowStar" aria-label="Preferito"></button></div>
+      <div class="now-title"><h1>${esc(t.title)}</h1><button class="icon-btn now-star" id="nowStar" aria-label="Preferito"></button>${t.web ? '' : `<button class="icon-btn now-lyr mobile-only" data-act="lyropen" aria-label="Testo" title="Testo">${ic('mic')}</button>`}</div>
       <p class="sub now-meta">${t.artists ? t.artists.map(a => `<a class="ar" href="#/artista/${encodeURIComponent(a.id)}">${esc(a.name)}</a>`).join(', ') : t.artistId ? `<a href="#/artista/${encodeURIComponent(t.artistId)}">${esc(t.artist)}</a>` : esc(t.artist)}${t.album ? ` · ${t.albumId ? `<a href="#/album/${encodeURIComponent(t.albumId)}">${esc(t.album)}</a>` : esc(t.album)}` : ''}</p>
       <div class="row now-acts">
         <button class="btn sm" data-act="nowmore">${ic('more')} Azioni</button>
@@ -6158,7 +6215,7 @@ function wirePlayer() {
   $('#bQm').onclick = qualityDialog; $('#qBadge').onclick = qualityDialog;
   $('#bStar').onclick = $('#bStarM').onclick = () => currentTrack() && toggleStar(currentTrack());
   $('#bDev').innerHTML = ic('speaker'); $('#bDev').onclick = () => Live.sheet();
-  $('#bQueueM').innerHTML = ic('queue'); $('#bQueueM').onclick = () => location.hash = '#/coda';
+  $('#bQueueM').innerHTML = ic('queue'); $('#bQueueM').onclick = () => ['ora', 'testo'].includes(document.documentElement.dataset.r) ? QSheet.open() : location.hash = '#/coda';
   $('#hMe').onclick = drawer;
   $('#hProf').onclick = profPop;
   $('#hBell').onclick = () => NotifPop.open(); $('#hBell').setAttribute('aria-haspopup', 'dialog');
