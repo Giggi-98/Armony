@@ -240,11 +240,43 @@ function apiParams(s, params = {}) {
 }
 // una richiesta appesa (il tunnel che cade, il server che riparte) non deve lasciare la pagina in caricamento per sempre:
 // tempo massimo, e le letture si riprovano una volta dopo un secondo
+/* registro della sessione: le ultime richieste di questo dispositivo (numero, percorso, durata, esito) e cosa è
+   successo intorno (rete, pagina in primo piano, canale dal vivo, audio). Una richiesta ferma oltre 8 s o fallita
+   manda al registro eventi del server il pezzo di registro di quel minuto; il server ci allega le richieste che ha
+   ricevuto davvero da questo dispositivo (diagnosi.py). Così si vede se un blocco nasce prima del server o dentro */
+const Trace = {
+  seq: 0, ev: [], t: null, sent: 0, from: 0,
+  add(txt) { this.ev.push([Date.now(), txt]); if (this.ev.length > 400) this.ev.splice(0, 100); },
+  // solo percorso e metodo Subsonic, mai credenziali né gettoni
+  path(url) { try { const u = new URL(url, location.href); return u.pathname.replace(/\/api\/(avatar|videos)\/.*/, '/api/$1/…') + (u.searchParams.get('id') ? '?id=' + u.searchParams.get('id').slice(0, 24) : ''); } catch { return '?'; } },
+  stall(rid, path, t0) {
+    this.add(`#${rid} ferma da 8 s: ${path}`);
+    this.from = this.from || t0 - 60000;
+    clearTimeout(this.t); this.t = setTimeout(() => this.send(), 25000);  // si aspetta come va a finire
+  },
+  send() {
+    if (!this.from || Date.now() - this.sent < 60000) return;
+    const from = this.from; this.from = 0; this.sent = Date.now();
+    const f = ms => new Date(ms).toLocaleTimeString('it-IT', { hour12: false }) + '.' + String(ms % 1000).padStart(3, '0').slice(0, 1);
+    const lines = this.ev.filter(([t]) => t >= from).map(([t, x]) => `${f(t)} ${x}`).join('\n');
+    const c = navigator.connection;
+    window.Diag?.report('avviso', 'sessione', `richieste bloccate (${this.ev.filter(([t, x]) => t >= from && / ferma da /.test(x)).length})`,
+      `rete: ${navigator.onLine ? 'sì' : 'no'}${c ? `, ${c.effectiveType || ''} ${c.type || ''} ${c.rtt != null ? c.rtt + ' ms' : ''}` : ''} · pagina ${document.hidden ? 'nascosta' : 'visibile'}\n${lines}`, { since: from / 1000 });
+  }
+};
+addEventListener('online', () => Trace.add('rete: tornata')); addEventListener('offline', () => Trace.add('rete: assente'));
+document.addEventListener('visibilitychange', () => Trace.add(document.hidden ? 'pagina nascosta' : 'pagina visibile'));
 async function netFetch(url, opts = {}, ms = 20000) {
   const get = !opts.method || opts.method === 'GET';
   for (let i = 0; ; i++) {
-    try { return await fetch(url, { ...opts, signal: opts.signal || AbortSignal.timeout?.(get ? ms : ms * 3) }); }
-    catch (e) { if (!get || i || opts.signal) throw e; await new Promise(r => setTimeout(r, 1000)); }
+    // _r: il numero della richiesta, che il server registra (diagnosi.py) e Navidrome ignora
+    const rid = (++Trace.seq).toString(36), path = Trace.path(url), t0 = Date.now();
+    const u = /\/(rest|api)\//.test(url) ? url + (url.includes('?') ? '&' : '?') + '_r=' + rid : url;
+    Trace.add(`#${rid} → ${opts.method || 'GET'} ${path}`);
+    const dog = setTimeout(() => Trace.stall(rid, path, t0), 8000);
+    try { const r = await fetch(u, { ...opts, signal: opts.signal || AbortSignal.timeout?.(get ? ms : ms * 3) }); Trace.add(`#${rid} ← ${r.status} in ${Date.now() - t0} ms`); return r; }
+    catch (e) { Trace.add(`#${rid} ✕ ${e?.name === 'TimeoutError' ? 'scaduta' : e?.name || 'errore'} dopo ${Date.now() - t0} ms`); if (Date.now() - t0 < 8000 && e?.name !== 'AbortError') Trace.stall(rid, path, t0); if (!get || i || opts.signal) throw e; await new Promise(r => setTimeout(r, 1000)); }
+    finally { clearTimeout(dog); }
   }
 }
 const apiBase = (s, method) => absUrl(s.url) + '/rest/' + method;
@@ -2187,7 +2219,7 @@ const Engine = {
     clearTimeout(this.stallT);
     this.stallT = setTimeout(() => {
       if (el !== this.el || el.paused || el.getAttribute('src') !== src || Math.abs(el.currentTime - at) > .5) return;
-      window.Diag?.report('avviso', 'audio', 'flusso fermo da 8 s: ricarico', safeUrl(src));
+      window.Diag?.report('avviso', 'audio', 'flusso fermo da 8 s: ricarico', safeUrl(src)); Trace.add('audio fermo da 8 s: ricarico ' + Trace.path(src));
       this.reload(el, src, at);
     }, 8000);
   },
@@ -2658,7 +2690,7 @@ async function vLyrics() {
       <span class="pic">${cover ? `<img src="${esc(cover)}" alt="">` : ic('album')}</span>
       <span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></span></div>
     <div class="lyrbig" id="lyrBig"><p class="lyrmsg">Cerco il testo…</p></div><div class="lyrfoot" id="lyrFoot"></div></div>`;
-  lyrTint($('#lyrPage'), t);
+  lyrTint($('#lyrPage'), t); lyrFit();
   const lyr = await Lyrics.get(t);
   const box = $('#lyrBig');
   if (!box || !sameTrack(currentTrack(), t)) return;
@@ -2691,6 +2723,12 @@ async function vLyrics() {
   tick();
 }
 addEventListener('hashchange', () => { if (!location.hash.startsWith('#/testo')) document.documentElement.style.removeProperty('--lyr-bg'); });
+function lyrFit() {
+  const pg = $('#lyrPage'); if (!pg) return;
+  if (!matchMedia('(max-width:860px)').matches) { pg.style.height = ''; return; }
+  pg.style.height = Math.max(240, $('#player').getBoundingClientRect().top - pg.getBoundingClientRect().top) + 'px';
+}
+new ResizeObserver(() => lyrFit()).observe($('#player'), { box: 'border-box' }); addEventListener('resize', lyrFit);
 
 /* ================= in riproduzione: testi e visualizzatore ================= */
 async function vNow() {
@@ -5462,10 +5500,10 @@ const Live = {
     const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&${authQ(s)}${hb ? '&hb=1' : ''}`);
     this.last = Date.now();
     es.onmessage = e => { this.last = Date.now(); try { this.recv(JSON.parse(e.data)); } catch {} };
-    es.onopen = () => { this.fails = 0; this.last = Date.now(); this.sent = null; this.publish(); };
+    es.onopen = () => { Trace.add('canale dal vivo: aperto'); this.fails = 0; this.last = Date.now(); this.sent = null; this.publish(); };
     // EventSource si ricollega da solo dopo un errore di rete; se il server rifiuta (sessione scaduta) chiude:
     // si rifà l'accesso con tok/salt e si riprova, sempre più piano
-    es.onerror = () => { if (es.readyState === EventSource.CLOSED && this.es === es) { clearInterval(this.dog); this.retry = setTimeout(() => this.relogin(), Math.min(60000, 5000 * ++this.fails)); } };
+    es.onerror = () => { Trace.add('canale dal vivo: errore, stato ' + es.readyState); if (es.readyState === EventSource.CLOSED && this.es === es) { clearInterval(this.dog); this.retry = setTimeout(() => this.relogin(), Math.min(60000, 5000 * ++this.fails)); } };
     // cane da guardia: un canale mezzo morto (app uccisa, rete cambiata, schermo spento) resta "aperto" per sempre.
     // Il battito va a tempo, non a giri: in sottofondo i timer possono scattare anche solo una volta al minuto
     if (hb) this.dog = setInterval(() => { if (Date.now() - this.last > 40000) this.connect(); else if (Date.now() - this.beatAt > 25000) this.beat(); }, 10000);
@@ -5730,9 +5768,9 @@ const Avatar = {
     if (v === undefined && this.ok()) { this.map.set(u, 0); setTimeout(() => this.load(u), 0); }
     return typeof v === 'string' ? `;background-image:url(${v})` : '';
   },
-  async load(u) {
+  async load(u, fresh) {
     try {
-      const r = await netFetch(absUrl(srv().url) + '/api/avatar/' + encodeURIComponent(u), { headers: { 'X-Token': srv().session } });
+      const r = await netFetch(absUrl(srv().url) + '/api/avatar/' + encodeURIComponent(u), { headers: { 'X-Token': srv().session }, cache: fresh ? 'reload' : 'default' });
       if (!r.ok) { this.map.set(u, null); return; }
       this.map.set(u, URL.createObjectURL(await r.blob()));
     } catch { this.map.set(u, null); return; }
@@ -5743,7 +5781,7 @@ const Avatar = {
     $$(`.pav[data-u="${CSS.escape(u)}"]`).forEach(el => { el.style.backgroundImage = typeof v === 'string' ? `url(${v})` : ''; el.classList.toggle('img', typeof v === 'string'); });
   },
   // cambiata (da questo o da un altro dispositivo, o da un amico): si ricarica
-  refresh(u) { u = String(u || '').toLowerCase(); const v = this.map.get(u); if (typeof v === 'string') URL.revokeObjectURL(v); this.map.delete(u); this.map.set(u, 0); this.paint(u); this.load(u); },
+  refresh(u) { u = String(u || '').toLowerCase(); const v = this.map.get(u); if (typeof v === 'string') URL.revokeObjectURL(v); this.map.delete(u); this.map.set(u, 0); this.paint(u); this.load(u, true); },
   // una foto scelta dal dispositivo: ritagliata al centro, 256×256, JPEG
   async choose() {
     const f = await pickFile('image/*'); if (!f) return;

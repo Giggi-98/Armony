@@ -2,6 +2,7 @@
 Armony - diagnosi: registro degli eventi e stato del server (solo amministratori).
 
   /api/log        POST: i client mandano i loro errori e le ambiguità (qualsiasi utente, a lotti, con un limite);
+                  un evento "sessione" (richieste bloccate) riceve in più le richieste viste dal server per quel dispositivo;
                   GET: il registro, con filtri; GET /api/log/testo: lo stesso in testo semplice, da incollare;
                   DELETE: svuota (amministratore, con le regole delle impostazioni del server)
   /api/stato      risorse del server: CPU, memoria, carico, disco, rete, thread di waitress, flussi audio in corso,
@@ -47,7 +48,7 @@ def log(level, area, msg, detail="", user=None, dev=None, src="server"):
     """Un evento nel registro. Non solleva mai: il registro non deve rompere chi lo usa."""
     try:
         level = level if level in LEVELS else "info"
-        area, msg, detail = str(area or "server")[:40], str(msg or "")[:500], str(detail or "")[:8000]
+        area, msg, detail = str(area or "server")[:40], str(msg or "")[:500], str(detail or "")[:20000]
         sig = hashlib.sha1(f"{src}|{level}|{area}|{msg}|{user or ''}".encode()).hexdigest()[:16]
         now = time.time()
         with _lock:
@@ -147,7 +148,12 @@ def log_post():
     for x in items[:50]:
         if len(recent) >= 300 or not isinstance(x, dict):
             break
-        detail = {k: str(x[k])[:3000] for k in ("detail", "url", "ua", "app", "stack") if x.get(k)}
+        detail = {k: str(x[k])[:7000 if x.get("area") == "sessione" else 3000] for k in ("detail", "url", "ua", "app", "stack") if x.get(k)}
+        if x.get("area") == "sessione" and g.who.get("dev"):  # cosa ha ricevuto il server dallo stesso dispositivo
+            try:
+                detail["server"] = visti_di(g.who["dev"], float(x.get("since") or now - 120))
+            except (TypeError, ValueError):
+                pass
         log(x.get("level") if x.get("level") in LEVELS else "errore", "client:" + str(x.get("area") or "app")[:30], x.get("msg"),
             json.dumps(detail, ensure_ascii=False), user=u, dev=g.who.get("dev") or str(x.get("device") or "")[:40] or None, src="client")
         recent.append(now)
@@ -237,6 +243,29 @@ def req_start():
     g._diag = id(request._get_current_object())
     with _alock:
         active[g._diag] = {"kind": kind_of(request.path), "t0": time.time(), "path": request.path}
+
+
+# ─── registro della sessione ───
+# Per ogni dispositivo le ultime richieste arrivate davvero qui (istante, metodo, percorso, numero _r del client,
+# esito, millisecondi fino alle intestazioni). Quando un client segnala richieste bloccate (area "sessione") il
+# registro eventi riceve insieme le due versioni: cosa ha mandato il dispositivo e cosa ha visto il server
+visti = collections.defaultdict(lambda: collections.deque(maxlen=400))
+
+
+def req_seen(resp):
+    who = g.get("who") or {}
+    if who.get("dev") and request.method != "OPTIONS":
+        t0 = active.get(getattr(g, "_diag", None), {}).get("t0") or time.time()
+        p = request.path
+        p = p.split("/api/avatar/")[0] + "/api/avatar/…" if "/api/avatar/" in p else p.split("/api/videos/")[0] + "/api/videos/…" if "/api/videos/" in p else p
+        visti[who["dev"]].append((t0, request.method, p, request.args.get("_r") or "", resp.status_code, int((time.time() - t0) * 1000)))
+    return resp
+
+
+def visti_di(dev, since):
+    f = lambda t: time.strftime("%H:%M:%S", time.localtime(t)) + f".{int(t * 10) % 10}"
+    rows = [r for r in list(visti.get(dev, ())) if r[0] >= since - 5]
+    return "\n".join(f"{f(t)} #{rid or '-'} {m} {p} → {st} in {ms} ms" for t, m, p, rid, st, ms in rows[-120:]) or "nessuna richiesta ricevuta da questo dispositivo"
 
 
 def req_end(_exc=None):
@@ -397,6 +426,7 @@ def init(flask_app, host):
     flask_app.register_error_handler(Exception, _route_error)
     flask_app.before_request(req_start)
     flask_app.teardown_request(req_end)
+    flask_app.after_request(req_seen)
     _hooks()
 
 

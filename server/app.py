@@ -530,6 +530,7 @@ def proxy(p):
         val = lambda n: args.get(n) or (form.get(n) or [""])[0]
         who = identity(request.headers.get("X-Token"), val("k"))
         if who:
+            g.who = who  # per il registro della sessione (diagnosi.req_seen)
             if who["user"] and val("u") and val("u").lower() != who["user"].lower():
                 return jsonify(error="Questo dispositivo è di un altro utente."), 403
             dev = who["dev"]
@@ -556,7 +557,7 @@ def proxy(p):
                              f"utente {val('u') or '?'}, client {val('c') or '?'}, {m}", user=val("u") or None, dev=dev)
             body, mt = utenti.subsonic_error(is_json, 40, "Wrong username or password")
             return Response(body, mimetype=mt, status=401 if m in ("stream", "download", "getCoverArt", "hls") else 200)
-        args = [(a, b) for a, b in request.args.items(multi=True) if a != "k"]  # il gettone non arriva a Navidrome
+        args = [(a, b) for a, b in request.args.items(multi=True) if a not in ("k", "_r")]  # né il gettone né il numero della richiesta
     headers = {k: v for k, v in request.headers.items() if k.lower() in PASS_REQ}
     headers["Accept-Encoding"] = "identity"
     headers["X-Forwarded-For"] = client_ip()

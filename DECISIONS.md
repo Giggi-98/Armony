@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Registro della sessione: richieste numerate dal client, viste dal server
+
+**Contesto:** il web e il telefono dell'utente si bloccano per minuti e poi ripartono, mentre gli altri utenti no. I log di Tailscale mostrano pacchetti d'apertura dai nodi d'ingresso del Funnel verso la porta peerAPI scartati («no rules matched») nelle stesse ore, ma senza un legame con le singole richieste.
+**Scelta:** `netFetch` numera ogni richiesta (`_r` nella query, che il proxy non passa a Navidrome) e la scrive in un registro in memoria (`Trace`) con durata ed esito, insieme a rete, visibilità, canale dal vivo e audio; una richiesta ferma oltre 8 s o fallita manda il minuto di registro come evento «sessione». Il server tiene per dispositivo le ultime 400 richieste ricevute (`diagnosi.req_seen`, millisecondi fino alle intestazioni) e le allega all'evento.
+**Alternative scartate:** un'intestazione `X-Req` (nell'app Android è una richiesta da un'altra origine: un'intestazione nuova chiede il permesso CORS e i server vecchi la rifiuterebbero); registrare sempre tutto sul server in SQLite (scritture continue per un dato che serve solo quando qualcosa va storto); i log di accesso di waitress (non sanno quale dispositivo, né quando il client ha mandato la richiesta).
+**Conseguenze:** al più un evento «sessione» al minuto per dispositivo; il registro del server si perde a ogni riavvio.
+**Da rivedere se:** la causa dei blocchi è trovata e risolta: allora il registro può restare solo per i casi rari.
+
 ## 2026-10-11 — Testi in una schermata propria, mini lettore senza disco, sviluppo del client su una copia
 
 **Contesto:** l'utente chiede testi come Spotify (righe cantate più grandi, una scheda dedicata), un mini lettore del telefono più pulito e il profilo nel pallino in alto a destra sul web. Nella stessa sessione una modifica a metà di `client/` (montato in produzione) ha servito per 35 secondi un `armony.js` rotto.

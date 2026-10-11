@@ -13,14 +13,14 @@ I.bug = '<rect x="8" y="6" width="8" height="14" rx="4"/><path d="M12 6V3M8 11H4
 const Diag = {
   q: store.get('diagQ', []), t: null, seen: new Map(),
   ok(s = srv()) { return !!s?.session && !!s.me?.caps?.includes('diagnosi'); },
-  report(level, area, msg, detail = '') {
+  report(level, area, msg, detail = '', extra = {}) {
     msg = String(msg || '').slice(0, 500); if (!msg) return;
     const sig = level + area + msg, now = Date.now();
     if (now - (this.seen.get(sig) || 0) < 30000) return;
     this.seen.set(sig, now); if (this.seen.size > 300) this.seen.clear();
     // solo la rotta: il link di una Jam porta il segreto della stanza dopo #/jam/entra/, e non deve arrivare al server
     const url = location.hash.replace(/^(#\/(jam\/entra|abbina|invito)\/).*/, '$1…').slice(0, 120);
-    this.q.push({ level, area, msg, detail: String(detail || '').slice(0, 1500), url, at: now, app: window.ARMONY_APP?.version || '', ua: navigator.userAgent.slice(0, 160) });
+    this.q.push({ level, area, msg, detail: String(detail || '').slice(0, area === 'sessione' ? 7000 : 1500), url, at: now, ...extra, app: window.ARMONY_APP?.version || '', ua: navigator.userAgent.slice(0, 160) });
     if (this.q.length > 100) this.q.splice(0, this.q.length - 100);
     store.set('diagQ', this.q);
     clearTimeout(this.t); this.t = setTimeout(() => this.flush(), level === 'errore' ? 3000 : 15000);
