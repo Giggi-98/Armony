@@ -623,7 +623,7 @@ dialog.bio .biotxt{color:var(--ink);opacity:.9;line-height:1.65;font-size:1rem;w
 @media (max-width:520px){.catrow .btn span{display:none}.catrow .btn{padding:0;width:var(--hit);justify-content:center}}
 /* notifiche: campanella (sul computer accanto al tema, in alto a destra; sul telefono nell'intestazione) e pagina */
 #hBell{position:fixed;top:calc(var(--sat) + var(--s4));right:calc(var(--s5) + 48px);z-index:5;width:40px;height:40px;border-radius:50%;background:var(--surface);border:1px solid var(--line);color:var(--ink);box-shadow:var(--shadow-float)}
-body:has(#themeBtn[hidden]) #hBell{right:var(--s5)}
+@media (min-width:861px){body:has(#themeBtn[hidden]) #hBell{right:var(--s5)}}  /* sul telefono la posizione la decide --nt */
 #hBell svg{width:20px;height:20px}
 .nbadge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:var(--accent);color:var(--on-accent);font:700 .68rem/18px var(--body);font-style:normal;text-align:center}
 .nlist{display:flex;flex-direction:column}
@@ -1193,7 +1193,7 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
 }
 /* menu del profilo (telefono): un foglio da sinistra con le sezioni che non stanno nella barra in basso */
 /* il menu del profilo entra da destra, sotto l'avatar che lo apre, ed esce dalla stessa parte */
-dialog.drawer{margin:0 0 0 auto;height:100%;max-height:100%;width:min(86vw,340px);max-width:none;border:0;border-radius:var(--r-xl) 0 0 var(--r-xl);padding:calc(var(--sat) + var(--s5)) var(--s2) calc(var(--sab) + var(--s4));background:var(--surface);overflow-y:auto;position:fixed;
+dialog.drawer{inset:0 0 0 auto;margin:0;height:100%;height:100dvh;max-height:none;transform-origin:100% 50%;width:min(86vw,340px);max-width:none;border:0;border-radius:var(--r-xl) 0 0 var(--r-xl);padding:calc(var(--sat) + var(--s5)) var(--s2) calc(var(--sab) + var(--s4));background:var(--surface);overflow-y:auto;position:fixed;
   opacity:1;transform:translateX(100%);transition:transform 280ms var(--ease-out),display 280ms allow-discrete,overlay 280ms allow-discrete}
 dialog.drawer[open]{transform:none}
 @starting-style{dialog.drawer[open]{transform:translateX(100%)}}
