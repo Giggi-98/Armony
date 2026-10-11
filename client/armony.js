@@ -251,6 +251,9 @@ const Trace = {
   path(url) { try { const u = new URL(url, location.href); return u.pathname.replace(/\/api\/(avatar|videos)\/.*/, '/api/$1/…') + (u.searchParams.get('id') ? '?id=' + u.searchParams.get('id').slice(0, 24) : ''); } catch { return '?'; } },
   stall(rid, path, t0) {
     this.add(`#${rid} ferma da 8 s: ${path}`);
+    // esperimento (0.35.1): nei blocchi registrati le risposte ferme arrivavano tutte appena il canale dal vivo si
+    // riapriva. Riaprirlo subito dovrebbe accorciare il blocco: il registro dirà se è vero
+    if (Live.es && Date.now() - (this.kick || 0) > 15000) { this.kick = Date.now(); this.add('canale dal vivo: riaperto per sbloccare'); Live.connect(); }
     this.from = this.from || t0 - 60000;
     clearTimeout(this.t); this.t = setTimeout(() => this.send(), 25000);  // si aspetta come va a finire
   },
@@ -5499,7 +5502,7 @@ const Live = {
     const s = srv(), hb = this.hb();
     const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&${authQ(s)}${hb ? '&hb=1' : ''}`);
     this.last = Date.now();
-    es.onmessage = e => { this.last = Date.now(); try { this.recv(JSON.parse(e.data)); } catch {} };
+    es.onmessage = e => { if (Date.now() - this.last > 12000) Trace.add('canale dal vivo: segnale'); this.last = Date.now(); try { this.recv(JSON.parse(e.data)); } catch {} };
     es.onopen = () => { Trace.add('canale dal vivo: aperto'); this.fails = 0; this.last = Date.now(); this.sent = null; this.publish(); };
     // EventSource si ricollega da solo dopo un errore di rete; se il server rifiuta (sessione scaduta) chiude:
     // si rifà l'accesso con tok/salt e si riprova, sempre più piano

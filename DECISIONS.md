@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Primo blocco registrato: il server risponde subito, le risposte si fermano sulla strada; riaprire il canale dal vivo
+
+**Contesto:** il primo evento «sessione» (PC dell'utente, Tailscale Funnel) mostra 16 richieste ricevute dal server e risposte in 0-13 ms, ma arrivate al browser 12-18 s dopo, tutte nello stesso istante: 0,8 s dopo che il client aveva riaperto il canale dal vivo (nessun segnale da 20 s). Le richieste nuove fatte durante il blocco non l'avevano sbloccato.
+**Scelta:** esperimento: quando una richiesta resta ferma 8 s il client riapre subito il canale dal vivo (al più ogni 15 s) e lo scrive nel registro della sessione; il registro annota anche i segnali del canale dopo un silenzio. Il problema resta fuori da Armony (connessione verso il browser attraverso il Funnel); questo serve ad accorciare i blocchi e a confermare l'ipotesi.
+**Alternative scartate:** cambiare il server (risponde in millisecondi: non è lui); togliere il canale dal vivo (serve al telecomando fra dispositivi); aspettare il controllo dei 40 s (i blocchi duravano proprio quanto lui).
+**Conseguenze:** in un blocco l'elenco «Dove suona» si ridisegna una volta.
+**Da rivedere se:** i prossimi eventi «sessione» mostrano blocchi che non finiscono alla riapertura del canale (allora l'ipotesi è sbagliata e l'esperimento va tolto), o se si sostituisce il Funnel.
+
 ## 2026-10-11 — Registro della sessione: richieste numerate dal client, viste dal server
 
 **Contesto:** il web e il telefono dell'utente si bloccano per minuti e poi ripartono, mentre gli altri utenti no. I log di Tailscale mostrano pacchetti d'apertura dai nodi d'ingresso del Funnel verso la porta peerAPI scartati («no rules matched») nelle stesse ore, ma senza un legame con le singole richieste.
