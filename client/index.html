@@ -313,7 +313,6 @@ label.check small{display:block;color:var(--muted)}
 .trcheck li>svg{flex:none;width:18px;height:18px;margin-top:1px;padding:2px;border-radius:50%;color:#fff;background:var(--sage)}
 .trcheck li.no>svg{background:var(--danger)}.trcheck li.warn>svg{background:var(--accent);color:var(--on-accent)}
 .trcheck b{font-weight:600}.trcheck small{display:block;color:var(--muted);font-size:.84rem}
-.lcard.special.smart .lcover{background:linear-gradient(135deg,#3b2fbd,#b38bff);color:#fff}
 /* playlist intelligente: righe campo · condizione · valore */
 @media (min-width:861px){dialog.sheet.smart{width:min(680px,calc(100vw - 2 * var(--s5)));max-width:none}}
 dialog.smart .smbody{display:flex;flex-direction:column;gap:var(--s3);padding:0 14px 14px}
@@ -714,8 +713,6 @@ dialog.bio .biotxt{color:var(--ink);opacity:.9;line-height:1.65;font-size:1rem;w
 .lcard small{color:var(--muted);font-size:var(--fs-small,.84rem);line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .lcard.round{text-align:center}
 .lcard.round .lcover{border-radius:50%}
-.lcard.special .lcover{background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#c2410c));color:var(--on-accent);box-shadow:none}
-.lcard.special.alt .lcover{background:linear-gradient(135deg,#1e3264,#148a08);color:#fff}
 .lcard.dir .lcover{background:var(--surface2);color:var(--accent-text)}
 .plDirHead:not(:empty){display:flex;align-items:center;gap:var(--s2);margin:0 0 var(--s3);flex-wrap:wrap}
 .plDirHead>svg{width:22px;height:22px;color:var(--accent-text)}
@@ -784,7 +781,6 @@ dialog.sheet.reord{display:flex;flex-direction:column;max-height:88vh;max-height
 .lhead h1{margin-bottom:0}
 @media (min-width:861px){body:has(#themeBtn:not([hidden])) .lhead,body:has(#hBell:not([hidden])) .lhead{padding-right:52px}body:has(#themeBtn:not([hidden])):has(#hBell:not([hidden])) .lhead{padding-right:100px}}
 .lhead .icon-btn svg{width:26px;height:26px}
-.lcard.special svg{width:34%;height:34%}
 /* lettera dell'indice degli artisti: una riga intera, compatta */
 .lletter{grid-column:1/-1;font:800 1.15rem/1 var(--display);color:var(--accent-text);padding:var(--s4) var(--s3) 0}
 .lletter:first-child{padding-top:0}
@@ -1644,6 +1640,8 @@ details.sosp input[type=checkbox]{width:18px;height:18px;accent-color:var(--acce
 @media (max-width:520px){.vcand{flex-wrap:wrap}.vcand .grow{flex-basis:calc(100% - 50px)}.vcand .vscore{order:-1}}
 /* ordina e cerca negli elenchi (Ord) */
 .ordbar{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);margin:0 0 var(--s2)}
+.plmk{display:inline-flex;gap:2px;flex:none}
+@media (max-width:560px){.ordbar.plbar{flex-wrap:wrap;row-gap:var(--s2)}.ordbar.plbar .ordq{flex:1 1 100%}.ordbar.plbar .plmk{margin-right:auto}}
 .ordq{display:flex;align-items:center;gap:var(--s2);min-width:0;flex:0 1 260px;height:36px;padding:0 var(--s3);border-radius:99px;background:var(--surface2);color:var(--muted)}
 .ordq svg{width:16px;height:16px;flex:none}
 .ordq input{border:0;background:none;padding:0;height:100%;min-width:0;flex:1;font-size:16px;color:var(--ink);outline:none}

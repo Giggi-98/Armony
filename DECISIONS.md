@@ -27,6 +27,20 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Una sola casa per le playlist: la Libreria
+**Contesto:** la sezione Playlist e la scheda Playlist della Libreria mostravano la stessa cosa, con in più i riquadri «Nuova playlist», «Playlist intelligente», «Importa da Spotify» e un «+» in testa alla Libreria («ridondanza inutile», dice l'utente).
+**Scelta:** resta la Libreria (ha anche Artisti, Album, Cronologia, Generi, come «La tua libreria» di Spotify); la voce Playlist esce dal menu del computer e dalla scelta della barra del telefono; `#/playlist` porta a `#/libreria`, le pagine delle singole playlist restano `#/playlist/<id>` (nel menu accendono Libreria). Creare, crearne una intelligente, una cartella e importare sono icone accanto alla ricerca delle playlist (sul telefono sotto la ricerca, a tutta riga); via i riquadri e il «+» col suo menu. «Su altri server» passa nella scheda Playlist della Libreria.
+**Alternative scartate:** tenere la sezione Playlist e togliere la scheda dalla Libreria (le playlist sono parte della libreria, come su Spotify, e la Libreria ha già tutto il resto).
+**Conseguenze:** chi aveva Playlist nella barra in basso del telefono torna alla barra predefinita (Home, Cerca, Libreria, Jam).
+**Da rivedere se:** le playlist diventano tante da voler una pagina a sé con strumenti suoi.
+
+## 2026-10-11 — Liste di brani a pezzi; elimina playlist dal tasto destro
+**Contesto:** una playlist intelligente senza limite (migliaia di brani) bloccava la pagina: `songList` disegnava tutte le righe in una volta (misurato: 936 ms per 5000 brani sul computer, molto di più sui telefoni). E non si poteva eliminarla senza aprirla.
+**Scelta:** `songList` disegna le prime 300 righe e mette un segnaposto; un IntersectionObserver (1500 px prima) aggiunge 200 righe alla volta scorrendo (46 ms per 5000 brani). Le righe aggiunte hanno lo stesso `data-i`, quindi selezione, menu e presenza funzionano uguale; le azioni sulla lista intera usano l'array, non il DOM. «Elimina playlist» nel tasto destro (rosso), con conferma; se non è tua lo rifiuta Navidrome.
+**Alternative scartate:** una lista virtuale che tiene nel DOM solo le righe visibili (più complessa, e la ricerca del browser con Ctrl+F non trova le righe fuori vista); un limite fisso alle playlist intelligenti (l'utente può volerne una grande).
+**Conseguenze:** Ctrl+F del browser trova solo le righe già disegnate; la ricerca dentro la lista di Armony le vede tutte.
+**Da rivedere se:** servono liste da decine di migliaia di brani (allora la lista virtuale).
+
 ## 2026-10-11 — Gapless con un timer, chi parte prima tiene la musica, canale dal vivo sul server di casa
 **Contesto:** piano 3, 0.57 (B1, B5, metà di B4). Senza dissolvenza il brano dopo partiva all'evento «finito» (misurato sul computer: 24 ms di silenzio; sui telefoni di più); due dispositivi partiti quasi insieme potevano fermarsi a vicenda; passando al server di un amico si spariva da «Dove suona».
 **Scelta:** gapless: quando mancano meno di 1,2 s e il brano dopo è già pronto sull'altro piatto, un timer lo avvia 50 ms prima della fine (misurato: 36-54 ms di sovrapposizione sulla coda silenziosa); allo scatto si ricontrolla che non ci siano stati pausa, salto o coda cambiata, altrimenti resta «finito» come prima. Chi parte prima: ogni stato porta `since`, l'istante d'inizio in ora del server (`LIVE_FIELDS`); se l'altro è partito dopo, si tiene la musica e ci si ripubblica; a parità decide l'identificativo; senza `since` (versioni vecchie) come prima. Canale: `Live.srv()` è il server attivo se ha il canale, altrimenti l'ultimo che l'aveva (`liveHome`).

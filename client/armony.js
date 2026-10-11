@@ -492,7 +492,7 @@ const PP = { play: ['M8 5.5L13.25 8.75L13.25 15.25L8 18.5Z', 'M13.25 8.75L18.5 1
 
 /* ================= router ================= */
 const NAV = [
-  ['home', 'Home', 'home'], ['cerca', 'Cerca', 'search'], ['libreria', 'Libreria', 'lib'], ['playlist', 'Playlist', 'list'],
+  ['home', 'Home', 'home'], ['cerca', 'Cerca', 'search'], ['libreria', 'Libreria', 'lib'],
   ['preferiti', 'Preferiti', 'heart'], ['jam', 'Jam', 'jam'], ['radio', 'Radio', 'radio'], ['amici', 'Amici', 'friends'], ['rete', 'Rete', 'globe'], ['offline', 'Offline', 'offline'], ['video', 'Video', 'film'],
   ['statistiche', 'Statistiche', 'stats'], ['scarica', 'Scarica', 'down'], ['impostazioni', 'Impostazioni', 'gear']
 ];
@@ -500,7 +500,7 @@ const NAV = [
 // su questo dispositivo, e quello della pagina aperta si apre da sé). Il telefono usa la barra in basso (NAV, TABS_DEF)
 const NAV_GROUPS = [
   [null, ['home', 'cerca']],
-  ['musica', 'La mia musica', 'lib', ['libreria', 'playlist', 'preferiti', 'offline', 'video']],
+  ['musica', 'La mia musica', 'lib', ['libreria', 'preferiti', 'offline', 'video']],
   ['vicinato', 'Vicinato', 'friends', ['jam', 'amici', 'radio']],
   ['rete', 'Rete', 'globe', ['rete', 'federazione']],
   ['attivita', 'Attività', 'stats', ['statistiche', 'scarica']],
@@ -530,7 +530,7 @@ function navToggle(g, open) {
   store.set('navOpen', { ...store.get('navOpen', {}), [g]: open });
 }
 const view = $('#view');
-const ROUTE_PARENT = { mix: 'home', album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria' };
+const ROUTE_PARENT = { playlist: 'libreria', collab: 'libreria', mix: 'home', album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria' };
 // su telefono: fino a quattro sezioni nella barra in basso (scelte in Impostazioni → Aspetto, o tenendo premuta la barra),
 // le altre nel foglio "Altro". Si salvano su questo dispositivo; una sezione che non esiste più riporta al predefinito
 const TABS_DEF = ['home', 'cerca', 'libreria', 'jam'];
@@ -602,14 +602,31 @@ function albumGrid(albums, opts = {}) {
 // ogni elenco disegnato tiene i suoi brani: un tocco usa l'elenco della riga, "Riproduci"/"Casuale" quello principale
 // della pagina. Prima si usava solo l'ultimo elenco disegnato, e un elenco corto disegnato dopo accorciava la coda
 const Lists = new Map(); let listSeq = 0;
+const SONG_FIRST = 300, SONG_STEP = 200;
+function songsMore(lid, rows, tot) {
+  const mark = document.querySelector(`.songs-more[data-l="${lid}"]`); if (!mark) return;
+  let from = SONG_FIRST;
+  const io = new IntersectionObserver(es => {
+    if (!es.some(e => e.isIntersecting) || !mark.isConnected) return;
+    mark.insertAdjacentHTML('beforebegin', rows(from, from + SONG_STEP)); from += SONG_STEP;
+    if (from >= tot) { io.disconnect(); mark.remove(); }
+  }, { rootMargin: '1500px 0px' });
+  io.observe(mark);
+}
 function songList(tracks, opts = {}) {
   S.lastList = tracks;
   const lid = ++listSeq; Lists.set(lid, tracks); if (Lists.size > 40) Lists.delete(Lists.keys().next().value);
   if (!tracks.length) return `<div class="empty">${opts.empty || 'Nessun brano.'}</div>`;
   const cur = currentTrack();
   const art = opts.art !== false, alb = opts.showAlbum !== false;
+  // liste lunghe (una playlist intelligente da migliaia di brani) a pezzi: le prime righe subito, le altre scorrendo.
+  // Disegnarle tutte insieme bloccava la pagina; le azioni sulla lista intera usano comunque tutti i brani
+  const rows = (from, to) => tracks.slice(from, to).map((t, k) => _songRow(t, from + k, opts, cur, art, alb)).join('');
+  if (tracks.length > SONG_FIRST) setTimeout(() => songsMore(lid, rows, tracks.length));
   return `<div class="songs tracklist${alb ? '' : ' noalb'}${opts.queue ? ' q' : ''}" data-l="${lid}">
-    <div class="th${art ? '' : ' noart'}"${opts.sortable ? '' : ' aria-hidden="true"'}><span class="n">#</span><span class="tt"${opts.sortable ? ' data-sort="title" role="button" tabindex="0"' : ''}>Titolo</span>${alb ? `<span class="al"${opts.sortable ? ' data-sort="album" role="button" tabindex="0"' : ''}>Album</span>` : ''}<span class="d"${opts.sortable ? ' data-sort="duration" role="button" tabindex="0" aria-label="Durata"' : ''}>${ic('clock')}</span><span></span></div>${tracks.map((t, i) => `
+    <div class="th${art ? '' : ' noart'}"${opts.sortable ? '' : ' aria-hidden="true"'}><span class="n">#</span><span class="tt"${opts.sortable ? ' data-sort="title" role="button" tabindex="0"' : ''}>Titolo</span>${alb ? `<span class="al"${opts.sortable ? ' data-sort="album" role="button" tabindex="0"' : ''}>Album</span>` : ''}<span class="d"${opts.sortable ? ' data-sort="duration" role="button" tabindex="0" aria-label="Durata"' : ''}>${ic('clock')}</span><span></span></div>${rows(0, Math.min(tracks.length, SONG_FIRST))}${tracks.length > SONG_FIRST ? `<div class="songs-more" data-l="${lid}" aria-hidden="true"></div>` : ''}</div>`;
+}
+const _songRow = (t, i, opts, cur, art, alb) => `
     <div class="song ${art ? '' : 'noart'} ${cur && key(cur) === key(t) ? 'now' : ''}" data-act="${opts.queue ? 'qplay' : 'play'}" data-i="${i}" data-tid="${esc(t.id)}">
       <span class="n">${opts.queue ? i + 1 : (opts.numbers ? (t.track || i + 1) : i + 1)}</span>
       <span class="thumb">${art ? imgTag(t.coverArt, 84, t.serverId) : ''}</span>
@@ -625,8 +642,7 @@ function songList(tracks, opts = {}) {
           <button class="icon-btn ${t.starred ? 'on' : ''}" data-act="star" data-i="${i}" aria-label="Preferito">${ic('heart', t.starred)}</button>`}
         <button class="icon-btn" data-act="more" data-i="${i}" aria-label="Altre azioni">${ic('more')}</button>
       </span>
-    </div>`).join('')}</div>`;
-}
+    </div>`;
 const listActions = (extra = '') => `<div class="row acts-row" style="margin-bottom:16px">
   <button class="btn primary" data-act="playall">${ic('play')} Riproduci</button>
   <button class="btn" data-act="shuffleall">${ic('shuffle')} Mescola</button>
@@ -895,7 +911,7 @@ async function vLibrary(tab) {
   const n = Scene.nav;
   // tempo reale: artisti, album e generi arrivati con un download compaiono da soli (evento 'libreria')
   const live = f => { const on = () => { Bus.removeEventListener('libreria', on); if (!stale(n)) f(); }; Bus.addEventListener('libreria', on); };
-  const tabs = `<div class="lhead"><h1>Libreria</h1>${can('playlist') ? `<button class="icon-btn" data-act="libplus" aria-label="Crea o importa una playlist">${ic('plus')}</button>` : ''}</div><div class="lpills" role="navigation" aria-label="Sezioni della libreria">${[['playlist', 'Playlist'], ['artisti', 'Artisti'], ['album', 'Album'], ['cronologia', 'Cronologia'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>`;
+  const tabs = `<div class="lhead"><h1>Libreria</h1></div><div class="lpills" role="navigation" aria-label="Sezioni della libreria">${[['playlist', 'Playlist'], ['artisti', 'Artisti'], ['album', 'Album'], ['cronologia', 'Cronologia'], ['generi', 'Generi'], ['brani', 'Brani a caso']].map(([k, l]) => `<a href="#/libreria/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</div>`;
   if (tab === 'cronologia') {
     // gli ultimi ascolti, per giorno (lo storico è quello di tutti i tuoi dispositivi se la sincronizzazione è accesa)
     const h = (await Stats.all()).sort((a, b) => b.ts - a.ts).slice(0, 400);
@@ -908,9 +924,13 @@ async function vLibrary(tab) {
     return;
   }
   if (tab === 'playlist') {
-    view.innerHTML = tabs + '<div id="plBox"></div>';
+    view.innerHTML = tabs + '<div id="plBox"></div><div id="plRete"></div>';
     await playlistsInto($('#plBox'), n);
+    fedCollabInto($('#plRete'), n);
     live(() => vLibrary(tab));
+    // conteggi e copertine cambiano quando una playlist si riempie (anche dal server, dopo i download)
+    const again = () => { Bus.removeEventListener('playlists', again); if (!stale(n)) vLibrary(tab); };
+    Bus.addEventListener('playlists', again);
   } else if (tab === 'artisti') {
     const idx = arr((await api('getArtists')).artists.index);
     if (stale(n)) return;
@@ -1636,16 +1656,8 @@ async function netPlaylists(nid, name) {
   };
   paint();
 }
-async function vPlaylists() {
-  if (!srv()) return noServer();
-  const n = Scene.nav;
-  view.innerHTML = `<h1>Playlist</h1><p class="sub">${srv().local ? 'Restano su questo telefono; con la copia sul server attiva finiscono anche lì.' : 'Le tue playlist e, se puoi vederle, quelle condivise degli altri.'}</p><div id="plBox"></div><div id="plRete"></div>`;
-  await playlistsInto($('#plBox'), n);
-  fedCollabInto($('#plRete'), n);
-  // tempo reale: conteggi e copertine cambiano quando una playlist si riempie (anche dal server, dopo i download)
-  const again = () => { Bus.removeEventListener('playlists', again); if (!stale(n)) vPlaylists(); };
-  Bus.addEventListener('playlists', again);
-}
+// la sezione Playlist non c'è più: le playlist stanno nella Libreria (scheda Playlist), come «La tua libreria» di Spotify
+function vPlaylists() { location.replace('#/libreria'); }
 // le playlist come in "La tua libreria" di Spotify: Preferiti fissato in cima, cerca, ordina (recenti, alfabetico, creatore)
 // riordinare una playlist trascinando (dito o mouse) la maniglia di ogni brano, o con le frecce dalla tastiera;
 // "Fatto" la riscrive sul server (POST /api/playlist/ordina, capacità "plordina")
@@ -1693,16 +1705,6 @@ async function reorderPl(id) {
   d.showModal();
 }
 // "+" della Libreria, come Spotify: crea una playlist o importala
-function libPlus() {
-  const d = $('#dlg'); d.className = 'sheet';
-  d.innerHTML = `<button class="mi" id="lpNew">${ic('list')}<span class="grow">Playlist<small>Crea una playlist vuota</small></span></button>
-    <button class="mi" id="lpDir">${ic('folder')}<span class="grow">Cartella<small>Per raggruppare le playlist</small></span></button>
-    <button class="mi" id="lpImp">${ic('down')}<span class="grow">Importa<small>Da Spotify (CSV di Exportify), M3U o JSON</small></span></button>`;
-  $('#lpDir').onclick = () => { d.close(); PlDir.create(); };
-  $('#lpNew').onclick = async () => { d.close(); const name = await ask('Nuova playlist', '', 'Nome'); if (name) { await api('createPlaylist', { name }); route(); } };
-  $('#lpImp').onclick = () => { d.close(); importPlaylist(); };
-  closeOutside(d); d.showModal();
-}
 // cartelle di playlist, come Spotify: solo un raggruppamento nelle preferenze (P.plDir, le stesse su tutti i tuoi
 // dispositivi). Navidrome non le conosce: per le altre app le playlist restano tutte allo stesso livello
 const PlDir = {
@@ -1743,18 +1745,16 @@ async function playlistsInto(box, n) {
     if (dir == null) sessionStorage.removeItem('armony:pldir'); else sessionStorage.setItem('armony:pldir', dir);
     const l = pls.filter(p => Q ? cleanTxt(`${p.name} ${p.owner || ''}`).includes(Q) : open ? open.ids.includes(p.id) : !inDir.has(p.id))
       .sort({ recent: (a, b) => cmp(b.changed || b.created, a.changed || a.created), alpha: (a, b) => cmp(a.name, b.name), owner: (a, b) => (a.owner !== me) - (b.owner !== me) || cmp(a.owner, b.owner) || cmp(a.name, b.name) }[o.by]);
-    const special = can('playlist') && !Q ? `<button class="lcard special" data-act="newpl"><div class="lcover">${ic('plus')}</div><b>Nuova playlist</b><small>Vuota, da riempire</small></button>
-        ${smartOk() ? `<button class="lcard special smart" data-act="smartpl"><div class="lcover">${ic('sliders')}</div><b>Playlist intelligente</b><small>Con regole, si aggiorna da sola</small></button>` : ''}
-        <button class="lcard special alt" data-act="importpl"><div class="lcover">${ic('down')}</div><b>Importa da Spotify</b><small>CSV di Exportify, M3U, JSON</small></button>` : '';
     $('#plCards').className = 'lcards ' + mode;
     $('#plDirHead').innerHTML = open ? `<button class="icon-btn" data-dir="" aria-label="Tutte le playlist">${ic('chevl')}</button>${ic('folder')}<b>${esc(open.n)}</b>
       <button class="icon-btn" data-dirx="ren" aria-label="Rinomina la cartella" title="Rinomina">${ic('pen')}</button><button class="icon-btn" data-dirx="del" aria-label="Togli la cartella (le playlist restano)" title="Togli la cartella">${ic('trash')}</button>` : '';
     if (open) { $('#plCards').innerHTML = l.map(lPlCard).join('') || '<p class="sub">Cartella vuota: sposta qui una playlist dal suo menu («Sposta in una cartella»).</p>'; return; }
     const dirCards = Q ? '' : dirs.map(d => `<button class="lcard dir" data-dir="${esc(d.n)}"><div class="lcover">${ic('folder')}</div><b>${esc(d.n)}</b><small>Cartella · ${d.ids.length} ${d.ids.length === 1 ? 'playlist' : 'playlist'}</small></button>`).join('');
     $('#plCards').innerHTML = (!Q || cleanTxt('preferiti').includes(Q) ? `<a class="lcard favs" href="#/preferiti"><div class="lcover">${ic('heart', true)}</div><b>Preferiti</b><small>Playlist · ${favs} ${favs === 1 ? 'brano' : 'brani'}</small></a>` : '')
-      + (mode === 'grid' ? special : '') + dirCards + l.map(lPlCard).join('') + (mode === 'list' ? special : '') + (Q && !l.length ? `<p class="sub">Nessuna playlist con «${esc(q)}».</p>` : '');
+      + dirCards + l.map(lPlCard).join('') + (Q && !l.length ? `<p class="sub">Nessuna playlist con «${esc(q)}».</p>` : '');
   };
-  box.innerHTML = `<div class="ordbar"><label class="ordq">${ic('search')}<input type="search" id="plQ" placeholder="Cerca nelle playlist" aria-label="Cerca nelle playlist" autocomplete="off"></label>
+  box.innerHTML = `<div class="ordbar plbar"><label class="ordq">${ic('search')}<input type="search" id="plQ" placeholder="Cerca nelle playlist" aria-label="Cerca nelle playlist" autocomplete="off"></label>
+    ${can('playlist') ? `<span class="plmk"><button class="icon-btn" data-act="newpl" aria-label="Nuova playlist" title="Nuova playlist">${ic('plus')}</button>${smartOk() ? `<button class="icon-btn" data-act="smartpl" aria-label="Playlist intelligente" title="Playlist intelligente: si aggiorna da sola">${ic('spark')}</button>` : ''}<button class="icon-btn" data-act="newdir" aria-label="Nuova cartella" title="Nuova cartella di playlist">${ic('folder')}</button>${srv().local ? '' : `<button class="icon-btn" data-act="importpl" aria-label="Importa playlist" title="Importa da Spotify (CSV di Exportify), M3U o JSON">${ic('down')}</button>`}</span>` : ''}
     <button class="ordby" id="plOrd"><span>${esc(sortL.find(x => x[0] === o.by)[1])}</span>${ic('sliders')}</button>
     <button class="icon-btn" id="plView" aria-label="${mode === 'list' ? 'Mostra a griglia' : 'Mostra a elenco'}">${ic(mode === 'list' ? 'grid' : 'list')}</button></div><div class="plDirHead" id="plDirHead"></div><div class="lcards" id="plCards"></div>`;
   paint('');
@@ -4208,6 +4208,7 @@ const Amici = {
   }
 };
 /* ================= notifiche (capacità "notifiche", server/notifiche.py) ================= */
+I.spark = '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z"/>';
 I.bell = '<path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>';
 const NKIND = { import: 'nImport', download: 'nDownload', jam: 'nJam', dispositivi: 'nDev', amici: 'nAmici', sistema: null };
 const Notif = {
@@ -4664,7 +4665,13 @@ document.addEventListener('contextmenu', e => {
        srv()?.local || !can('condividi') ? null : ['share', 'Condividi un link', () => shareItem(id, name)],
        srv()?.local || !Amici.on() ? null : ['friends', 'Collaboratori', () => Amici.collabSheet(id)],
        fedCollabOk() ? ['globe', 'Collaboratori federazione', () => fedCollabSheet(id)] : null,
-       ['folder', 'Sposta in una cartella', () => PlDir.pick(id, at || [innerWidth / 2, innerHeight / 3])]].filter(Boolean)), `<b>${esc(name)}</b><small>Playlist</small>`);
+       ['folder', 'Sposta in una cartella', () => PlDir.pick(id, at || [innerWidth / 2, innerHeight / 3])],
+       // anche le intelligenti: una troppo grande si toglie da qui senza aprirla. Se non è tua lo dice Navidrome
+       can('playlist') ? ['trash', 'Elimina playlist', async () => {
+         if (!confirm(`Eliminare la playlist «${name}»? I brani restano in libreria.`)) return;
+         try { await api('deletePlaylist', { id }); toast(`«${name}» eliminata.`); emit('playlists'); if (decodeURIComponent(location.hash).startsWith('#/playlist/' + id)) location.hash = '#/libreria'; }
+         catch (er) { toast(er.message); }
+       }, 'danger'] : null].filter(Boolean)), `<b>${esc(name)}</b><small>Playlist</small>`);
   }
   const ghost = e.target.closest('.card.ghost [data-act="dzalbum"], .card.ghost')?.closest('.card');
   if (ghost) { const id = ghost.querySelector('[data-act="dzalbum"]')?.dataset.id; if (id) return menu([['album', 'Apri (non in libreria)', go('#/album-dz/' + encodeURIComponent(id))]]); }
@@ -5876,7 +5883,7 @@ view.addEventListener('click', async e => {
       case 'smartedit': smartSheet(id); break;
       case 'newpl': { const name = await ask('Nuova playlist', '', 'Nome'); if (name) { await api('createPlaylist', { name }); route(); } break; }
       case 'importpl': importPlaylist(); break;
-      case 'libplus': libPlus(); break;
+      case 'newdir': PlDir.create(); break;
       case 'reorderpl': reorderPl(id); break;
       case 'collabpl': Amici.collabSheet(id); break;
       case 'fedcollabpl': fedCollabSheet(id); break;
@@ -5912,7 +5919,7 @@ view.addEventListener('click', async e => {
       }
       case 'dirpl': { const r = $('[data-act="lmore"]')?.getBoundingClientRect(); PlDir.pick(id, r ? [r.left, r.bottom + 4] : [innerWidth / 2, innerHeight / 3]); break; }  // dal menu ⋯: vicino al suo tasto
       case 'addsongs': addSongsSheet(el.dataset.id || id, el.dataset.name || ''); break;
-      case 'delpl': if (confirm('Eliminare questa playlist? I brani restano in libreria.')) { await api('deletePlaylist', { id }); location.hash = '#/playlist'; } break;
+      case 'delpl': if (confirm('Eliminare questa playlist? I brani restano in libreria.')) { await api('deletePlaylist', { id }); location.hash = '#/libreria'; } break;
       case 'upforce': { const u = Up.list[+el.dataset.i]; if (u) { u.force = true; u.status = 'in coda'; upRun(); } break; }
       case 'upclear': Up.list = Up.list.filter(u => ['in coda', 'in corso'].includes(u.status)); upRender(); break;
       case 'clearjobs': await dlApi('/api/jobs', { method: 'DELETE' }); refreshJobs(); break;
