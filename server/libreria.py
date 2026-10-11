@@ -332,10 +332,16 @@ def giro_testi():
                 if os.path.exists(lrc) or now - no.get(sid, 0) < 30 * 86400 or not title:
                     continue
                 giro["corrente"] = f"{artist} - {title}"
-                try:
-                    t = lrclib(artist, title, album, dur)
-                except (requests.RequestException, ValueError) as e:
-                    giro["fermo"] = f"LRCLIB non risponde ({e.__class__.__name__}): riprovo fra un'ora"
+                t, err = None, None
+                for prova in range(3):  # un errore passeggero (LRCLIB lento, un 502) non ferma il giro per un'ora
+                    try:
+                        t, err = lrclib(artist, title, album, dur), None
+                        break
+                    except (requests.RequestException, ValueError) as e:
+                        err = getattr(getattr(e, "response", None), "status_code", None) or e.__class__.__name__
+                        time.sleep(30)
+                if err:
+                    giro["fermo"] = f"LRCLIB non risponde (errore {err}, tre volte di fila): riprovo fra un'ora"
                     time.sleep(3600)
                     giro["fermo"] = ""
                     break

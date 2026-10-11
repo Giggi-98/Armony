@@ -2578,6 +2578,20 @@ const Engine = {
     // niente dissolvenza fra brani consecutivi dello stesso album (live, mix, concept: sono fatti per legarsi)
     const seq = t.albumId && t.albumId === nt.albumId && nt.track === (t.track || 0) + 1;
     if (P.crossfade > 0 && this.ctx && !this.fading && !seq && rem <= P.crossfade && rem > .3) this.crossfade(n, rem);
+    // gapless: senza dissolvenza (e fra brani dello stesso album) il successivo parte 50 ms prima della fine, con un timer
+    // preciso. Aspettare l'evento «finito» lasciava 100-300 ms di silenzio: il buco negli album dal vivo e nei concept
+    else if ((!P.crossfade || seq || !this.ctx) && !this.fading && !this.gap && rem < 1.2 && !a.paused && this.idle.dataset.key === key(nt) && this.idle.readyState >= 3)
+      this.gap = setTimeout(() => this.gapless(n), Math.max(0, (rem - .05) / (a.playbackRate || 1)) * 1000);
+  },
+  gapless(n) {
+    const old = this.cur, nw = 1 - old, a = this.decks[old], b = this.decks[nw], t = S.queue[n];
+    this.gap = 0;
+    // nel frattempo pausa, salto all'indietro, coda cambiata: ci pensa «finito», come prima
+    if (a.paused || a.duration - a.currentTime > .3 || !t || b.dataset.key !== key(t) || this.nextIndex() !== n || this.fading) return;
+    if (this.ctx) this.setGain(nw, this.rg(t));
+    b.currentTime = 0; b.playbackRate = P.speed; b.play().catch(() => {});
+    this.cur = nw; S.index = n; persistQueue(); trackChanged(t);
+    setTimeout(() => { if (this.cur !== old) { a.pause(); if (this.ctx) this.setGain(old, 0); } }, 400);
   },
   async crossfade(n, rem) {
     this.fading = true;
@@ -6233,12 +6247,20 @@ const Phone = {
 const Live = {
   es: null, devices: new Map(), states: new Map(), target: null, sent: null, tick: null, retry: null, dog: null, last: 0, beatAt: 0, fails: 0, want: null,
   name() { return P.deviceName || store.get('devName', null) || (NATIVE ? 'Telefono' : /Android|iPhone|iPad|Mobile/.test(navigator.userAgent) ? 'Telefono (browser)' : 'Computer'); },
-  on() { const s = srv(); return P.live !== false && !!s?.session && !!s.me?.caps?.includes('live'); },
+  // il server del canale: quello attivo se ce l'ha, altrimenti quello «di casa» (l'ultimo su cui il canale c'era).
+  // Passando al server di un amico per ascoltarlo non si sparisce da «Dove suona» (piano 2, 2.10)
+  srv() {
+    const a = srv();
+    if (a?.session && !a.local && a.me?.caps?.includes('live')) { if (store.get('liveHome', null) !== a.id) store.set('liveHome', a.id); return a; }
+    const h = S.servers.find(x => x.id === store.get('liveHome', null));
+    return h?.session && h.me?.caps?.includes('live') ? h : a;
+  },
+  on() { const s = Live.srv(); return P.live !== false && !!s?.session && !!s.me?.caps?.includes('live'); },
   st() { return this.target ? this.states.get(this.target) || null : null; },
   // telecomando: c'è un dispositivo di destinazione collegato e qui non sta suonando niente
   remote() { return !Jam.role && !Radio.st && !!this.target && this.devices.has(this.target) && Engine.el.paused; },
   // i brani degli altri miei dispositivi sono dello stesso server del canale (anche se lo raggiungono con un altro indirizzo)
-  loc(w) { return localize(w, srv()?.local ? null : S.active); },
+  loc(w) { const s = Live.srv(); return localize(w, s?.local ? null : s?.id); },
   track() { const s = this.st(); return s?.track ? this.loc(s.track) : null; },
   playing() { return !!this.st()?.playing; },
   // ─── PERCHÉ l'ora del server ───
@@ -6252,12 +6274,12 @@ const Live = {
   pos() { const s = this.st(); if (!s) return 0; const p = (s.position || 0) + (s.playing ? this.age(s) / 1000 * (s.rate || 1) : 0); return s.duration ? Math.min(p, s.duration) : p; },
   dur() { return this.st()?.duration || 0; },
   // il server manda ping e riceve battiti (livehb): solo allora il cane da guardia ha senso
-  hb() { return !!srv()?.me?.caps?.includes('livehb'); },
+  hb() { return !!Live.srv()?.me?.caps?.includes('livehb'); },
   stop() { clearTimeout(this.retry); clearInterval(this.dog); clearInterval(this.pollT); this.es?.close(); this.es = null; this.devices.clear(); this.states.clear(); this.target = null; this.sent = null; this.paint(); },
   connect() {
     const was = this.target; this.stop(); this.want = was;
     if (!this.on()) return Presence.clear();
-    const s = srv(), hb = this.hb();
+    const s = Live.srv(), hb = this.hb();
     const es = this.es = new EventSource(`${absUrl(s.url)}/api/live?device=${encodeURIComponent(S.device)}&name=${encodeURIComponent(this.name())}&${authQ(s)}${hb ? '&hb=1' : ''}`);
     this.last = Date.now();
     es.onmessage = e => { if (Date.now() - this.last > 12000) Trace.add('canale dal vivo: segnale'); this.last = Date.now(); try { this.recv(JSON.parse(e.data)); } catch {} };
@@ -6278,7 +6300,7 @@ const Live = {
   take(m) {
     if (m.id) { if ((this.seen ||= new Set()).has(m.id)) return; this.seen.add(m.id); if (this.seen.size > 200) this.seen.delete(this.seen.values().next().value); }
     this.exec(m);
-    if (m.id) srvApi(srv(), '/api/live/ack', { method: 'POST', body: JSON.stringify({ id: m.id }) }).catch(() => {});
+    if (m.id) srvApi(Live.srv(), '/api/live/ack', { method: 'POST', body: JSON.stringify({ id: m.id }) }).catch(() => {});
   },
   async relogin() { await syncSessions(); this.connect(); },
   // prima di spostare la musica: il canale dev'essere vivo, altrimenti si riapre e si aspetta il "hello" (al più 4 s).
@@ -6291,7 +6313,7 @@ const Live = {
   // dispositivi e stati come li vede il server adesso (capacità "livestato"): dopo un canale caduto in silenzio i
   // messaggi persi non tornano, questo sì. Restituisce lo scarto fra l'orologio del server e il nostro (ms)
   async resync(mine, cmd) {
-    const s = srv(); if (!s?.session || !s.me?.caps?.includes('livestato')) return null;
+    const s = Live.srv(); if (!s?.session || !s.me?.caps?.includes('livestato')) return null;
     let r; try { r = await srvApi(s, '/api/live/stato?' + new URLSearchParams({ ...(mine ? { device: S.device } : {}), ...(cmd ? { cmd } : {}) })); } catch { return null; }
     const now = Date.now(), off = r.now * 1000 - now;
     this.off = null; this.seenOff(r.now * 1000, now); arr(r.states).forEach(x => x.at && this.seenOff(x.at * 1000, now));
@@ -6305,12 +6327,12 @@ const Live = {
   // battito per il server; 404 = non ha più il nostro canale, 401 = sessione scaduta
   beat() {
     this.beatAt = Date.now();
-    srvApi(srv(), '/api/live/beat', { method: 'POST', body: JSON.stringify({ device: S.device }) })
+    srvApi(Live.srv(), '/api/live/beat', { method: 'POST', body: JSON.stringify({ device: S.device }) })
       .catch(e => /404/.test(e.message) ? this.connect() : /401/.test(e.message) ? this.relogin() : 0);
   },
   // ritorno in primo piano, rete di nuovo su, app riaperta: se il canale non è sicuramente vivo ci si ricollega subito
   wake(force) {
-    if (P.live === false || !srv()?.me?.caps?.includes('live')) return;
+    if (P.live === false || !Live.srv()?.me?.caps?.includes('live')) return;
     const ok = this.es?.readyState === EventSource.OPEN && (!this.hb() || Date.now() - this.last < 20000);
     if (ok && !force) return this.hb() && this.beat();
     this.es && this.es.readyState !== EventSource.CLOSED ? this.connect() : this.relogin();
@@ -6319,8 +6341,8 @@ const Live = {
     const now = Date.now(), before = this.track()?.id;
     if (m.type === 'ping') return;
     if (m.type === 'kicked') return this.stop();  // un'altra scheda di questo dispositivo ha preso il canale
-    if (m.type === 'revocato') return Disp.revoke(srv(), true);  // dispositivi.js: fuori subito
-    if (m.type === 'rekey') { this.stop(); return Disp.fresh(srv(), true).then(() => this.connect()); }
+    if (m.type === 'revocato') return Disp.revoke(Live.srv(), true);  // dispositivi.js: fuori subito
+    if (m.type === 'rekey') { this.stop(); return Disp.fresh(Live.srv(), true).then(() => this.connect()); }
     if (m.type === 'chiave' || m.type === 'mai') { this.stop(); return toast('Il server ora accetta solo dispositivi con chiave: aggiorna Armony o aprila con HTTPS.', 8000); }
     if (m.type === 'dispositivi') return Disp.changed();
     if (m.type === 'avatar') return Avatar.refresh(m.user);  // un utente ha cambiato la foto profilo
@@ -6328,7 +6350,7 @@ const Live = {
     if (m.type === 'presence' || m.type === 'activity') return Presence.recv(m);  // gli altri utenti del server
     if (m.type === 'radio') return Radio.recv(m);  // stazioni e ascoltatori della Jam Radio
     if (m.type === 'notifica') return Notif.recv(m);
-    if (m.type === 'credenziali' && m.t && m.s) { const s = srv(); if (s && !s.local) { s.tok = m.t; s.salt = m.s; persistServers(); toast('Password cambiata: questo dispositivo resta collegato.'); } return; }
+    if (m.type === 'credenziali' && m.t && m.s) { const s = Live.srv(); if (s && !s.local) { s.tok = m.t; s.salt = m.s; persistServers(); toast('Password cambiata: questo dispositivo resta collegato.'); } return; }
     if (m.type === 'libreria') { emitSoon('libreria'); if (m.playlists) emitSoon('playlists'); return; }  // brani nuovi, playlist completate dal server
     if (m.type === 'hello') {
       this.helloAt = now; Presence.hello(m); Radio.hello(m);
@@ -6348,7 +6370,10 @@ const Live = {
     } else if (m.type === 'state') {
       const s = { ...m.state, recvAt: now }; this.states.set(s.device, s); this.devices.set(s.device, s.name); if (s.at) this.seenOff(s.at * 1000, now);
       if (s.solo && this.target === s.device) this.target = null;  // si è sganciato: non è più la nostra uscita
-      if (s.playing && !s.solo && !P.solo && !Jam.role) {
+      // due partiti quasi insieme: tiene chi ha cominciato prima (a parità, l'identificativo); si ripubblica, così l'altro lo sa
+      const prima = !Engine.el.paused && !Radio.st && this.since && s.since && (this.since < s.since || (this.since === s.since && S.device < s.device));
+      if (prima && !s.solo && !P.solo && !Jam.role) { this.sent = null; this.publish(); }
+      else if (s.playing && !s.solo && !P.solo && !Jam.role) {
         // un solo dispositivo suona: chi comincia ferma gli altri (anche la radio)
         if (Radio.st) { if (Radio.on) toast(`La musica è passata su ${s.name}.`); Radio.leave(true); }
         else if (!Engine.el.paused) { Engine.el.pause(); toast(`La musica è passata su ${s.name}.`); }
@@ -6393,7 +6418,7 @@ const Live = {
     await this.cmd('transfer', v, to);
   },
   async cmd(cmd, value, to = this.target) {
-    const s = srv(); if (!s?.session || !to) return;
+    const s = Live.srv(); if (!s?.session || !to) return;
     // risposta immediata nel lettore; lo stato vero arriva poco dopo dal dispositivo
     const st = this.states.get(to);
     if (st && to === this.target) {
@@ -6433,7 +6458,7 @@ const Live = {
     // ancora collegato ma non l'ha preso (canale che si riapre, app che torna dallo sfondo): altri 5 s, poi si rinuncia
     // e il comando si annulla sul server, così non parte più tardi mentre qui suona già
     if (id && !again && this.devices.has(to) && r?.cmd && !r.cmd.done) return setTimeout(() => this.check(to, sentAt, v, id, true), 5000);
-    if (id) { const c = await srvApi(srv(), '/api/live/cmd/' + id, { method: 'DELETE' }).catch(() => null); if (c?.done === 'eseguito') { if (v) this.target = to; this.paint(); this.connect(); return; } }
+    if (id) { const c = await srvApi(Live.srv(), '/api/live/cmd/' + id, { method: 'DELETE' }).catch(() => null); if (c?.done === 'eseguito') { if (v) this.target = to; this.paint(); this.connect(); return; } }
     if (!Engine.el.paused || (this.target && this.target !== to)) return;
     const name = this.devices.get(to) || this.gone?.[to] || 'Il dispositivo';
     this.devices.delete(to); this.states.delete(to); this.target = null;
@@ -6451,11 +6476,14 @@ const Live = {
     const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: rd ? Radio.pos() : Engine.time(), duration: playDur(), rate: rd ? 1 : P.speed, shuffle: S.shuffle, repeat: S.repeat, track: wire(t),
       next: up.map(wire), left: rd ? up.length : Math.max(0, S.queue.length - S.index - 1), radio: rd ? { id: rd.id, name: rd.name, r: Radio.path(rd) } : null };
     now.sig = up.map(x => x.id).join() + '|' + now.left;  // solo per accorgersi che la coda è cambiata
+    // da quando suona, in ora del server: se due dispositivi partono quasi insieme cede solo chi è partito dopo
+    if (now.playing && !this.sent?.playing) this.since = Date.now() + (this.off || 0);
+    now.since = now.playing ? this.since : null;
     if (now.playing && this.target) { this.target = null; this.pill(); }
     const s = this.sent, exp = s ? s.position + (s.playing ? (Date.now() - s.at) / 1000 * s.rate : 0) : 0;
     if (s && s.track.id === now.track.id && s.playing === now.playing && s.rate === now.rate && s.solo === now.solo && s.shuffle === now.shuffle && s.repeat === now.repeat && s.sig === now.sig && Math.abs(exp - now.position) < 1.5) return;
     this.sent = { ...now, at: Date.now() };
-    srvApi(srv(), '/api/live/state', { method: 'POST', body: JSON.stringify(now) }).catch(() => {});
+    srvApi(Live.srv(), '/api/live/state', { method: 'POST', body: JSON.stringify(now) }).catch(() => {});
   },
   pill() {
     const pill = $('#livePill'); if (!pill) return;

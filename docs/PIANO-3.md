@@ -59,6 +59,12 @@ Legenda: **impatto** alto/medio/basso per chi usa Armony; **sforzo** S (ore), M 
 | E3 | **Notifiche web a browser chiuso** (piano 2, 9.7) 🔶: Web Push con chiavi del server, riapre la decisione «niente push» solo per il web | Sul web gli avvisi arrivano solo con la pagina aperta | basso | M |
 | E4 | **Controllo di accessibilità**: tastiera ovunque, lettori di schermo sulla mappa e sui menu nuovi, contrasti nei due temi | Le sezioni nuove (mappa, menu a gruppi) sono state fatte in fretta | basso | S |
 
+## Stato
+
+- **0.55.0**: A1 (collaudo automatico, `deploy/collaudo.py`), A3 (guardiano), A4 (prova prima del trasferimento). A2: su un'installazione nuova «Scegli un'altra versione» funziona (il collaudo lo prova): su Yoga è un problema di quella macchina, servono i suoi log.
+- **0.56.0**: C1 (playlist intelligenti), C2 (salute della libreria), C5 (testi dal server, `.lrc`). 0.56.1: il giro dei testi riprova tre volte prima di fermarsi.
+- **0.57.0**: B1 (gapless), B5 (due dispositivi che partono insieme), metà di B4 (2.10: il canale dal vivo resta sul server di casa). Resta di B4 la 2.9 (Android in pausa raggiungibile, codice nativo da collaudare sul telefono).
+
 ## Ordine proposto
 
 1. **0.55 — prima del trasloco a casa**: A1, A2, A3, A4. Il collaudo automatico prima di tutto: protegge ogni rilascio dopo.

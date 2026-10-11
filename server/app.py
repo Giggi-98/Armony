@@ -942,7 +942,7 @@ lcmds = {}     # utente -> {id: {"to", "cmd", "value", "from", "ts", "done"}}
 LIVE_CMD_TTL = 30
 LIVE_MAX_USER = 8  # canali dal vivo per utente (ognuno tiene un thread di waitress)
 LIVE_BEAT_MAX = 120  # secondi senza battito prima di dare per sparito un dispositivo (Android in sottofondo batte anche 1/min)
-LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat", "next", "left", "radio")
+LIVE_FIELDS = ("playing", "position", "duration", "rate", "track", "solo", "shuffle", "repeat", "next", "left", "radio", "since")
 
 
 def cmd_pending(u, dev, now):
