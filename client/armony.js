@@ -5557,9 +5557,10 @@ const AppUpdate = {
     return String(body || '').split('\n').map(l => l.trim()).filter(l => /^[-*] /.test(l))
       .map(l => l.replace(/^[-*] /, '').replace(/ by @\S+ in \S+$/, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')).slice(0, 5);
   },
-  // al massimo un controllo ogni 6 ore; "Più tardi" vale per quella versione fino al prossimo avvio
+  // al massimo un controllo all'ora (all'avvio e tornando nell'app): con ogni 6 ore un'app rimasta aperta in
+  // sottofondo vedeva la versione nuova solo mezza giornata dopo. "Più tardi" vale per quella versione fino al prossimo avvio
   async auto() {
-    if (Date.now() - this.last < 6 * 3600e3 || $('dialog[open]')) return;
+    if (Date.now() - this.last < 3600e3 || $('dialog[open]')) return;
     this.last = Date.now();
     const u = await this.check();
     if (u?.available && this.later !== u.latest) this.offer(u);
