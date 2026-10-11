@@ -498,7 +498,7 @@ async function route() {
   document.documentElement.dataset.r = r;  // il telefono cambia il lettore in basso su "In riproduzione" (index.html)
   const run = async () => {
     if (stale(n)) return;
-    delete view.dataset.pl;
+    delete view.dataset.pl; delete document.documentElement.dataset.login;  // la pagina d'accesso lo rimette (utenti.js)
     view.innerHTML = skeleton(r, id);
     if (changed && r !== 'ora') window.scrollTo(0, 0);
     return fn(id);
@@ -566,7 +566,7 @@ function noServer() {
   // nell'app si parte anche senza server, con la musica del telefono (telefono.js)
   const ph = !!Local.p;
   if (local && !ph) {  // nel browser servito dal server: il modulo di accesso subito (utenti.js)
-    view.innerHTML = loginCard() + `<div class="row" style="justify-content:center;margin-top:var(--s5)"><a class="btn sm" href="${esc(apkUrl())}">${ic('down')} App Android</a><button class="btn sm" id="welQr">QR code</button></div>`;
+    view.innerHTML = loginCard();
     wireLogin();
   } else view.innerHTML = `<h1>Benvenuto in Armony</h1><p class="sub">La musica della vostra compagnia, dai vostri server.</p>
   <div class="empty"><h3>${ph ? 'Da dove arriva la musica?' : 'Collega il primo server'}</h3><p>${ph ? 'Ascolta subito i brani che hai sul telefono, anche senza rete. Un server lo colleghi quando vuoi: ci salvi una copia della tua musica e da lì prendi quella degli amici.' : 'Accedi con il tuo utente del server musicale, oppure creane uno se chi lo gestisce ti ha dato un invito.'}</p>

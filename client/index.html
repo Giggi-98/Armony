@@ -1422,8 +1422,42 @@ dialog.sheet .head .icon-btn{margin:-6px 0 -6px -6px}
 .login .sub{margin:0 0 var(--s2)}
 .login .btn.primary{justify-content:center;min-height:48px;margin-top:var(--s2)}
 .login-logo{width:56px;height:56px;border-radius:50%;background:radial-gradient(circle,var(--accent) 0 30%,var(--ink) 31% 34%,#1b1e36 35% 100%);box-shadow:var(--shadow-art)}
-.login-alt{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:center;padding-top:var(--s3);border-top:1px solid var(--line);margin-top:var(--s2)}
 @media (max-width:520px){.login{margin-top:var(--s3);padding:var(--s5) var(--s4)}}
+/* pagina d'accesso a tutta pagina (data-login): niente barra laterale, lettore, sezioni né tasti in alto */
+:root[data-login] :is(aside,.player,#tabs,#themeBtn,#hBell,#hProf){display:none!important}
+:root[data-login] .app{grid-template-columns:minmax(0,1fr);padding-bottom:0}
+:root[data-login] main{padding:0}
+.lgpage{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s4);padding:calc(var(--sat) + var(--s6)) var(--s4) calc(var(--sab) + var(--s5));
+  background:radial-gradient(60% 45% at 50% 0%,color-mix(in srgb,var(--accent) 16%,transparent),transparent 70%),radial-gradient(50% 40% at 85% 100%,color-mix(in srgb,#6d5bd0 14%,transparent),transparent 70%)}
+.lgpage .login{width:100%;max-width:400px;margin:0;gap:var(--s4);padding:var(--s6)}
+.lg-brand{display:flex;align-items:center;gap:var(--s3);font:800 1.6rem/1 var(--brand);letter-spacing:-.02em}
+.lg-brand .login-logo{width:40px;height:40px}
+.lgpage h1{font-size:clamp(1.6rem,4vw,2rem);letter-spacing:-.02em;margin:0 0 var(--s1)}
+.lgpage h1 b{color:var(--accent-text);font-weight:800}
+.lgpage .sub{margin:0;font-size:.92rem}
+.lg-pw{position:relative;display:block}
+.lg-pw input{width:100%;padding-right:52px}
+.lg-pw .icon-btn{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:40px;color:var(--muted)}
+.lg-msg{margin:0;min-height:1.2em;color:var(--danger);font-size:.88rem;font-weight:600}
+.lg-msg:empty{min-height:0;margin-top:calc(-1 * var(--s3))}
+.lgpage .lg-go{margin-top:0;font-size:1rem}
+.lg-or{display:flex;align-items:center;gap:var(--s3);margin:0;color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.08em}
+.lg-or::before,.lg-or::after{content:"";flex:1;height:1px;background:var(--line)}
+.lg-alt{display:flex;flex-direction:column;gap:var(--s1);margin:0 calc(-1 * var(--s2))}
+.lg-alt .mi{display:flex;width:100%;gap:var(--s3);align-items:center;min-height:52px;padding:var(--s2) var(--s3);border:0;background:none;border-radius:var(--r-m);color:inherit;font:inherit;font-weight:600;text-align:left;cursor:pointer;touch-action:manipulation}
+.lg-alt .mi svg{width:20px;height:20px;flex:none;color:var(--muted)}
+.lg-alt .mi .grow{flex:1;min-width:0}
+.lg-alt .mi small{display:block;color:var(--muted);font-weight:500;font-size:.8rem}
+.lg-alt .mi:active{background:var(--surface2)}
+@media (hover:hover) and (pointer:fine){.lg-alt .mi:hover{background:var(--surface2)}}
+.lg-foot{display:flex;align-items:center;gap:var(--s2);margin:0;font-size:.86rem;color:var(--muted)}
+.lg-foot a,.lg-foot button{display:inline-flex;align-items:center;gap:6px;color:var(--muted);background:none;border:0;padding:var(--s2);font:inherit;font-weight:600;text-decoration:none;cursor:pointer;border-radius:var(--r-s)}
+.lg-foot svg{width:16px;height:16px}
+@media (hover:hover) and (pointer:fine){.lg-foot a:hover,.lg-foot button:hover{color:var(--ink)}}
+@media (max-width:520px){
+  .lgpage{justify-content:flex-start;padding-top:calc(var(--sat) + var(--s7))}
+  .lgpage .login{padding:0;background:none;border:0;box-shadow:none}
+}
 .usrlist{display:flex;flex-direction:column;gap:2px}
 .list-item.usr{width:100%;border:0;border-bottom:1px solid var(--line);background:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
 .list-item.usr>svg{width:18px;height:18px;flex:none;color:var(--muted)}

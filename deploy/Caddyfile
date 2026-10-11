@@ -1,0 +1,30 @@
+# Armony su HTTPS con un nome a sé (profilo "https" del docker-compose): Caddy ottiene e rinnova da solo un certificato
+# Let's Encrypt per ARMONY_DOMAIN e passa tutto ad Armony su questa macchina.
+#
+# Il router/firewall inoltra la porta 443 da internet a ARMONY_HTTPS_PORT di questa macchina (8460 di base) SENZA
+# cambiare l'indirizzo di chi si collega (solo DNAT): Armony riconosce "da casa" chi ha un indirizzo privato, quindi
+# con un inoltro che maschera l'origine tutti sembrerebbero di casa.
+#
+# Il certificato si prende con la sfida TLS-ALPN sulla 443 (quella inoltrata): niente porta 80.
+{
+	https_port {$ARMONY_HTTPS_PORT:8460}
+	# la 80 di questa macchina può essere di un altro servizio: Caddy non la tocca
+	http_port {$ARMONY_HTTP_PORT:8462}
+	auto_https disable_redirects
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$ARMONY_DOMAIN} {
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+	# X-Forwarded-For: Caddy mette solo l'indirizzo vero di chi si collega (quelli mandati dal client li scarta);
+	# waitress se ne fida perché arriva da 127.0.0.1. flush -1: canale dal vivo e audio passano subito
+	reverse_proxy 127.0.0.1:{$ARMONY_PORT:8080} {
+		flush_interval -1
+	}
+}

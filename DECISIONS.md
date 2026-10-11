@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — HTTPS diretto con Caddy (profilo "https") al posto del Funnel; pagina d'accesso a tutta pagina
+
+**Contesto:** i registri di sessione mostrano blocchi sulla strada fra il server e i dispositivi che passano da Tailscale Funnel. L'utente ha un DynDNS (`armony-net.ddns.net`) che punta al suo firewall, che può inoltrare la 443. Sulla macchina nginx (servizi non di Armony) occupa 80, 443, 8443 (n8n, senza filtro sul nome) e 8444.
+**Scelta:** servizio `https` (Caddy 2.8.4, profilo facoltativo, rete host) in ascolto sulla 8460 con certificato Let's Encrypt ottenuto con la sfida TLS-ALPN sulla 443 inoltrata (nessuna porta 80), `reverse_proxy` verso 127.0.0.1:8080 con `flush_interval -1` per il canale dal vivo e l'audio. Caddy mette in X-Forwarded-For solo l'indirizzo vero; waitress se ne fida perché arriva da 127.0.0.1. Verificato che il firewall inoltri senza mascherare l'origine (connessioni su :8460 dall'IP pubblico del client). L'indirizzo pubblico di Armony passa a quello nuovo; il Funnel resta acceso finché i dispositivi non sono passati. La pagina d'accesso del browser diventa una schermata a sé (`data-login`: niente barra laterale, lettore, sezioni).
+**Alternative scartate:** inoltrare alla 8443 (avrebbe esposto n8n a internet al posto di Armony); un blocco nel nginx esistente con certbot (tocca la configurazione di altri servizi e chiede anche la porta 80); restare sul Funnel (i blocchi sono nel percorso, non in Armony).
+**Conseguenze:** chi installa Armony senza un nome resta come prima (profilo spento). Un inoltro con SNAT renderebbe "di casa" chiunque: va controllato a ogni cambio del firewall.
+**Da rivedere se:** il firewall o il DynDNS cambiano, o se i blocchi continuano anche sull'indirizzo diretto.
+
 ## 2026-10-11 — Primo blocco registrato: il server risponde subito, le risposte si fermano sulla strada; riaprire il canale dal vivo
 
 **Contesto:** il primo evento «sessione» (PC dell'utente, Tailscale Funnel) mostra 16 richieste ricevute dal server e risposte in 0-13 ms, ma arrivate al browser 12-18 s dopo, tutte nello stesso istante: 0,8 s dopo che il client aveva riaperto il canale dal vivo (nessun segnale da 20 s). Le richieste nuove fatte durante il blocco non l'avevano sbloccato.

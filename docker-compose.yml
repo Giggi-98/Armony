@@ -2,6 +2,7 @@
 #   Prima volta:  cp .env.example .env  e cambia le password in .env (non va su git)
 #   Avvio:        docker compose up -d
 #   Con TURN:     docker compose --profile turn up -d   (per Jam via 5G dietro NAT difficili)
+#   Con HTTPS:    docker compose --profile https up -d  (nome tuo, es. DynDNS, con certificato vero: vedi deploy/Caddyfile)
 #
 #   App:          http://IP-DEL-SERVER:8080
 #   Navidrome:    solo da questa macchina (127.0.0.1:4533): da fuori si passa da Armony, che controlla chiavi, revoche e
@@ -91,6 +92,23 @@ services:
     init: true
     ports:
       - "127.0.0.1:4416:4416"
+    restart: unless-stopped
+
+  # HTTPS con un nome tuo (ARMONY_DOMAIN in .env): certificato Let's Encrypt preso e rinnovato da solo. Il router
+  # inoltra la 443 da internet alla porta ARMONY_HTTPS_PORT di questa macchina (8460 di base). Dettagli in deploy/Caddyfile
+  https:
+    image: caddy:2.8.4
+    container_name: armony-https
+    logging: *logging
+    profiles: ["https"]
+    network_mode: host
+    environment:
+      ARMONY_DOMAIN: "${ARMONY_DOMAIN:?manca ARMONY_DOMAIN in .env}"
+      ARMONY_HTTPS_PORT: "${ARMONY_HTTPS_PORT:-8460}"
+      ARMONY_PORT: "8080"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy:/data
     restart: unless-stopped
 
   turn:

@@ -49,7 +49,13 @@ I browser riservano alcune funzioni alle pagine sicure. Senza HTTPS Armony funzi
 
 Il modo più semplice è **Tailscale**, gratuito per uso personale. Installalo sul server e sui telefoni degli amici, poi sul server esegui `tailscale serve --bg 8080`. Ottieni un indirizzo tipo `https://server.nome-rete.ts.net` con certificato valido, raggiungibile solo dai dispositivi della vostra rete Tailscale, da casa o in 5G.
 
-In alternativa: un dominio con Caddy davanti alla porta 8080 (HTTPS automatico), oppure Cloudflare Tunnel.
+In alternativa, con un nome tuo (anche un DynDNS gratuito, es. `armony.ddns.net`) e la porta 443 del router: Armony ha già pronto **Caddy**, che prende e rinnova da solo un certificato vero.
+
+1. In `.env` metti `ARMONY_DOMAIN=il.tuo.nome` (e, se la 8460 è occupata, `ARMONY_HTTPS_PORT`).
+2. Sul router/firewall inoltra la **443** da internet alla porta **8460** del server, **senza mascherare l'indirizzo d'origine** (solo DNAT, niente SNAT/masquerade): Armony riconosce "da casa" chi ha un indirizzo privato, e con l'origine mascherata chiunque da internet lo sembrerebbe.
+3. `docker compose --profile https up -d https`. Nel giro di un minuto il certificato arriva (`docker logs armony-https`: «certificate obtained successfully»). Non serve la porta 80.
+
+Rispetto a Tailscale Funnel la strada è diretta: niente nodi intermedi (dai registri di sessione, con il Funnel le risposte a volte restavano ferme decine di secondi). Oppure: Cloudflare Tunnel.
 
 Poi, in Armony, **Impostazioni → Server musicali → Indirizzo pubblico di questo server** (solo l'amministratore): scrivi l'indirizzo HTTPS, per esempio `https://armony.nome-rete.ts.net`. Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati usano quello, anche se in casa apri Armony con un altro indirizzo.
 

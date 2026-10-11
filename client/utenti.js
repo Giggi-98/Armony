@@ -29,22 +29,32 @@ async function enterServer(n) {
 }
 
 /* ---------------- schermata di accesso (browser, nessun server ancora) ---------------- */
+I.eye = '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>';
+I.eyeoff = '<path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/>';
+// a tutta pagina, senza barra laterale né lettore (data-login su <html>, index.html): chi non è entrato non ha niente da ascoltare
 function loginCard() {
-  return `<form class="login" id="loginForm" autocomplete="on">
-    <span class="login-logo" aria-hidden="true"></span>
-    <h1>Entra in Armony</h1><p class="sub">Con l'utente e la password che ti ha dato chi gestisce il server, o che hai scelto con il link di benvenuto.</p>
-    <label class="f">Utente<input type="text" id="lgU" autocomplete="username" autocapitalize="none" autocorrect="off" required></label>
-    <label class="f">Password<input type="password" id="lgP" autocomplete="current-password" required></label>
-    <p class="small" id="lgMsg" role="status" style="margin:0;color:var(--danger)"></p>
-    <button class="btn primary" id="lgGo">Entra</button>
-    <div class="login-alt">
-      <button type="button" class="btn sm" data-act="scanqr">${ic('qr')} Ho un QR</button>
-      <button type="button" class="btn sm" data-act="addsrv" data-url="${esc(location.origin)}">Ho un invito o un codice</button>
-      <button type="button" class="btn sm" data-act="addsrv">Un altro server</button>
-    </div></form>`;
+  return `<div class="lgpage"><form class="login" id="loginForm" autocomplete="on">
+    <div class="lg-brand"><span class="login-logo" aria-hidden="true"></span><span>armony</span></div>
+    <div><h1>Entra<span id="lgSrv"></span></h1><p class="sub">Con l'utente e la password che ti ha dato chi gestisce il server, o quella che hai scelto con il link di benvenuto.</p></div>
+    <label class="f">Utente<input type="text" id="lgU" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" required></label>
+    <label class="f">Password<span class="lg-pw"><input type="password" id="lgP" autocomplete="current-password" enterkeyhint="go" required>
+      <button type="button" class="icon-btn" id="lgEye" aria-label="Mostra la password" aria-pressed="false">${ic('eye')}</button></span></label>
+    <p class="lg-msg" id="lgMsg" role="alert"></p>
+    <button class="btn primary lg-go" id="lgGo">Entra</button>
+    <p class="lg-or"><span>oppure</span></p>
+    <div class="lg-alt">
+      <button type="button" class="mi" data-act="scanqr">${ic('qr')}<span class="grow">Ho un QR<small>Inquadra quello che ti hanno mandato</small></span>${ic('chevr')}</button>
+      <button type="button" class="mi" data-act="addsrv" data-url="${esc(location.origin)}">${ic('send')}<span class="grow">Ho un invito o un codice<small>Il codice a 8 cifre o il link di invito</small></span>${ic('chevr')}</button>
+      <button type="button" class="mi" data-act="addsrv">${ic('globe')}<span class="grow">Un altro server<small>Navidrome o Armony di qualcun altro</small></span>${ic('chevr')}</button>
+    </div></form>
+    <p class="lg-foot"><a href="${esc(apkUrl())}">${ic('down')} App Android</a><span aria-hidden="true">·</span><button type="button" id="welQr">QR dell'app</button></p></div>`;
 }
 function wireLogin() {
   const f = $('#loginForm'); if (!f) return;
+  document.documentElement.dataset.login = '';
+  fetch(location.origin + '/api/info').then(r => r.json()).then(j => { if (j.name && $('#lgSrv')) $('#lgSrv').innerHTML = ` su <b>${esc(j.name)}</b>`; }).catch(() => {});
+  $('#lgEye').onclick = e => { const p = $('#lgP'), b = e.currentTarget, show = p.type === 'password'; p.type = show ? 'text' : 'password'; b.innerHTML = ic(show ? 'eyeoff' : 'eye'); b.setAttribute('aria-pressed', show); b.setAttribute('aria-label', show ? 'Nascondi la password' : 'Mostra la password'); p.focus(); };
+  if (matchMedia('(pointer:fine)').matches) setTimeout(() => $('#lgU')?.focus(), 50);
   f.onsubmit = async e => {
     e.preventDefault();
     const user = $('#lgU').value.trim(), pass = $('#lgP').value, msg = t => { $('#lgMsg').textContent = t; };
