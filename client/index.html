@@ -305,7 +305,11 @@ label.check small{display:block;color:var(--muted)}
 .fedsync{background:var(--accent-soft);border-radius:var(--r-m);padding:var(--s4);display:flex;flex-direction:column;gap:var(--s2)}
 .fedsync small{font-size:.88rem;line-height:1.4}
 .fedmeta{font-size:.86rem;color:var(--muted);line-height:1.6}
+.fedmeta svg{width:14px;height:14px;vertical-align:-2px;color:var(--sage)}
+@media (max-width:520px){.fedsteps{gap:var(--s1)}.fedsteps li{font-size:.68rem;overflow-wrap:anywhere}}
 .federr{color:var(--danger);font-size:.88rem}
+.trbar{height:10px;border-radius:99px;background:var(--surface2);overflow:hidden}
+.trbar i{display:block;height:100%;background:var(--accent);border-radius:inherit;transition:width .6s var(--ease-out)}
 .linkb{background:none;border:0;padding:0;font:inherit;color:var(--accent-text);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
 .fedfoot{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;border-top:1px solid var(--line);padding-top:var(--s3)}
 .fedfoot select{width:auto;flex:1 1 12rem;max-width:20rem}

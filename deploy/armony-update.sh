@@ -22,6 +22,9 @@ status() {
 }
 fail() { status "errore" "$1"; echo "armony-update: $1" >&2; exit 1; }
 
+# il trasferimento di un server (server/trasferimento.py) arriva con la stessa richiesta: lo applica il suo script
+if [ -f "$U/trasferimento/applica" ]; then rm -f "$U/request"; exec sh "$DIR/deploy/armony-trasferimento.sh"; fi
+
 rm -f "$U/request"
 status "in corso" ""
 g diff --quiet HEAD -- || fail "ci sono modifiche locali non salvate in git: aggiornamento annullato"

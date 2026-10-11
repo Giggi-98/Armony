@@ -179,6 +179,8 @@ def fold(s):
 
 # ------------------------------------------------------------------ richieste firmate verso gli altri nodi
 def fed_req(node, method, path, params=None, body=None, stream=False, timeout=10, headers=None, raw=None):
+    if spostato_a(ME):
+        raise FedError("Questo server si è spostato: la federazione la fa il nuovo")
     q = urllib.parse.urlencode({k: v for k, v in (params or {}).items() if v not in (None, "")})
     full = path + ("?" + q if q else "")
     data = raw if raw is not None else json.dumps(body).encode() if body is not None else b""
@@ -206,8 +208,43 @@ def fed_req(node, method, path, params=None, body=None, stream=False, timeout=10
     return r, sig
 
 
+def spostato_a(to):
+    """Indirizzo nuovo se `to` è un'identità trasferita altrove da questo server, altrimenti None."""
+    m = setting("spostato")
+    if not m:
+        return None
+    m = json.loads(m)
+    return m["url"] if to in (m.get("id"), ME if m.get("tutto") else None) else None
+
+
+def seguito(node, r):
+    """Risposta «spostato»: l'indirizzo nuovo vale solo se là risponde la stessa chiave. Allora si aggiorna e si riprova."""
+    try:
+        j = r.json()
+        url = clean_url(j.get("url")) if j.get("code") == "spostato" else None
+        if url and A.http.get(url + "/fed/hello", timeout=10).json().get("pub") == node["pub"]:
+            db.run("UPDATE fed_nodes SET url = ?, error = NULL WHERE id = ?", url, node["id"])
+            diagnosi_evento(f"{node.get('name') or 'Un server'} si è spostato su {url}")
+            return url
+    except (ValueError, requests.RequestException):
+        pass
+    return None
+
+
+def diagnosi_evento(msg):
+    try:
+        A.diagnosi.log("info", "federazione", msg)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def fed_json(node, method, path, params=None, body=None, timeout=10):
     r, sig = fed_req(node, method, path, params, body, timeout=timeout)
+    if r.status_code == 410:
+        url = seguito(node, r)
+        if url:
+            node = dict(node, url=url)
+            r, sig = fed_req(node, method, path, params, body, timeout=timeout)
     if not r.ok:
         try:
             msg = r.json().get("error")
@@ -241,6 +278,12 @@ def fed_guard():
         date = int(request.headers.get("X-Fed-Date", "0"))
     except ValueError:
         date = 0
+    # trasferito su un altro server (trasferimento.py): a chi cerca la vecchia identità si dice dove è andata. Chi riceve
+    # non si fida e basta: controlla che là risponda la stessa chiave (seguito())
+    mv = spostato_a(request.headers.get("X-Fed-To"))
+    if mv:
+        A.trasferimento.visto("server", nid)
+        return jsonify(error="Questo server si è spostato", code="spostato", url=mv), 410
     if request.headers.get("X-Fed-To") != ME:
         return jsonify(error="Richiesta destinata a un altro nodo"), 401
     if abs(time.time() - date) > 300:
@@ -362,13 +405,17 @@ def pair():
            "state = CASE WHEN fed_nodes.state = 'attivo' THEN 'attivo' ELSE 'richiesta' END",
            nid, d["pub"], str(d.get("name") or "Server")[:60], str(d.get("owner") or "")[:60], url, now, now,
            str(d.get("app") or "")[:20], int(d.get("proto") or 0))
+    auto = setting("auto:" + h)
+    if auto:  # invito del trasferimento: si accetta da solo
+        db.run("UPDATE fed_nodes SET state = 'attivo', dir = ? WHERE id = ?", auto, nid)
+        db.run("DELETE FROM settings WHERE key = ?", "fed_auto:" + h)
     n = node(nid)
     if n["state"] == "richiesta":
         # chi ha creato l'invito spesso non sta guardando la pagina: gli amministratori lo sanno subito, dalla campanella
         for u in db.all_("SELECT DISTINCT user FROM devices WHERE admin = 1 AND state = 'fidato'"):
             A.notifiche.notifica(u["user"], "sistema", f"{n['name']} chiede di collegarsi a questo server",
-                                 f"Codice di sicurezza {safety(PUB, n['pub'])}: se è uguale sul suo schermo, accetta in Impostazioni → Federazione",
-                                 "#/impostazioni/librerie", only_once="fedpair:" + nid + ":" + str(int(now)))
+                                 f"Codice di sicurezza {safety(PUB, n['pub'])}: se è uguale sul suo schermo, accetta in Rete → Federazione",
+                                 "#/federazione", only_once="fedpair:" + nid + ":" + str(int(now)))
     return jsonify(**hello_payload(), state=n["state"])
 
 
@@ -599,6 +646,9 @@ def _store(c, nid, n, j):
 def loop():
     time.sleep(5)
     while True:
+        if spostato_a(ME):
+            time.sleep(60)
+            continue
         try:
             build_catalog()
             # in parallelo: un nodo spento non deve fermare gli altri per un minuto ciascuno. Chi non risponde si
@@ -833,7 +883,7 @@ def chan_start(nid):
 def chan_run(nid):
     while chan_want.get(nid):
         n = node(nid)
-        if not n or n["state"] != "attivo":
+        if not n or n["state"] != "attivo" or spostato_a(ME):
             break
         # anche con «ricevo»: il canale serve a raggiungermi (nomi degli utenti, inviti a collaborare, brani concessi);
         # cosa gli do lo decide il verso, controllato su ogni richiesta che arriva
@@ -1213,30 +1263,39 @@ def fed_join():
     d = request.get_json(silent=True) or {}
     try:
         ensure_me(d, serve_url=False)
-        inv = parse_code(d.get("code"))
-        url = clean_url(inv["u"])
     except ValueError as e:
         return jsonify(error=str(e)), 400
+    out, code = join_code(d.get("code"))
+    return jsonify(out), code
+
+
+def join_code(code):
+    """Usa un invito ARF1: (risposta, codice HTTP). La usa anche il trasferimento, per agganciare il vecchio come libreria."""
+    try:
+        inv = parse_code(code)
+        url = clean_url(inv["u"])
+    except ValueError as e:
+        return dict(error=str(e)), 400
     try:
         h = A.http.get(url + "/fed/hello", timeout=10).json()
     except (requests.RequestException, ValueError):
-        return jsonify(error=f"Non riesco a raggiungere {url}: controlla che sia acceso e raggiungibile da questo server"), 502
+        return dict(error=f"Non riesco a raggiungere {url}: controlla che sia acceso e raggiungibile da questo server"), 502
     if h.get("pub") != inv["k"]:
-        return jsonify(error="La chiave del server non è quella dell'invito: qualcuno si è messo in mezzo, o l'indirizzo è sbagliato"), 409
+        return dict(error="La chiave del server non è quella dell'invito: qualcuno si è messo in mezzo, o l'indirizzo è sbagliato"), 409
     if int(h.get("proto") or 0) != PROTO:
-        return jsonify(error=f"Versione incompatibile: aggiorna Armony su {h.get('nome') or url} o qui"), 409
+        return dict(error=f"Versione incompatibile: aggiorna Armony su {h.get('nome') or url} o qui"), 409
     if not my_url() and "foglia" not in (h.get("caps") or []):
-        return jsonify(error=f"{h.get('nome') or url} è una versione che vuole l'indirizzo di questo server: aggiornalo ad Armony 0.50 "
+        return dict(error=f"{h.get('nome') or url} è una versione che vuole l'indirizzo di questo server: aggiornalo ad Armony 0.50 "
                              "o scrivi qui l'indirizzo per gli altri server"), 409
     nid = node_id(inv["k"])
     if nid == ME:
-        return jsonify(error="Questo è il codice di questo stesso server"), 400
+        return dict(error="Questo è il codice di questo stesso server"), 400
     peer = {"id": nid, "pub": inv["k"], "name": h.get("nome") or inv.get("n") or "Server", "url": url}
     try:
         j = fed_json(peer, "POST", "/fed/v1/pair", body={"secret": inv["s"], "url": my_url(), "name": A.NAME, "owner": owner(),
                                                           "pub": PUB, "app": A.VERSION, "proto": PROTO})
     except FedError as e:
-        return jsonify(error=str(e)), 502
+        return dict(error=str(e)), 502
     now = time.time()
     db.run("INSERT INTO fed_nodes (id, pub, name, owner, url, state, created, seen, app, proto) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
            "ON CONFLICT(id) DO UPDATE SET url = excluded.url, name = excluded.name, owner = excluded.owner, state = excluded.state, error = NULL",
@@ -1244,7 +1303,7 @@ def fed_join():
            "attivo" if j.get("state") == "attivo" else "attesa", now, now, str(j.get("app") or "")[:20], PROTO)
     if j.get("state") == "attivo":
         pool.submit(refresh, nid)
-    return jsonify(node_out(node(nid)))
+    return node_out(node(nid)), 200
 
 
 @bp.post("/api/fed/nodes/<nid>/accept")
@@ -1551,6 +1610,30 @@ def rete_unsubscribe(pid):
     if gone:  # solo l'elenco dell'abbonamento appena tolto, mai un'importazione da file
         db.run("DELETE FROM imports WHERE pid = ?", pid)
     return jsonify(ok=True) if gone else (jsonify(error="Abbonamento non trovato"), 404)
+
+
+# ------------------------------------------------------------------ un nodo collegato ha cambiato indirizzo (trasferimento)
+@bp.post("/fed/v1/indirizzo")
+def fed_indirizzo():
+    """Il nodo (firma della sua identità) dice il suo indirizzo nuovo: vale solo se là risponde la stessa chiave."""
+    try:
+        url = clean_url((request.get_json(silent=True) or {}).get("url"))
+        if A.http.get(url + "/fed/hello", timeout=10).json().get("pub") != g.fed_node["pub"]:
+            return jsonify(error="A quell'indirizzo risponde un altro server"), 409
+    except (ValueError, requests.RequestException) as e:
+        return jsonify(error=f"Indirizzo non valido: {e}"[:200]), 400
+    db.run("UPDATE fed_nodes SET url = ?, error = NULL WHERE id = ?", url, g.fed_node["id"])
+    diagnosi_evento(f"{g.fed_node['name']} si è spostato su {url}")
+    return jsonify(ok=True)
+
+
+def invito_auto(verso):
+    """Un invito che, usato, si accetta da solo con quel verso: per agganciare il vecchio server come libreria."""
+    secret, now = secrets.token_urlsafe(18), time.time()
+    h = hashlib.sha256(secret.encode()).hexdigest()
+    db.run("INSERT INTO fed_invites (hash, created, expires) VALUES (?, ?, ?)", h, now, now + INVITE_H * 3600)
+    set_setting("auto:" + h, verso)
+    return invite_code(secret)
 
 
 # ------------------------------------------------------------------ topologia: la mappa dal vivo della rete

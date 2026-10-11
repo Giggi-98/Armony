@@ -4,7 +4,8 @@ Progetto del protocollo con cui un server Armony passa tutto a un altro: identit
 collegamenti e, se si vuole, i brani. Caso tipico: il server di prova diventa il server di casa, su un mini PC con IP
 pubblico, che da lì fa da centro della rete.
 
-Stato: **progetto, da approvare**. Niente di questo è ancora nel codice.
+Stato: **realizzato** (0.54.0: `server/trasferimento.py`, `deploy/armony-trasferimento.sh`, Impostazioni → Trasferimento).
+Rispetto al progetto approvato, due semplificazioni, segnate qui sotto con *(realizzato)*.
 
 ## Le due parti
 
@@ -78,7 +79,9 @@ Se il controllo fallisce torna ai dati di prima, e il vecchio esce dal congelame
 - **Server collegati**: il nuovo, che ora ha l'identità, chiama ogni server collegato che raggiunge con
   `/fed/v1/indirizzo {url}`, firmato con l'identità: lo riconoscono (stessa chiave) e aggiornano l'indirizzo.
 - **Foglie** (server senza indirizzo che chiamavano il vecchio): alle loro richieste il vecchio risponde «spostato a
-  <indirizzo>», firmato con l'identità; loro passano al nuovo da sole.
+  <indirizzo>»; loro passano al nuovo da sole. *(realizzato)* La risposta non è firmata: chi la riceve controlla che al
+  nuovo indirizzo `/fed/hello` dia la stessa chiave pubblica, e solo allora cambia indirizzo. Così il vecchio non ha
+  bisogno dell'identità per indirizzare, e `/fed/v1/indirizzo` fa lo stesso controllo.
 - **Dispositivi**: il vecchio imposta come indirizzo pubblico quello del nuovo. Il Trasloco della 0.37 fa il resto:
   l'app controlla che al nuovo indirizzo la sua sessione valga (vale: il database è lo stesso) e si sposta; il browser
   mostra «Passa lì».
@@ -92,7 +95,8 @@ chiamano ancora il vecchio). Poi **«Concludi»**: cancella identità e sessioni
 abbina da solo al nuovo dentro la sessione di trasferimento (verso «solo lui vede me»), e i suoi brani si cercano,
 ascoltano e copiano dalla federazione. Sul nuovo, le playlist hanno i brani che mancano finché non arrivano:
 **«Sposta i brani adesso»** riprende la fase 4 solo per i file, e Navidrome li ritrova con gli stessi id. L'identità
-vecchia resta sul vecchio solo per rispondere «spostato» per 30 giorni, poi si cancella.
+vecchia resta sul vecchio, in un file a parte, fino a «Concludi». *(realizzato)* Per rispondere «spostato» non serve
+(vedi le foglie), quindi non c'è più un termine di 30 giorni: la cancella «Concludi».
 
 ## Sicurezza
 - Codice monouso con scadenza, codice di sicurezza confrontato a voce, richieste tutte firmate.

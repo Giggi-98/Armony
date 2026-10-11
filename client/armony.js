@@ -507,8 +507,8 @@ const NAV_GROUPS = [
   [null, ['impostazioni']]
 ];
 // le voci che non sono sezioni: la Federazione è una scheda delle impostazioni (solo amministratori); la Rete nel gruppo è la mappa
-const NAV_EXTRA = { federazione: ['Federazione', 'globe', '#/impostazioni/librerie'] };
-const navKey = r => r === 'impostazioni' && /\/librerie$/.test(location.hash) ? 'federazione' : r;
+const NAV_EXTRA = { federazione: ['Federazione', 'globe', '#/federazione'] };
+const navKey = r => r;
 function paintNav() {
   const ok = h => h === 'federazione' ? !!access().admin && netOk() : (h !== 'rete' || can('rete')) && (h !== 'video' || (S.dl.url && can('download')));
   const item = (h, sub) => { const [l, i, href] = NAV_EXTRA[h] || [...NAV.find(n => n[0] === h).slice(1), '#/' + h];
@@ -552,12 +552,13 @@ async function route() {
   const id = rest.join('/');
   markNav(r);
   // da una scheda all'altra delle impostazioni senza ridisegnare la pagina (route() con lo stesso indirizzo la ridisegna)
+  if (r === 'impostazioni' && id === 'librerie') return location.replace('#/federazione');  // la Federazione ora è una pagina sua
   if (r === 'impostazioni' && Scene.r === 'impostazioni' && location.hash !== Scene.hash && $('#view .setp')) { Scene.hash = location.hash; return setTab(id); }
   $$('#sidePl a').forEach(a => a.classList.toggle('on', r === 'playlist' && a.dataset.pl === id));
   const fn = Disp.gate(r) || {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, mix: vMix, testo: vLyrics, video: vVideo, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto, collab: vCollab
+    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, mix: vMix, testo: vLyrics, video: vVideo, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto, collab: vCollab, federazione: vFederazione
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav;
   if (changed && Scene.hash) Scene.back = Scene.r === 'ora' || Scene.r === 'testo' ? Scene.back : Scene.hash;  // dove torna la freccia del lettore
@@ -1418,7 +1419,7 @@ async function fedCollabSheet(pid) {
       ${n.utenti === null ? `<p class="sub" style="padding:0 14px;margin:0">${esc(n.error || 'Non risponde.')}</p>`
         : n.utenti.length ? n.utenti.map(u => `<label class="check" style="padding:8px 14px"><input type="checkbox" value="${esc(n.id + '|' + u)}" ${on.has(n.id + '|' + u.toLowerCase()) ? 'checked' : ''}><span>${esc(u)} <small style="color:var(--muted)">di ${esc(n.name)}</small></span></label>`).join('')
         : '<p class="sub" style="padding:0 14px;margin:0">Nessun utente.</p>'}`).join('')
-      : '<p class="sub" style="padding:0 14px">Nessun server collegato: collegane uno in Impostazioni → Federazione.</p>')
+      : '<p class="sub" style="padding:0 14px">Nessun server collegato: collegane uno in Rete → Federazione.</p>')
     + `<div class="row" style="padding:12px 14px"><button class="btn primary" id="fcOk">Salva</button></div>`;
   $('#fcOk').onclick = async () => {
     const users = [...d.querySelectorAll('#fcBox input:checked')].map(i => { const [node, ...u] = i.value.split('|'); return { node, user: u.join('|') }; });
@@ -1558,7 +1559,7 @@ const Topo = {
     const centri = d.nodes.filter(n => n.centro), mesh = d.edges.filter(e => e.kind === 'diretto' && by(e.a)?.centro && by(e.b)?.centro);
     const stars = centri.filter(c => d.edges.some(e => e.kind === 'canale' && (e.a === c.id || e.b === c.id)));
     const leaves = d.nodes.filter(n => !n.centro).length, meshN = new Set(mesh.flatMap(e => [e.a, e.b])).size;
-    el.textContent = d.nodes.length < 2 ? 'Solo questo server: collegane un altro in Impostazioni → Federazione'
+    el.textContent = d.nodes.length < 2 ? 'Solo questo server: collegane un altro in Rete → Federazione'
       : meshN && stars.length ? `Maglia fra ${meshN} centri, con ${leaves} ${leaves === 1 ? 'foglia' : 'foglie'} a stella`
       : meshN ? `Maglia fra ${meshN} centri` : stars.length ? `Stella attorno a ${stars.map(c => c.name).join(' e ')}` : `${d.nodes.length} server collegati`;
   },
@@ -1575,10 +1576,22 @@ const Topo = {
     card.hidden = false;
   }
 };
+// la Federazione: pagina sua (gruppo Rete), solo per l'amministratore
+async function vFederazione(tries = 0) {
+  if (!srv()) return noServer();
+  const n = Scene.nav;
+  // appena aperta l'app chi sei non lo si sa ancora (arriva da /api/me): si aspetta un poco invece di dire «solo admin»
+  if (!dlSrv()?.me && tries < 20) { if (!tries) view.innerHTML = `<div class="sk-page">${SK.row.repeat(3)}</div>`; return setTimeout(() => !stale(n) && vFederazione(tries + 1), 300); }
+  if (!access().admin || !netOk()) { view.innerHTML = '<h1>Federazione</h1><div class="empty"><h3>Solo per l\'amministratore</h3><p>I collegamenti fra server li gestisce l\'amministratore di questo server.</p></div>'; return; }
+  view.innerHTML = '<h1>Federazione</h1><p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare in streaming o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>';
+  refreshFed();
+  markNav('federazione');  // la voce nel menu compare solo ora che si sa chi sei: il gruppo Rete si apre
+}
 async function vRete() {
   if (!srv()) return noServer();
   const n = Scene.nav;
   view.innerHTML = `<h1>Rete</h1><p class="sub">Le librerie collegate a questo server e quelle degli amici degli amici. Da Cerca trovi i loro brani sotto "Nella rete": li ascolti subito e li copi nella tua libreria.</p><div id="netMap"><div class="sk-page">${SK.row.repeat(3)}</div></div>`;
+  if (access().admin && netOk()) $('#netMap').insertAdjacentHTML('beforebegin', `<a class="btn" href="#/federazione" style="margin-bottom:var(--s4)">${ic('globe')} Gestisci la federazione</a>`);
   if (Topo.ok()) { $('#netMap').insertAdjacentHTML('beforebegin', '<div id="topoBox"></div><h2>Librerie</h2>'); Topo.mount($('#topoBox')); viewInterval(() => document.hidden || Topo.load(), 5000); }
   if (!netOk()) { $('#netMap').innerHTML = '<div class="empty"><h3>Rete non disponibile</h3><p>Questo server non ha ancora le librerie collegate: serve una versione più nuova di Armony.</p></div>'; return; }
   const m = await dlApi('/api/rete/mappa');
@@ -1594,7 +1607,7 @@ async function vRete() {
       <span class="grow"><b>${esc(m.me.name)}${m.me.owner ? ` <small>di ${esc(m.me.owner)}</small>` : ''}</b><small>Questo server · ${num(m.me)}</small></span></div>
     ${m.nodes.length ? `<ul>${m.nodes.map(x => nodeHtml(x)).join('')}</ul>` : ''}</li></ul>
     ${m.nodes.length ? `<p class="small" style="color:var(--muted);margin-top:var(--s4)">${m.nodes.length + m.far.length + 1} librerie, ${tot} brani in tutto. Si vedono fino a ${m.hops} ${m.hops === 1 ? 'passaggio' : 'passaggi'} di distanza; gli amici degli amici compaiono solo se il loro server lo permette.</p>`
-      : `<div class="empty" style="margin-top:var(--s4)"><h3>Nessun server collegato</h3><p>${access().admin ? 'Collega la libreria di un amico in Impostazioni → Federazione.' : 'L\'amministratore di questo server può collegarlo alle librerie degli amici.'}</p>${access().admin ? '<a class="btn primary" href="#/impostazioni">Impostazioni</a>' : ''}</div>`}`;
+      : `<div class="empty" style="margin-top:var(--s4)"><h3>Nessun server collegato</h3><p>${access().admin ? 'Collega la libreria di un amico in Rete → Federazione.' : 'L\'amministratore di questo server può collegarlo alle librerie degli amici.'}</p>${access().admin ? '<a class="btn primary" href="#/federazione">Federazione</a>' : ''}</div>`}`;
   $('#netMap').onclick = e => { const b = e.target.closest('[data-netpl]'); if (b) netPlaylists(b.dataset.netpl, b.dataset.name); };
 }
 // le playlist pubbliche di un server collegato: abbonandosi, una playlist qui resta uguale alla sua (i brani si copiano)
@@ -2867,7 +2880,7 @@ async function fedPresPaint() {
   const ppl = r.servers.flatMap(s => s.presenza.map(e => ({ ...e, srv: s }))), acts = r.servers.flatMap(s => s.attivita.map(a => ({ ...a, srv: s }))).sort((a, b) => b.at - a.at).slice(0, 12);
   box._ppl = ppl;
   const who = (e, s) => ({ user: e.user + '@' + s.node, name: e.name || e.user });
-  box.innerHTML = !r.servers.length ? '<p class="sub">Nessun server collegato condivide l\'attività dei suoi utenti. Lo attiva il loro amministratore in Impostazioni → Federazione.</p>'
+  box.innerHTML = !r.servers.length ? '<p class="sub">Nessun server collegato condivide l\'attività dei suoi utenti. Lo attiva il loro amministratore in Rete → Federazione.</p>'
     : `<div class="pnow">${ppl.length ? ppl.map((e, i) => { const t = e.track || {};
         return `<div class="pnow-row${e.playing ? '' : ' paused'}"><span class="pgo" style="cursor:default">${pavatar(who(e, e.srv), 'm')}<span class="grow"><b>${esc(e.name || e.user)}${peq(e.playing)}<small> · ${e.playing ? '' : 'in pausa · '}su ${esc(e.srv.name)}${e.radio ? ` · radio «${esc(e.radio)}»` : ''}</small></b>
           <span class="ptrack"><span class="pic">${t.id && t.cover ? imgTag(`rete|${e.srv.node}|${t.id}`, 80, dlSrv()?.id) : ic('headphones')}</span><span class="grow"><b>${esc(t.title || '')}</b><small>${esc(t.artist || '')}${t.album ? ' · ' + esc(t.album) : ''}</small></span></span></span></span>
@@ -4746,7 +4759,7 @@ function vSettings(id = location.hash.split('/')[2]) {
     <p class="small" style="color:var(--muted);margin:0">Quello con cui gli altri raggiungono Armony (Tailscale, dominio). Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati lo usano al posto dell'indirizzo di casa.</p>
     <div class="row"><button class="btn" id="pubSave">Salva</button></div></div>`] : null,
   adm && caps.includes('youtube') ? ['srv', 'youtube', 'YouTube', 'film', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>'] : null,
-  adm && netOk() ? ['srv', 'librerie', 'Federazione', 'globe', 'federazione librerie collegate rete server amici collegare invito codice sicurezza canale', '<p class="sub">Collega questo server a quelli degli amici: in Cerca compaiono anche i loro brani, da ascoltare in streaming o da copiare qui.</p><div id="fedBox"><p class="sub">Caricamento…</p></div>'] : null,
+  adm && dlSrv()?.me?.caps?.includes('trasferimento') ? ['srv', 'trasferimento', 'Trasferimento', 'send', 'trasferimento trasloco sposta server nuovo casa migrazione identità', '<div id="trBox"><p class="sub">Caricamento…</p></div>'] : null,
   adm ? ['srv', 'aggiornamenti', 'Aggiornamenti', 'repeat', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>'] : null,
   // stato del server (diagnosi.js) con dentro lo spazio del disco; sui server che non lo conoscono, solo lo spazio
   adm && ds?.session && caps.includes('diagnosi') ? ['srv', 'stato', 'Stato del server', 'pulse', 'cpu processore memoria ram carico rete thread ascolti flussi dispositivi risorse monitor disco spazio occupato libero', '<div id="statoBox"><p class="sub">Misuro…</p></div><h3>Spazio</h3><div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>']
@@ -4796,7 +4809,7 @@ function vSettings(id = location.hash.split('/')[2]) {
       ds.me = { ...ds.me, public: r.public }; persistServers(); toast(r.public ? `Fatto: i link useranno ${r.public}.` : 'Indirizzo tolto: i link useranno quello di ogni dispositivo.');
     } catch (e) { toast(e.message); }
   });
-  if (adm) { refreshUpdate(); refreshUsers(); refreshReg(); refreshFed(); refreshYt(); }
+  if (adm) { refreshUpdate(); refreshUsers(); refreshReg(); refreshYt(); refreshTrasf(); }
   if (window.ARMONY_APP) { AppUpdate.paint(); NetDns.paint(); }
   Local.paint();
   $$('[name=theme]').forEach(r => r.onchange = () => { P.theme = r.value; savePrefs(); applyTheme(); });
@@ -5115,8 +5128,7 @@ function fedCard(x) {
       <div class="row"><button class="btn primary" data-act="fedpl" data-id="${id}" data-name="${nm}">${ic('list')} Scegli le playlist</button><button class="btn" data-act="fedstream" data-id="${id}">No, ascolto in streaming</button></div></div>`;
   const meta = x.state === 'attivo' ? `<p class="fedmeta">${[`${x.songs} brani, ${x.albums} album${x.app ? ' · Armony ' + esc(x.app) : ''}${x.synced ? ' · catalogo ' + fedAgo(x.synced) : ''}`,
     // il canale: chi lo apre e perché, così nessuno deve chiedersi cosa fare
-    !x.url && x.reach === 'canale' ? `Non si raggiunge da fuori: tiene aperto lui un canale verso questo server, da cui passa la sua libreria.`
-      : x.reach === 'uscita' ? `Questo server non si raggiunge da fuori: tiene aperto un canale verso ${nm}, da cui passa la tua libreria. Non devi fare niente.`
+    x.reach === 'uscita' ? `Questo server non si raggiunge da fuori: tiene aperto un canale verso ${nm}, da cui passa la tua libreria. Non devi fare niente.`
       : '',
     !recv ? 'Lui vede la tua libreria; tu non cerchi nella sua.' : x.sync === 'playlist' ? `Copi le playlist che scegli, il resto in streaming. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Playlist</button>`
       : x.sync === 'stream' ? `Ascolti in streaming, senza copiare. <button class="linkb" data-act="fedpl" data-id="${id}" data-name="${nm}">Copia delle playlist</button>` : '',
@@ -5127,6 +5139,78 @@ function fedCard(x) {
   return `<div class="fedcard${x.state === 'richiesta' || (x.state === 'attivo' && recv && !x.sync && x.online) ? ' ask' : ''}">
     <div class="fedcard-head"><span class="fedav">${esc((x.name || '?')[0].toUpperCase())}</span><span class="grow"><b>${nm}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><span class="fedstat">${stat}</span></span></div>
     ${x.state === 'richiesta' || x.state === 'attesa' || x.state === 'attivo' && !x.online && (quiet || !x.synced) ? fedSteps(x) : ''}${body}${meta}${foot}</div>`;
+}
+/* ================= trasferimento del server a un altro (capacità "trasferimento", server/trasferimento.py) =================
+   I due lati in una scheda sola: chi riceve (il nuovo) e chi invia (il vecchio). Ogni passo dice cosa succede e cosa
+   fare sull'altro schermo; durante l'invio si rilegge ogni 2 secondi. */
+let trT = 0;
+async function refreshTrasf() {
+  const box = $('#trBox'); if (!box) return;
+  clearTimeout(trT);
+  let t; try { t = await dlApi('/api/trasferimento'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  if (!box.isConnected) return;
+  const act = (id, fn) => { const b = $('#' + id); if (b) b.onclick = async () => { b.disabled = true; try { await fn(); } catch (e) { toast(e.message); } b.disabled = false; refreshTrasf(); }; };
+  const post = (p, body) => dlApi('/api/trasferimento/' + p, { method: 'POST', body: JSON.stringify(body || {}) });
+  const steps = (names, cur) => `<ol class="fedsteps">${names.map((n, i) => `<li class="${i < cur ? 'done' : i === cur ? 'cur' : ''}">${esc(n)}</li>`).join('')}</ol>`;
+  const S5 = ['Aggancio', 'Conferma', 'Invio', 'Applica', 'Fatto'];
+  const annulla = '<button class="btn" id="trNo">Annulla</button>';
+  let html = '';
+  if (!t.ruolo || t.stage === 'annullato') {
+    html = `<p class="sub" style="margin-bottom:var(--s4)">Sposta tutto questo server su un altro: utenti e password, playlist, preferiti, ascolti, dispositivi (restano collegati), collegamenti della federazione e, se vuoi, i brani. Il nuovo prende anche l'identità: per gli altri server è lo stesso server, a un indirizzo nuovo. Come funziona: docs/TRASFERIMENTO.md.</p>
+      <div class="fedacts">
+        <button class="fedtile primary" id="trRicevi"><span class="fedav">${ic('down')}</span><span><b>Ricevi un server</b><small>Questo è il server nuovo, appena installato: crea un codice da usare sul vecchio.</small></span></button>
+        <button class="fedtile" id="trInvia"><span class="fedav">${ic('send')}</span><span><b>Trasferisci questo server</b><small>Questo è il vecchio: incolla il codice del nuovo e scegli cosa portare.</small></span></button></div>`;
+  } else if (t.ruolo === 'ricevi') {
+    const cur = { aperto: 0, agganciato: t.confermato ? 2 : 1, ricezione: 2, applicazione: 3, applicato: 4 }[t.stage] ?? 0;
+    html = `<div class="fedcard${t.stage === 'agganciato' && !t.confermato ? ' ask' : ''}">${steps(S5, cur)}` + ({
+      aperto: () => `<p>Usa questo codice sul server vecchio, in Impostazioni → Trasferimento → «Trasferisci questo server». Vale una volta, fino alle ${new Date(t.expires * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}.</p>
+        <div class="code" style="font-size:.78rem;word-break:break-all" id="trCode">${esc(store.get('trCode', ''))}</div><div class="row"><button class="btn primary" id="trCopy">${ic('share')} Copia il codice</button>${annulla}</div>`,
+      agganciato: () => t.confermato ? `<p>Confermato. Ora sul server vecchio si sceglie se portare anche i brani e si avvia: questa scheda segue tutto da sola.</p>`
+        : `<p><b>${esc(t.peer_name || 'Il server vecchio')}</b> vuole trasferirsi qui. Confronta il codice di sicurezza con quello sul suo schermo: se è uguale, conferma.</p>
+          <p class="safety">${esc(t.safety)}</p><div class="row"><button class="btn primary" id="trOk">${ic('check')} È uguale, conferma</button>${annulla}</div>`,
+      ricezione: () => `<p>Ricevo i dati da <b>${esc(t.peer_name || 'il server vecchio')}</b>. Non spegnere questo server; l'avanzamento si vede sul vecchio.</p>`,
+      applicazione: () => `<p>Applico i dati e riavvio. Fra un minuto questo server diventa <b>${esc(t.peer_name || 'il vecchio')}</b>: si entra con gli account del vecchio, quello creato con l'installazione non c'è più.</p>`,
+      applicato: () => `<p>Questo server ora è <b>${esc(t.peer_name || '')}</b>, all'indirizzo ${esc(t.url || '')}. I dispositivi e i server collegati lo stanno raggiungendo qui da soli.</p>
+        ${t.brani ? '' : '<p class="fedmeta">I brani sono ancora sul server vecchio, che resta collegato come libreria: li ascolti dalla federazione e si spostano da là con «Sposta i brani adesso».</p>'}`
+    }[t.stage] || (() => ''))() + '</div>';
+  } else {
+    const cur = { agganciato: t.confermato ? 2 : 1, errore: t.confermato ? 2 : 1, invio: 2, congelato: 2, applicazione: 3, trasferito: 4, concluso: 4 }[t.stage] ?? 0;
+    const v = t.vivo, pct = v && v.tot ? Math.min(100, Math.round(v.fatto * 100 / v.tot)) : 0, eta = v && v.vel > 0 ? Math.round((v.tot - v.fatto) / v.vel / 60) : null;
+    html = `<div class="fedcard${t.stage === 'errore' ? '' : ''}">${steps(S5, cur)}` + ({
+      agganciato: () => scelta(), errore: () => `<p class="federr">${esc(t.errore || 'Interrotto')}</p>` + scelta(),
+      invio: () => bar(), congelato: () => bar(), applicazione: () => bar(),
+      trasferito: () => `<p>Trasferito su <b>${esc(t.url)}</b>. I dispositivi si spostano da soli alla prossima apertura e i server collegati hanno il nuovo indirizzo.</p>
+        ${t.ancora ? `<p class="fedmeta">Ancora su questo server, nelle ultime 24 ore: ${t.ancora.dispositivo} ${t.ancora.dispositivo === 1 ? 'dispositivo' : 'dispositivi'}, ${t.ancora.server} ${t.ancora.server === 1 ? 'server' : 'server'}.</p>` : ''}
+        ${v && v.msg && v.msg.startsWith('Brani') ? bar() : ''}
+        ${t.brani ? '' : '<p class="fedmeta">Questo server resta come libreria collegata al nuovo: i brani si ascoltano da lì. Quando vuoi, spostali.</p>'}
+        <div class="row">${t.brani ? '' : `<button class="btn primary" id="trBrani">${ic('down')} Sposta i brani adesso</button>`}<button class="btn" id="trFine">Concludi</button></div>`,
+      concluso: () => `<p>Concluso: questo server non risponde più al posto del nuovo${t.brani ? ' e si può spegnere' : ''}.</p>`
+    }[t.stage] || (() => ''))() + '</div>';
+    function scelta() {
+      const m = t.misure || {};
+      return `<p>Agganciato a <b>${esc(t.nome_nuovo || t.url)}</b>. Confronta il codice di sicurezza con quello sul suo schermo:</p><p class="safety">${esc(t.safety)}</p>
+        <p class="fedmeta">${t.raggiungibile === false ? '<span class="federr">Il server nuovo ora non risponde.</span>' : t.confermato ? `${ic('check')} Sul nuovo hanno confermato.` : 'Aspetto che sul nuovo confermino…'}</p>
+        <label class="check"><input type="checkbox" id="trBr" checked><span>Porta anche i brani (${bytes(m.brani || 0)})<small>Sul nuovo ci sono ${bytes(t.libero || 0)} liberi. Senza, questo server resta come libreria collegata e i brani si spostano dopo.</small></span></label>
+        ${m.video ? `<label class="check"><input type="checkbox" id="trVi"><span>Porta anche i video (${bytes(m.video)})</span></label>` : ''}
+        <p class="fedmeta">Durante l'invio questo server funziona; alla fine si ferma un minuto per le modifiche, poi il nuovo prende il suo posto.</p>
+        <div class="row"><button class="btn primary" id="trGo" ${t.confermato ? '' : 'disabled'}>${ic('send')} Avvia il trasferimento</button>${annulla}</div>`;
+    }
+    function bar() {
+      return `<p>${esc(v?.msg || 'In corso…')}</p><div class="trbar"><i style="width:${pct}%"></i></div>
+        <p class="fedmeta">${v ? `${bytes(v.fatto)} di ${bytes(v.tot)} · ${pct}%${v.vel ? ` · ${bytes(v.vel)}/s` : ''}${eta != null && eta > 0 ? ` · circa ${eta} min` : ''}` : ''}${v?.file ? `<br>${esc(v.file)}` : ''}</p>`;
+    }
+  }
+  box.innerHTML = html;
+  act('trRicevi', async () => { const r = await post('ricevi'); store.set('trCode', r.code); if (r.avviso) toast(r.avviso, 6000); });
+  act('trInvia', async () => { const c = prompt('Il codice del server nuovo (inizia con ART1):'); if (c) await post('aggancia', { code: c.trim() }); });
+  act('trOk', () => post('conferma'));
+  act('trNo', async () => { if (confirm('Annullare il trasferimento?')) { await post('annulla'); store.set('trCode', ''); } });
+  act('trGo', async () => { if (confirm(`Trasferire questo server su ${t.nome_nuovo || t.url}? Alla fine il nuovo prende il suo posto.`)) await post('avvia', { brani: $('#trBr')?.checked, video: $('#trVi')?.checked }); });
+  act('trBrani', () => post('brani'));
+  act('trFine', async () => { if (confirm(t.brani ? 'Concludere? Questo server smette di rispondere al posto del nuovo e cancella la sua identità e le sessioni.' : 'Concludere? Questo server smette di indirizzare chi lo cerca verso il nuovo.')) await post('concludi'); });
+  $('#trCopy') && ($('#trCopy').onclick = async () => { if (await copyText(store.get('trCode', ''))) toast('Codice copiato.'); });
+  const busy = ['aperto', 'agganciato', 'ricezione', 'applicazione', 'invio', 'congelato', 'errore'].includes(t.stage) || t.vivo;
+  trT = setTimeout(() => box.isConnected && refreshTrasf(), busy ? 2000 : 15000);
 }
 async function refreshFed() {
   const box = $('#fedBox'); if (!box) return;
@@ -5175,7 +5259,7 @@ async function refreshFed() {
 }
 function fedInviteSheet(code) {
   const d = $('#dlg2'); d.className = '';
-  d.innerHTML = `<h3>Invito per un altro server</h3><p class="sub" style="margin-bottom:var(--s3)">Mandalo all'amministratore dell'altro server: lo incolla in Impostazioni → Federazione → Usa un invito. Vale una volta sola, per 24 ore. Poi in Federazione compare la sua richiesta da accettare, e ti arriva una notifica.</p>
+  d.innerHTML = `<h3>Invito per un altro server</h3><p class="sub" style="margin-bottom:var(--s3)">Mandalo all'amministratore dell'altro server: lo incolla in Rete → Federazione → Usa un invito. Vale una volta sola, per 24 ore. Poi in Federazione compare la sua richiesta da accettare, e ti arriva una notifica.</p>
     <div class="code" style="font-size:.78rem;word-break:break-all">${esc(code)}</div><div id="fedQr" style="margin:var(--s3) 0"></div>
     <div class="row"><button class="btn primary" id="fedCopy">${ic('share')} ${navigator.share ? 'Condividi' : 'Copia'}</button><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
   $('#fedCopy').onclick = async () => {
