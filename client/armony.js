@@ -455,10 +455,10 @@ async function route() {
   const fn = Disp.gate(r) || {
     home: vHome, cerca: vSearch, libreria: vLibrary, artista: vArtist, album: vAlbum, 'artista-dz': vArtistDz, 'album-dz': vAlbumDz, genere: vGenre, decennio: vDecade,
     playlist: id ? vPlaylist : vPlaylists, preferiti: vStarred, coda: vQueue, ora: vNow, amici: vFriends, offline: vOffline,
-    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, mix: vMix, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
+    statistiche: vStats, scarica: vDownload, notifiche: vNotifiche, mix: vMix, testo: vLyrics, impostazioni: vSettings, jam: vJam, tasti: vKeys, invito: vInvite, rete: vRete, radio: vRadio, abbina: vAbbina, benvenuto: vBenvenuto
   }[r] || vHome;
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav;
-  if (changed && Scene.hash) Scene.back = Scene.r === 'ora' ? Scene.back : Scene.hash;  // dove torna la freccia del lettore
+  if (changed && Scene.hash) Scene.back = Scene.r === 'ora' || Scene.r === 'testo' ? Scene.back : Scene.hash;  // dove torna la freccia del lettore
   Scene.hash = location.hash; Scene.r = r;
   document.documentElement.dataset.r = r;  // il telefono cambia il lettore in basso su "In riproduzione" (index.html)
   const run = async () => {
@@ -2308,6 +2308,7 @@ function trackChanged(t) {
   if (t && srv(t.serverId) && !t.fed && Jam.role !== 'guest') api('scrobble', { id: t.id, submission: false }, srv(t.serverId)).catch(() => {});
   QSync.schedule(); emit('track', t); ACache.ahead();
   if (location.hash.startsWith('#/ora')) vNow();
+  else if (location.hash.startsWith('#/testo')) vLyrics();
   else if (location.hash.startsWith('#/coda')) vQueue();
 }
 function ctlToggle() {
@@ -2352,7 +2353,7 @@ function ctlRepeat() { S.repeat = { off: 'all', all: 'one', one: 'off' }[S.repea
 function updateNowPlaying() {
   const t = currentTrack();
   $('#npT').textContent = t ? t.title : 'Niente in riproduzione';
-  $('#npA').textContent = t ? t.artist + (t.album ? ' · ' + t.album : '') : (Jam.role === 'guest' ? 'In attesa dell\'host della Jam' : 'Scegli un album o una playlist');
+  $('#npA').innerHTML = t ? esc(t.artist) + (t.album ? `<span class="npalb"> · ${esc(t.album)}</span>` : '') : esc(Jam.role === 'guest' ? 'In attesa dell\'host della Jam' : 'Scegli un album o una playlist');  // sul telefono solo l'artista
   $('#disc').innerHTML = t && t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 80, t.serverId))}" alt="" onerror="this.outerHTML='<div class=lbl></div>'">` : '<div class="lbl"></div>';
   // telecomando: sotto il titolo il dispositivo che suona (come la riga verde di Spotify)
   if (t && Live.remote()) { $('#npA').innerHTML = `<span class="ondev">${ic('speaker')}${esc(Live.devices.get(Live.target) || 'Altro dispositivo')}</span>`; }
@@ -2377,7 +2378,9 @@ function paintButtons() {
   bp.setAttribute('aria-label', playing ? 'Pausa' : 'Riproduci');
   $('#disc').classList.toggle('spin', playing);
   $('#bigdisc')?.classList.toggle('spin', playing);
-  Turntable.set($('#disc'), playing); Turntable.set($('#bigdisc .rec'), playing); Wave.set(playing);
+  // sul telefono il mini lettore ha una copertina quadrata e ferma: l'animazione (Web Animations) scavalcherebbe il CSS
+  if (matchMedia('(max-width:860px)').matches) { const d = $('#disc'); d._spin?.cancel(); d._spin = null; d._to = null; } else Turntable.set($('#disc'), playing);
+  Turntable.set($('#bigdisc .rec'), playing); Wave.set(playing);
   const rs = Live.remote() ? Live.st() : null, shuf = rs ? !!rs.shuffle : S.shuffle, rep = rs ? rs.repeat || 'off' : S.repeat;
   $('#bShuf').innerHTML = ic('shuffle'); $('#bShuf').classList.toggle('on', shuf);
   $('#bRep').innerHTML = ic('repeat') + (rep === 'one' ? '<span class="mini">1</span>' : '');
@@ -2619,6 +2622,76 @@ const Glow = {
 };
 addEventListener('hashchange', () => { if (!/^#\/(ora|album|artista)/.test(location.hash)) Glow.off(); });
 
+/* ================= testi a tutta pagina (#/testo), come Spotify =================
+   Il colore della copertina come fondo, righe grandi: quella cantata in piena luce e più grande, le passate attenuate,
+   le prossime più scure. Scorre da sola; se scorri tu si ferma qualche secondo. Toccando una riga si salta lì */
+function lyrBg(c) {
+  if (!c) return '';
+  let [h, s] = rgbToHsl(c.c1);
+  s = c.neutral ? Math.min(s, .08) : Math.min(Math.max(s, .35), .62);
+  return `rgb(${hslToRgb(h, s, c.neutral ? .26 : .33).join(' ')})`;  // abbastanza scuro per il testo bianco (AA)
+}
+function lyrTint(el, t) {
+  const url = t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 300, t.serverId) : '';
+  Glow.colors(url).then(c => { const v = lyrBg(c); if (!v || !sameTrack(currentTrack(), t)) return; el?.style.setProperty('--lyr-bg', v); if (location.hash.startsWith('#/testo')) document.documentElement.style.setProperty('--lyr-bg', v); });
+}
+function lyrIndex(lyr, t) {
+  if (!lyr?.synced) return -1;
+  const p = playPos() + store.get('lyrOff:' + key(t), 0);
+  let idx = -1; for (let i = 0; i < lyr.lines.length; i++) { if (lyr.lines[i].t <= p) idx = i; else break; }
+  return idx;
+}
+// l'anteprima della scheda «Testo» in «In riproduzione» (telefono): la riga cantata e le tre dopo
+function lyrPreview(lyr, t, force) {
+  const box = $('#lyrPrev'); if (!box) return;
+  const idx = lyrIndex(lyr, t); if (!force && box._i === idx) return; box._i = idx;
+  const from = Math.max(0, idx), ls = lyr.lines.slice(from, from + 4).filter(l => l.v);
+  box.innerHTML = ls.map((l, k) => `<span class="${k === 0 && idx >= 0 ? 'on' : ''}">${esc(l.v)}</span>`).join('');
+}
+async function vLyrics() {
+  const t = currentTrack();
+  if (!t) { location.replace('#/ora'); return; }
+  const cover = t.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 300, t.serverId) : '';
+  Glow.off(); document.documentElement.style.removeProperty('--lyr-bg');
+  view.innerHTML = `<div class="lyrpage" id="lyrPage">
+    <div class="lyrhead"><button class="icon-btn" data-act="lyrclose" aria-label="Chiudi il testo">${ic('chev')}</button>
+      <span class="pic">${cover ? `<img src="${esc(cover)}" alt="">` : ic('album')}</span>
+      <span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></span></div>
+    <div class="lyrbig" id="lyrBig"><p class="lyrmsg">Cerco il testo…</p></div><div class="lyrfoot" id="lyrFoot"></div></div>`;
+  lyrTint($('#lyrPage'), t);
+  const lyr = await Lyrics.get(t);
+  const box = $('#lyrBig');
+  if (!box || !sameTrack(currentTrack(), t)) return;
+  if (!lyr || lyr.instrumental) {
+    box.innerHTML = `<p class="lyrmsg">${lyr ? 'Brano strumentale.' : `Nessun testo per questo brano.${P.lyricsOnline ? '' : ' Attiva la ricerca online dei testi nelle impostazioni.'}`}</p>`;
+    return;
+  }
+  box.classList.toggle('plain', !lyr.synced);
+  box.innerHTML = lyr.lines.map((l, i) => `<p data-i="${i}">${esc(l.v) || '♪'}</p>`).join('');
+  const off = () => store.get('lyrOff:' + key(t), 0);
+  $('#lyrFoot').innerHTML = `<span>Fonte: ${esc(lyr.src || '')}</span>${lyr.synced ? `<span class="row">Sincronia <button class="btn sm" data-off="-0.5" aria-label="Testo prima di mezzo secondo">−0,5</button><span id="offv">${off().toFixed(1)} s</span><button class="btn sm" data-off="0.5" aria-label="Testo dopo mezzo secondo">+0,5</button></span>` : ''}`;
+  if (!lyr.synced) return;
+  $$('#lyrFoot [data-off]').forEach(b => b.onclick = () => { const v = +(off() + +b.dataset.off).toFixed(1); store.set('lyrOff:' + key(t), v); $('#offv').textContent = v.toFixed(1) + ' s'; });
+  box.onclick = e => { const p = e.target.closest('p[data-i]'); if (p && lyr.lines[+p.dataset.i].t != null) { held = 0; ctlSeek(lyr.lines[+p.dataset.i].t - off() + .05); } };
+  // scorrere a mano ferma lo scorrimento automatico per 3,5 s, poi torna alla riga cantata
+  let last = -2, held = 0, wait = false;
+  const hold = () => { held = Date.now() + 3500; wait = true; };
+  ['wheel', 'touchmove'].forEach(ev => box.addEventListener(ev, hold, { passive: true }));
+  const ps = [...box.children];
+  const tick = () => {
+    if (!box.isConnected) return;
+    const idx = lyrIndex(lyr, t), free = Date.now() > held;
+    if (idx !== last || (wait && free)) {
+      if (idx !== last) ps.forEach((el, i) => { el.classList.toggle('on', i === idx); el.classList.toggle('past', i < idx); });
+      last = idx;
+      if (free) { wait = false; const el = ps[Math.max(0, idx)]; if (el) box.scrollTo({ top: el.offsetTop - box.clientHeight * .3, behavior: calm() ? 'auto' : 'smooth' }); }
+    }
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+addEventListener('hashchange', () => { if (!location.hash.startsWith('#/testo')) document.documentElement.style.removeProperty('--lyr-bg'); });
+
 /* ================= in riproduzione: testi e visualizzatore ================= */
 async function vNow() {
   const t = currentTrack();
@@ -2671,6 +2744,7 @@ async function vNow() {
       }
       c2.globalAlpha = 1;
     }
+    if (lyr && $('#lyrPrev')) lyrPreview(lyr, t);
     if (lyr?.synced && $('#lyr')) {
       const p = playPos() + store.get('lyrOff:' + key(t), 0);
       let idx = -1; for (let i = 0; i < lyr.lines.length; i++) { if (lyr.lines[i].t <= p) idx = i; else break; }
@@ -2693,9 +2767,14 @@ async function vNow() {
         ${up.length ? `<h2 style="margin-top:8px">Prossimi</h2>${songList(up)}` : ''}`;
       if (up.length && Jam.role !== 'guest' && !Radio.st && !Live.remote()) { S.lastList = up; pane.querySelectorAll('.song').forEach(el => el.dataset.act = 'qplayoff'); }
     }
+    else if (matchMedia('(max-width:860px)').matches) {
+      // sul telefono, come Spotify: una scheda con le righe di adesso; toccandola il testo si apre a tutta pagina
+      pane.innerHTML = `<button class="lyrcard" data-act="lyropen" aria-label="Apri il testo a tutta pagina"><span class="lyrcard-h"><b>Testo</b>${ic('chevr')}</span><span class="lyrcard-l" id="lyrPrev"></span></button>`;
+      lyrTint($('.lyrcard'), t); lyrPreview(lyr, t, true);
+    }
     else {
       const off = store.get('lyrOff:' + key(t), 0);
-      pane.innerHTML = `<div class="lyrics ${lyr.synced ? '' : 'plain'}" id="lyr">${lyr.lines.map((l, i) => `<p data-i="${i}">${esc(l.v) || '&nbsp;'}</p>`).join('')}</div>
+      pane.innerHTML = `<button class="btn sm lyrfull" data-act="lyropen">${ic('lyrics')} Testo a tutta pagina</button><div class="lyrics ${lyr.synced ? '' : 'plain'}" id="lyr">${lyr.lines.map((l, i) => `<p data-i="${i}">${esc(l.v) || '&nbsp;'}</p>`).join('')}</div>
         <div class="row between small" style="color:var(--muted)"><span>Fonte: ${esc(lyr.src || '')}</span>${lyr.synced ? `<span class="row">Sincronia <button class="btn sm" data-off="-0.5">−0,5 s</button><span id="offv">${off.toFixed(1)} s</span><button class="btn sm" data-off="0.5">+0,5 s</button></span>` : ''}</div>`;
       if (lyr.synced) {
         $('#lyr').onclick = e => { const p = e.target.closest('p'); if (p) ctlSeek(lyr.lines[+p.dataset.i].t - store.get('lyrOff:' + key(t), 0) + .05); };
@@ -3909,7 +3988,7 @@ function songMenu(t, ctx = {}) {
     phoneT && !Offline.has(t) ? null : Offline.has(t) ? ['trash', 'Togli dall\'offline', async () => { await Offline.remove(offKey(t)); toast('Rimosso dall\'offline.'); if (location.hash.startsWith('#/offline')) route(); }]
       : ['offline', 'Salva per l\'offline', () => Offline.save([t])],
     phoneT ? null : ['down', 'Scarica il file originale', () => downloadOriginal(t)],
-    ['lyrics', 'Testo', () => { if (key(currentTrack() || {}) !== key(t)) return toast('Il testo si apre per il brano in riproduzione.'); sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; }],
+    ['lyrics', 'Testo', () => { if (key(currentTrack() || {}) !== key(t)) return toast('Il testo si apre per il brano in riproduzione.'); location.hash = '#/testo'; }],
     ctx.pl != null && can('playlist') ? ['trash', 'Togli dalla playlist', async () => {
       // per id sul server (capacità "pltogli"): la posizione vista qui può essere cambiata nel frattempo
       const s = srv(t.serverId), pid = view.dataset.pl;
@@ -4705,6 +4784,29 @@ function paintMe() {
   const b = $('#hMe'); if (!b) return;
   const u = srv()?.user || '?', dot = (Presence.on?.() && Presence.playingCount?.() && inMore('amici')) || (srv()?.me?.pending && inMore('impostazioni'));
   b.innerHTML = pavatar({ user: u, name: u }) + (dot ? '<i class="dot pdot" aria-hidden="true"></i>' : '');
+  const hp = $('#hProf'); if (hp) { hp.hidden = !srv() || !!srv().local; hp.innerHTML = pavatar({ user: u, name: P.nick || u }); }
+}
+// computer: il pallino del profilo, ultimo in alto a destra, apre le impostazioni del profilo (foto, nome, privacy)
+function profPop() {
+  const d = $('#dlg'), s = srv(), u = s?.user || '';
+  d.className = 'profpop';
+  d.innerHTML = `<div class="pp-me">${pavatar({ user: u, name: P.nick || u }, 'l')}<span class="grow"><b>${esc(P.nick || u)}</b><small>${esc(u)} · ${esc(s?.name || '')}${s?.me?.admin ? ' · amministratore' : ''}</small></span></div>
+    ${Avatar.ok() ? `<div class="row"><button class="btn sm" id="ppAv">${ic('image')} Cambia foto</button><button class="btn sm" id="ppAvDel">Togli la foto</button></div>` : ''}
+    <label class="f">Il tuo nome per gli amici e nelle Jam<input type="text" id="ppNick" value="${esc(P.nick)}" placeholder="${esc(u)}" maxlength="30"></label>
+    ${Presence.on() ? `<label class="check"><input type="checkbox" id="ppShare" ${Presence.share ? 'checked' : ''}><span>Mostra agli altri cosa ascolto</span></label>` : ''}
+    <div class="dr-sep"></div>
+    ${Amici.on() ? `<button class="mi" id="ppPw">${ic('lock')}<span class="grow">Cambia password</span></button>` : ''}
+    <a class="mi" href="#/impostazioni/profilo">${ic('user')}<span class="grow">Tutte le impostazioni del profilo</span></a>
+    <a class="mi" href="#/impostazioni">${ic('gear')}<span class="grow">Impostazioni</span></a>`;
+  if ($('#ppAv')) { $('#ppAv').onclick = () => Avatar.choose(); $('#ppAvDel').onclick = () => Avatar.remove(); }
+  $('#ppNick').onchange = e => { P.nick = e.target.value.trim(); savePrefs(); paintMe(); };
+  if ($('#ppShare')) $('#ppShare').onchange = async e => {
+    try { Presence.share = (await srvApi(srv(), '/api/live/privacy', { method: 'PUT', body: JSON.stringify({ share: e.target.checked }) })).share; toast(Presence.share ? 'Gli altri vedono cosa ascolti.' : 'Non compari più agli altri.'); }
+    catch { e.target.checked = Presence.share; toast('Non riesco a salvare: riprova.'); }
+  };
+  if ($('#ppPw')) $('#ppPw').onclick = () => { d.close(); Amici.passwordSheet(); };
+  d.querySelectorAll('a.mi').forEach(a => a.addEventListener('click', () => d.close()));
+  closeOutside(d); d.showModal();
 }
 // menu del profilo (telefono): chi sei, server e qualità, tutte le sezioni che non stanno nella barra in basso
 function drawer() {
@@ -5027,6 +5129,8 @@ view.addEventListener('click', async e => {
       case 'wrapped': makeWrapped(); break;
       case 'nowmore': songMenu(currentTrack()); break;
       case 'nowtools': nowTools(); break;
+      case 'lyropen': location.hash = '#/testo'; break;
+      case 'lyrclose': navStack.at(-2) ? history.back() : (location.hash = '#/ora'); break;
       case 'npclose': Scene.back ? history.back() : (location.hash = '#/home'); break;
       case 'sleep': sleepDialog(); break;
       case 'speed': speedDialog(); break;
@@ -5452,6 +5556,7 @@ const Live = {
     } else if (m.type === 'cmd') return this.take(m);
     this.paint();
     if (this.remote() && this.track()?.id !== before && location.hash.startsWith('#/ora')) vNow();
+    if (this.remote() && this.track()?.id !== before && location.hash.startsWith('#/testo')) vLyrics();
     if (this.remote() && m.type === 'state' && m.state.device === this.target && location.hash.startsWith('#/coda')) vQueue();
   },
   exec(m) {
@@ -5846,16 +5951,17 @@ function miniGestures() {
 
 /* ================= controlli del lettore e avvio ================= */
 function wirePlayer() {
-  $('#bPrev').innerHTML = ic('prev'); $('#bNext').innerHTML = ic('next'); $('#bQueue').innerHTML = ic('queue'); $('#bQm').innerHTML = ic('sliders'); $('#bLyr').innerHTML = ic('lyrics');
+  $('#bPrev').innerHTML = ic('prev'); $('#bNext').innerHTML = ic('next'); $('#bQueue').innerHTML = ic('queue'); $('#bQm').innerHTML = ic('sliders'); $('#bLyr').innerHTML = $('#bLyrM').innerHTML = ic('lyrics');
   $('#bPlay').onclick = ctlToggle; $('#bNext').onclick = () => ctlNext(false); $('#bPrev').onclick = ctlPrev;
   $('#bQueue').onclick = () => location.hash = '#/coda';
-  $('#bLyr').onclick = () => { sessionStorage.setItem('armony:nowtab', 'lyr'); location.hash = '#/ora'; };
+  $('#bLyr').onclick = $('#bLyrM').onclick = () => location.hash.startsWith('#/testo') ? (navStack.at(-2) ? history.back() : location.hash = '#/ora') : location.hash = '#/testo';
   $('#npBtn').onclick = () => location.hash = '#/ora';
   $('#bQm').onclick = qualityDialog; $('#qBadge').onclick = qualityDialog;
   $('#bStar').onclick = $('#bStarM').onclick = () => currentTrack() && toggleStar(currentTrack());
   $('#bDev').innerHTML = ic('speaker'); $('#bDev').onclick = () => Live.sheet();
   $('#bQueueM').innerHTML = ic('queue'); $('#bQueueM').onclick = () => location.hash = '#/coda';
   $('#hMe').onclick = drawer;
+  $('#hProf').onclick = profPop;
   $('#hBell').onclick = () => { location.hash = '#/notifiche'; };
   miniGestures();
   $('#sleepPill').onclick = sleepDialog; $('#jamPill').onclick = () => location.hash = '#/jam';

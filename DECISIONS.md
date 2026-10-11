@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Testi in una schermata propria, mini lettore senza disco, sviluppo del client su una copia
+
+**Contesto:** l'utente chiede testi come Spotify (righe cantate più grandi, una scheda dedicata), un mini lettore del telefono più pulito e il profilo nel pallino in alto a destra sul web. Nella stessa sessione una modifica a metà di `client/` (montato in produzione) ha servito per 35 secondi un `armony.js` rotto.
+**Scelta:** rotta `#/testo` (`vLyrics`): fondo dal colore della copertina scurito (luminosità 0,33, così il testo bianco resta leggibile in entrambi i temi), righe con `transform: scale` (la riga attiva cresce senza spostare le altre), autoscroll sospeso 3,5 s quando si scorre a mano. Sul telefono «In riproduzione» mostra una scheda d'anteprima che apre `#/testo`, e il lettore grande ha il tasto Testo; sul computer il tasto Testo del lettore apre `#/testo`. Mini lettore del telefono: copertina quadrata ferma (l'animazione del disco gira solo su schermo largo), solo l'artista, binario d'avanzamento visibile. Profilo sul computer: `#hProf` apre un riquadro con foto, nome, visibilità. Il client si sviluppa in una copia montata nel container di prova e si copia in `client/` solo al rilascio.
+**Alternative scartate:** testi più grandi solo dentro la scheda di «In riproduzione» (sul telefono restava una lista con scorrimento annidato sotto i comandi, il difetto segnalato); colore del fondo dal tema (Spotify usa la copertina, ed è ciò che rende riconoscibile la schermata); disco che gira anche nel mini lettore (a 40 px un disco storto sembra un errore).
+**Conseguenze:** con copertine quasi grigie il fondo è un grigio scuro neutro.
+**Da rivedere se:** si aggiungono testi parola per parola (servirebbero tempi per parola, che LRCLIB di solito non ha).
+
 ## 2026-10-11 — Il gettone del dispositivo negli indirizzi; playlist ai server collegati solo col consenso
 
 **Contesto:** voci 3.12 e 7.8 del piano. Il canale dal vivo (EventSource) e i video portavano la sessione nell'indirizzo (`?token=`): una credenziale che vale giorni, finita in cronologia e nei log dei proxy. `/api/lan/servers` e le Jam vicine mostravano a internet gli indirizzi della rete di casa. Ogni playlist pubblica andava a tutti i server collegati.

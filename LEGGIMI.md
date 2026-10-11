@@ -79,7 +79,7 @@ Poi, in Armony, **Impostazioni → Server musicali → Indirizzo pubblico di que
 - **Nuove uscite** in Home: i dischi usciti negli ultimi due mesi degli artisti che ascolti di più, non ancora in libreria.
 - **Popolari** dell'artista anche se Navidrome non è collegato a Last.fm: i brani più ascoltati secondo Deezer che hai in libreria.
 - **Cronologia** (Libreria → Cronologia): i brani che hai ascoltato, giorno per giorno.
-- **Testi sincronizzati** in stile karaoke (salvati insieme ai brani offline, quindi anche senza rete). Tocchi una riga e la musica salta lì, e puoi correggere la sincronia di mezzo secondo alla volta. I testi arrivano dal server o, se non ci sono, da LRCLIB (si può disattivare).
+- **Testi sincronizzati** in stile karaoke (salvati insieme ai brani offline, quindi anche senza rete). Come su Spotify c'è una **schermata Testo** tutta sua (tasto Testo nel lettore; sul telefono in basso nel lettore a tutto schermo, o toccando la scheda «Testo» sotto il disco): il colore della copertina come fondo, righe grandi, quella cantata in piena luce e più grande delle altre. Scorre da sola; se scorri tu si ferma qualche secondo. Tocchi una riga e la musica salta lì, e puoi correggere la sincronia di mezzo secondo alla volta. I testi arrivano dal server o, se non ci sono, da LRCLIB (si può disattivare).
 - **Visualizzatore** circolare attorno al disco.
 - **Radio da un brano o da un artista**, basata su brani simili, genere e popolarità.
 - **Mix pronti**: casuale, preferiti, "Riscoperte" (brani che non ascolti da almeno due mesi), per decennio, per genere.
@@ -92,7 +92,7 @@ Poi, in Armony, **Impostazioni → Server musicali → Indirizzo pubblico di que
 - **Playlist collaborative**: nel menu ⋯ di una tua playlist, «Collaboratori», scegli gli amici del server. Possono aggiungere, togliere e riordinare i brani come te; ricevono un avviso quando li inviti e tu quando aggiungono qualcosa. La playlist diventa visibile agli altri utenti del server (serve l'amministratore di Navidrome in Impostazioni → Utenti → Registrazione).
 - **Manda a un amico**: dal menu di un brano, di un album o di una playlist scegli un amico e, se vuoi, scrivi due parole. Gli arriva una notifica e lo ritrova in Amici → Ricevuti.
 - **Il vostro mix** (Amici): scegli un amico e Armony fa un mix dai vostri ascolti degli ultimi sei mesi, prima i brani che piacciono a tutti e due, poi alternati quelli di ciascuno, con la vostra **affinità** e gli artisti in comune. Solo con chi mostra i suoi ascolti agli amici.
-- **Foto profilo e nome**: in Impostazioni → Profilo scegli una foto (ritagliata e rimpicciolita dall'app) e il nome con cui ti vedono gli amici. La foto compare ovunque c'era la tua iniziale ed è visibile solo agli utenti del server collegati.
+- **Foto profilo e nome**: sul computer la tua foto è il pallino in alto a destra: cliccandolo cambi foto, nome e visibilità; sul telefono stanno in Impostazioni → Profilo. Scegli una foto (ritagliata e rimpicciolita dall'app) e il nome con cui ti vedono gli amici. La foto compare ovunque c'era la tua iniziale ed è visibile solo agli utenti del server collegati.
 - **Cambiare la password** dentro Armony (Impostazioni → Profilo): vale anche per le app Subsonic, e i tuoi dispositivi con Armony aperta restano collegati da soli.
 
 ### Jam: ascoltare insieme
