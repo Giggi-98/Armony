@@ -15,12 +15,16 @@ Armony - federazione: server Armony collegati fra loro (docs/FEDERAZIONE.md).
     collab?user=, collab/<pid>?user=, collab/<pid>/aggiungi
                                      playlist di questo server in cui collabora un utente del nodo che chiede
     notifica                         {user, title, body, link}: un avviso per un mio utente (invito a collaborare)
+    presenza                         chi ascolta cosa e le attività recenti, solo se l'amministratore lo permette
+    topologia                        i miei collegamenti (centro o foglia, diretto o canale): per la mappa di chi chiede
   /api/fed/*             gestione, solo amministratori: impostazioni, inviti, collegamenti; nodes/<id>/sync {mode}:
                          «playlist» o «stream», la risposta alla domanda fatta quando il collegamento è in linea
   /api/rete/*            per gli utenti: cerca, stream, cover, mappa; copia (permesso "download");
                          offerte (GET), offerta {pid, on} (POST): quali playlist pubbliche vanno ai server collegati;
                          collab (GET) le playlist di altri server in cui collaboro, collab/<nodo>/<pid> (GET i brani,
                          POST {ids} aggiunge i miei brani: lì si copiano)
+  /api/rete/topologia    il grafo della rete per la mappa dal vivo: io, i miei collegamenti e i loro (letto al più ogni 5 s)
+  /api/rete/presenza     gli amici dei server collegati che condividono l'attività (letta al più ogni 10 s)
   /api/collab/rete       GET ?pid= e PUT {pid, users: [{node, user}]}: i collaboratori di altri server (il proprietario)
 
 Registrato da app.py con init(): usa da lì sessione HTTP, credenziali di Navidrome e coda dei lavori.
@@ -261,7 +265,7 @@ def fed_guard():
     # verso "ricevo": prendo dalla sua libreria ma la mia non la mostro a lui (né catalogo, né ricerca, né audio)
     # La collaborazione alle playlist passa comunque (la decide il proprietario), e così i brani che un mio utente ha
     # aggiunto a una sua playlist: deve poterli copiare (grants)
-    if n.get("dir") == "ricevo" and request.path not in allowed and request.path not in ("/fed/v1/ora", "/fed/v1/raggiungo", "/fed/v1/notifica") \
+    if n.get("dir") == "ricevo" and request.path not in allowed and request.path not in ("/fed/v1/ora", "/fed/v1/raggiungo", "/fed/v1/notifica", "/fed/v1/presenza", "/fed/v1/topologia") \
             and not request.path.startswith(("/fed/v1/canale", "/fed/v1/collab", "/fed/v1/utenti")) and not concesso(nid, request.path):
         return jsonify(error=f"{A.NAME} non condivide la sua libreria con questo server", code="verso"), 403
     w = int(time.time() // 60)
@@ -1147,7 +1151,8 @@ def node_out(n):
 def fed_status():
     n, a = my_counts()
     return jsonify(me=dict(hello_payload(), url=my_url(), songs=n, albums=a, short=ME[:8]),
-                   settings=dict(url=my_url(), owner=owner(), transitive=transitive(), hops=hops(), utenti=setting("utenti", "0") == "1"),
+                   settings=dict(url=my_url(), owner=owner(), transitive=transitive(), hops=hops(), utenti=setting("utenti", "0") == "1",
+                                 attivita=setting("attivita", "0") == "1"),
                    ready=bool(A.nd_admin()), nodes=[node_out(dict(r)) for r in db.all_("SELECT * FROM fed_nodes ORDER BY state != 'richiesta', name")])
 
 
@@ -1165,6 +1170,8 @@ def fed_settings():
         set_setting("transitive", "1" if d["transitive"] else "0")
     if "utenti" in d:
         set_setting("utenti", "1" if d["utenti"] else "0")
+    if "attivita" in d:
+        set_setting("attivita", "1" if d["attivita"] else "0")
     if "hops" in d:
         try:
             set_setting("hops", max(1, min(int(d["hops"]), 4)))
@@ -1544,6 +1551,107 @@ def rete_unsubscribe(pid):
     if gone:  # solo l'elenco dell'abbonamento appena tolto, mai un'importazione da file
         db.run("DELETE FROM imports WHERE pid = ?", pid)
     return jsonify(ok=True) if gone else (jsonify(error="Abbonamento non trovato"), 404)
+
+
+# ------------------------------------------------------------------ topologia: la mappa dal vivo della rete
+# Ogni server racconta i suoi collegamenti: se l'altro ha un indirizzo (fa da centro) o no (foglia), e come si parlano
+# (diretto, dal canale della foglia). Chi chiede ricompone il grafo: così si vede anche la maglia fra i miei vicini, che
+# la mappa ad albero (/fed/v1/vicini) non mostra. Gli amici degli amici compaiono solo se lo permettono (transitive).
+def link_out(n):
+    o = node_out(n)
+    return {"id": n["id"], "name": n["name"], "owner": n["owner"] or "", "songs": n["songs"] or 0, "centro": bool(n["url"]),
+            "reach": o["reach"], "online": o["online"], "contatto": o["contatto"], "dir": n.get("dir") or "entrambi"}
+
+
+@bp.get("/fed/v1/topologia")
+def fed_topologia():
+    req = g.fed_node["id"]
+    return jsonify(centro=bool(my_url()), links=[link_out(n) for n in nodes() if n["id"] == req or n["transitive"]])
+
+
+topo_cache = {"at": 0.0, "data": None}
+
+
+@bp.get("/api/rete/topologia")
+def rete_topologia():
+    if time.time() - topo_cache["at"] < 5 and topo_cache["data"]:
+        return jsonify(topo_cache["data"])
+    n_, a_ = my_counts()
+    me = {"id": ME, "name": A.NAME, "owner": owner(), "songs": n_, "centro": bool(my_url()), "me": True, "online": True}
+    vert, edges = {ME: me}, {}
+
+    def edge(a, b, x):
+        # canale: va dalla foglia al centro (from = chi lo tiene aperto); diretto: si raggiungono
+        k = tuple(sorted((a, b)))
+        if k in edges:
+            return
+        chan = x["reach"] in ("canale", "uscita")
+        frm = (b if x["reach"] == "canale" else a) if chan else None
+        edges[k] = {"a": a, "b": b, "kind": "canale" if chan else "diretto", "from": frm, "online": x["online"], "contatto": x["contatto"], "dir": x["dir"]}
+    mine = [link_out(n) for n in nodes()]
+    for x in mine:
+        vert[x["id"]] = {k: x[k] for k in ("id", "name", "owner", "songs", "centro", "online")}
+        edge(ME, x["id"], x)
+
+    def ask(n):
+        try:
+            return n["id"], fed_json(n, "GET", "/fed/v1/topologia", timeout=(4, 6))
+        except FedError:
+            return n["id"], None
+    for nid, j in pool.map(ask, [n for n in nodes()]):
+        if not j:
+            continue
+        vert[nid]["centro"] = bool(j.get("centro"))
+        for x in j.get("links") or []:
+            if not isinstance(x, dict) or not NODE_RE.match(str(x.get("id"))) or x["id"] == ME:
+                continue
+            x = {"id": x["id"], "name": str(x.get("name") or "Server")[:60], "owner": str(x.get("owner") or "")[:60], "songs": int(x.get("songs") or 0),
+                 "centro": bool(x.get("centro")), "online": bool(x.get("online")), "reach": str(x.get("reach") or ""),
+                 "contatto": float(x.get("contatto") or 0), "dir": str(x.get("dir") or "")}
+            vert.setdefault(x["id"], {k: x[k] for k in ("id", "name", "owner", "songs", "centro", "online")} | {"far": True})
+            edge(nid, x["id"], x)
+    data = {"me": ME, "nodes": list(vert.values()), "edges": list(edges.values()), "at": time.time()}
+    topo_cache.update(at=time.time(), data=data)
+    return jsonify(data)
+
+
+# ------------------------------------------------------------------ attività degli amici fra server
+# Con il permesso dell'amministratore (spento di base) un server dice ai collegati chi ascolta cosa e le attività recenti:
+# la stessa presenza della pagina Amici, già senza chi ha scelto di nascondersi. Il brano porta l'id solo se è nel
+# catalogo offerto, così dall'altra parte si può ascoltare attraverso il collegamento. Passa anche con «ricevo»: qui
+# decide l'impostazione, non il verso della libreria.
+@bp.get("/fed/v1/presenza")
+def fed_presenza():
+    if setting("attivita", "0") != "1":
+        return jsonify(error=f"{A.NAME} non condivide l'attività dei suoi utenti", code="privato"), 403
+    pres = A.pres_all()
+    ids = [e["track"].get("id") for e in pres if e["track"].get("id")]
+    offered = {r["id"]: r["cover"] for r in db.all_(f"SELECT id, cover FROM fed_mine WHERE gone = 0 AND id IN ({','.join('?' * len(ids))})", *ids)} if ids else {}
+    out = [{"user": e["user"], "name": e["name"], "playing": e["playing"], "since": e["since"], "devName": e.get("devName"),
+            "radio": (e.get("radio") or {}).get("name"),
+            "track": {**{k: e["track"].get(k) for k in ("title", "artist", "album", "duration")},
+                      "id": e["track"]["id"] if e["track"].get("id") in offered else None, "cover": bool(offered.get(e["track"].get("id")))}}
+           for e in pres]
+    with A.alock:
+        acts = [{k: a.get(k) for k in ("id", "user", "name", "kind", "text", "at", "n")} for a in list(A.acts)[:20]]
+    return jsonify(presenza=out, attivita=acts)
+
+
+pres_cache = {"at": 0.0, "data": []}
+
+
+@bp.get("/api/rete/presenza")
+def rete_presenza():
+    # una lettura ogni 10 s per tutto il server, non una per ogni pagina Amici aperta
+    if time.time() - pres_cache["at"] > 10:
+        def one(n):
+            try:
+                j = fed_json(n, "GET", "/fed/v1/presenza", timeout=(4, 8))
+            except FedError:
+                return None  # non condivide, o non risponde
+            return {"node": n["id"], "name": n["name"], "presenza": j.get("presenza") or [], "attivita": j.get("attivita") or []}
+        pres_cache.update(at=time.time(), data=[x for x in pool.map(one, nodes()) if x])
+    return jsonify(servers=pres_cache["data"])
 
 
 # ------------------------------------------------------------------ collaboratori da altri server

@@ -75,6 +75,22 @@ nav a.on{background:var(--surface2);color:var(--ink);font-weight:600}
 nav a.on svg{color:var(--accent-text)}
 nav svg{width:22px;height:22px;flex:none}
 nav .dot{position:absolute;right:10px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+/* gruppi del menu: il titolo apre e chiude; l'altezza si anima con la griglia 0fr → 1fr */
+.ngrp{display:flex;align-items:center;gap:14px;width:100%;padding:10px 12px;border:0;border-radius:var(--r-m);background:none;color:var(--muted);font:inherit;font-size:15px;font-weight:600;text-align:left;cursor:pointer;position:relative;transition:background var(--t-tap) ease,color var(--t-tap) ease}
+.ngrp svg{width:22px;height:22px;flex:none}
+.ngrp .lbl{flex:1}
+.ngrp svg:last-child{width:16px;height:16px;transition:transform .2s var(--ease-out)}
+.ngrp[aria-expanded="true"] svg:last-child{transform:rotate(90deg)}
+.ngrp:has(+ .nsub a.on){color:var(--ink)}
+.ngrp[aria-expanded="false"]:has(+ .nsub .dot)::after{content:"";position:absolute;right:34px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.ngrp:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.nsub{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s var(--ease-out)}
+.nsub.open{grid-template-rows:1fr}
+.nsub>div{overflow:hidden;display:flex;flex-direction:column;gap:2px;min-height:0}
+.nsub:not(.open)>div{visibility:hidden;transition:visibility 0s .22s}
+nav a.nitem{padding:8px 12px 8px 24px;font-size:14.5px}
+nav a.nitem svg{width:20px;height:20px}
+@media (prefers-reduced-motion:reduce){.nsub,.ngrp svg:last-child{transition:none}}
 .ctx{margin-top:auto;display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border:0;border-radius:var(--r-m);background:var(--surface2);cursor:pointer;text-align:left;font-weight:600;color:var(--ink)}
 .ctx .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ctx .pill{cursor:inherit}
@@ -215,6 +231,49 @@ label.check small{display:block;color:var(--muted)}
 .netav svg{width:22px;height:22px}
 .netdot{width:10px;height:10px;border-radius:50%;background:var(--sage);flex:none}
 .netdot.off{background:var(--muted);opacity:.5}
+/* mappa dal vivo della rete (Topo): segue il tema, con un fondo puntinato leggero che dà profondità.
+   Centri con anello, foglie piccole, canali tratteggiati che scorrono dalla foglia verso il centro */
+.topo{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);overflow:hidden;margin-bottom:var(--s5);
+  background-image:radial-gradient(color-mix(in srgb,var(--muted) 22%,transparent) 1px,transparent 1.2px);background-size:22px 22px}
+.topo-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:var(--s2) var(--s4);padding:var(--s4) var(--s4) 0;position:relative;z-index:1}
+.topo-head b{display:block;font-size:1rem}
+.topo-sum{display:block;color:var(--muted);font-size:.88rem;margin-top:2px}
+.topo-leg{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s3);font-size:.78rem;color:var(--muted)}
+.topo-leg span{display:inline-flex;align-items:center;gap:6px}
+.topo-leg i{display:inline-block}
+.lg-c{width:12px;height:12px;border-radius:50%;background:var(--surface2);box-shadow:0 0 0 2px var(--ink)}
+.lg-f{width:9px;height:9px;border-radius:50%;background:var(--surface2);box-shadow:0 0 0 1.5px var(--muted)}
+.lg-d{width:18px;height:2px;background:var(--ink);opacity:.55}
+.lg-k{width:18px;height:0;border-top:2px dashed var(--accent)}
+#topoSvg{display:block;width:100%;height:420px;touch-action:none;user-select:none;-webkit-user-select:none}
+.te{stroke:color-mix(in srgb,var(--ink) 45%,transparent);stroke-width:2;stroke-linecap:round}
+.te.canale{stroke:var(--accent);stroke-dasharray:7 7;animation:teflow 1.1s linear infinite}
+.te.off{stroke:var(--muted);opacity:.35;animation:none}
+@keyframes teflow{to{stroke-dashoffset:-14}}
+.tp{fill:var(--sage)}.tp.canale{fill:var(--accent)}
+.tn{cursor:grab;outline:none}
+.tn:active{cursor:grabbing}
+.tn .body{fill:var(--th,var(--surface2));stroke:var(--surface);stroke-width:3}
+.tn .ring{fill:none;stroke:var(--ink);stroke-width:2}
+.tn.me .body{fill:var(--accent)}
+.tn.me .ring{stroke:var(--accent);stroke-width:2.5}
+.tn .halo{fill:color-mix(in srgb,var(--sage) 30%,transparent);transform-box:fill-box;transform-origin:center;animation:tnhalo 2.4s ease-out infinite}
+@keyframes tnhalo{0%{opacity:.9;transform:scale(.85)}100%{opacity:0;transform:scale(1.35)}}
+.tn .ini{fill:#fff;font:700 15px var(--body);text-anchor:middle;pointer-events:none}
+.tn.me .ini{fill:var(--on-accent);font-size:20px}
+.tn.foglia .ini{font-size:12px}
+.tn .nm{fill:var(--ink);font:600 12.5px var(--body);text-anchor:middle;paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+.tn .rl{fill:var(--muted);font:500 10.5px var(--body);text-anchor:middle;paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+.tn.off .body{fill:var(--surface2);stroke-dasharray:3 3;stroke:var(--muted)}
+.tn.off .ini{fill:var(--muted)}
+.tn.sel .body,.tn:focus-visible .body{stroke:var(--accent)}
+.topo-card{position:absolute;right:var(--s3);bottom:var(--s3);width:min(280px,calc(100% - 2 * var(--s3)));background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m);padding:var(--s3) var(--s4);box-shadow:var(--shadow-float);font-size:.86rem}
+.topo-card b{display:block;font-size:.98rem}.topo-card small{color:var(--muted)}
+.topo-card p{margin:var(--s2) 0 0;color:var(--muted)}
+.topo-card ul{margin:var(--s2) 0 0;padding-left:1.1em;color:var(--muted)}
+.topo-card .ok{color:var(--sage);font-weight:600}.topo-card .err{color:var(--danger);font-weight:600}
+@media (max-width:860px){#topoSvg{height:360px}.topo-card{left:var(--s3);right:var(--s3);width:auto}}
+@media (prefers-reduced-motion:reduce){.te.canale,.tn .halo{animation:none}}
 /* federazione: la scheda del server, i due tasti d'ingresso e una scheda per collegamento con i passi del botta e risposta */
 .fedme{display:flex;flex-direction:column;gap:var(--s4)}
 .fedme-head,.fedcard-head{display:flex;align-items:center;gap:var(--s3)}
@@ -1098,6 +1157,7 @@ aside{view-transition-name:side}
 /* passaggio del puntatore solo dove c'è un puntatore vero: sul tocco resterebbe attaccato */
 @media (hover:hover) and (pointer:fine){
   nav a:hover{background:var(--surface2);color:var(--ink)}
+  .ngrp:hover{background:var(--surface2);color:var(--ink)}
   .ctx:hover,.btn:hover,.chip:hover{background:color-mix(in srgb,var(--surface2) 82%,var(--ink))}
   .btn.primary:hover{background:color-mix(in srgb,var(--accent) 88%,#fff)}
   .icon-btn:hover{background:var(--surface2);color:var(--ink)}
@@ -1292,6 +1352,7 @@ dialog.drawer .mi{min-height:52px}
 .pnow-row.paused .pav{opacity:.6}
 .ptrack{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s1);min-width:0}
 .ptrack .pic,dialog.sheet .pcard .pic{width:40px;height:40px;border-radius:4px;overflow:hidden;background:var(--surface2);flex:none}
+.ptrack .pic>svg{display:block;width:20px;height:20px;margin:10px;color:var(--muted)}
 .ptrack img,dialog.sheet .pcard img{width:100%;height:100%;object-fit:cover}
 .ptrack .grow,dialog.sheet .pcard .grow{flex:1;min-width:0}
 .ptrack b,.ptrack small,dialog.sheet .pcard b,dialog.sheet .pcard small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

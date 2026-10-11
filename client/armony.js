@@ -496,6 +496,39 @@ const NAV = [
   ['preferiti', 'Preferiti', 'heart'], ['jam', 'Jam', 'jam'], ['radio', 'Radio', 'radio'], ['amici', 'Amici', 'friends'], ['rete', 'Rete', 'globe'], ['offline', 'Offline', 'offline'], ['video', 'Video', 'film'],
   ['statistiche', 'Statistiche', 'stats'], ['scarica', 'Scarica', 'down'], ['impostazioni', 'Impostazioni', 'gear']
 ];
+// menu laterale del computer: Home, Cerca e Impostazioni fisse, il resto in gruppi che si aprono al clic (si ricordano
+// su questo dispositivo, e quello della pagina aperta si apre da sé). Il telefono usa la barra in basso (NAV, TABS_DEF)
+const NAV_GROUPS = [
+  [null, ['home', 'cerca']],
+  ['musica', 'La mia musica', 'lib', ['libreria', 'playlist', 'preferiti', 'offline', 'video']],
+  ['vicinato', 'Vicinato', 'friends', ['jam', 'amici', 'radio']],
+  ['rete', 'Rete', 'globe', ['rete', 'federazione']],
+  ['attivita', 'Attività', 'stats', ['statistiche', 'scarica']],
+  [null, ['impostazioni']]
+];
+// le voci che non sono sezioni: la Federazione è una scheda delle impostazioni (solo amministratori); la Rete nel gruppo è la mappa
+const NAV_EXTRA = { federazione: ['Federazione', 'globe', '#/impostazioni/librerie'] };
+const navKey = r => r === 'impostazioni' && /\/librerie$/.test(location.hash) ? 'federazione' : r;
+function paintNav() {
+  const ok = h => h === 'federazione' ? !!access().admin && netOk() : (h !== 'rete' || can('rete')) && (h !== 'video' || (S.dl.url && can('download')));
+  const item = (h, sub) => { const [l, i, href] = NAV_EXTRA[h] || [...NAV.find(n => n[0] === h).slice(1), '#/' + h];
+    return `<a href="${href}" data-r="${h}"${sub ? ' class="nitem"' : ''}>${ic(h === 'rete' && sub ? 'grid' : i)}<span class="lbl">${h === 'rete' && sub ? 'Mappa' : l}</span></a>`; };
+  const html = NAV_GROUPS.map(([g, l, i, hs]) => {
+    const vis = (hs || l).filter(ok); if (!vis.length) return '';
+    if (!g) return vis.map(h => item(h)).join('');
+    const open = !!store.get('navOpen', {})[g];
+    return `<button class="ngrp" type="button" data-g="${g}" aria-expanded="${open}" aria-controls="ng-${g}">${ic(i)}<span class="lbl">${l}</span>${ic('chevr')}</button>
+      <div class="nsub${open ? ' open' : ''}" id="ng-${g}"><div>${vis.map(h => item(h, true)).join('')}</div></div>`;
+  }).join('');
+  if ($('#nav').dataset.k === html) return;
+  $('#nav').dataset.k = html; $('#nav').innerHTML = html;
+}
+function navToggle(g, open) {
+  const b = $(`#nav .ngrp[data-g="${g}"]`); if (!b) return;
+  open ??= b.getAttribute('aria-expanded') !== 'true';
+  b.setAttribute('aria-expanded', open); b.nextElementSibling.classList.toggle('open', open);
+  store.set('navOpen', { ...store.get('navOpen', {}), [g]: open });
+}
 const view = $('#view');
 const ROUTE_PARENT = { mix: 'home', album: 'libreria', artista: 'libreria', 'album-dz': 'libreria', 'artista-dz': 'libreria', genere: 'libreria', decennio: 'libreria' };
 // su telefono: fino a quattro sezioni nella barra in basso (scelte in Impostazioni → Aspetto, o tenendo premuta la barra),
@@ -506,8 +539,11 @@ const inMore = h => h === 'tasti' || (NAV.some(n => n[0] === h) && !tabsOf().inc
 let viewTimers = [];
 const viewInterval = (fn, ms) => viewTimers.push(setInterval(fn, ms));
 function markNav(r) {
+  paintNav(); r = navKey(r);
   $$('#nav a, #tabs a').forEach(a => { const on = a.dataset.r === r || ROUTE_PARENT[r] === a.dataset.r; a.classList.toggle('on', on); on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'); });
   $('#tabMore')?.classList.toggle('on', inMore(ROUTE_PARENT[r] || r));
+  const g = $('#nav a.on.nitem')?.closest('.nsub')?.previousElementSibling;  // il gruppo della pagina aperta si apre
+  if (g && g.getAttribute('aria-expanded') !== 'true') navToggle(g.dataset.g, true);
 }
 async function route() {
   viewTimers.forEach(clearInterval); viewTimers = [];
@@ -1419,10 +1455,131 @@ async function vCollab(id) {
     const t = songs[+b.dataset.net]; if (!t.fed.off) setQueue(ok, ok.indexOf(t));
   });
 }
+/* ---- mappa dal vivo della rete (capacità "fedtopologia"): centri e foglie, collegamenti diretti e canali ----
+   SVG con una simulazione di forze fatta a mano (niente librerie): i server si respingono, i collegamenti fanno da
+   molle, tutto tende al centro. I canali scorrono dalla foglia verso il centro; un punto viaggia su ogni collegamento
+   che ha avuto un contatto negli ultimi secondi. Si rilegge ogni 5 s; le posizioni restano, i nuovi entrano piano. */
+const Topo = {
+  pos: new Map(), raf: 0, data: null, sel: null, drag: null, packets: [], last: 0,
+  ok: () => netOk() && !!dlSrv()?.me?.caps?.includes('fedtopologia'),
+  still: () => matchMedia('(prefers-reduced-motion: reduce)').matches,
+  async mount(box) {
+    box.innerHTML = `<div class="topo"><div class="topo-head"><div><b>Mappa dal vivo</b><span class="topo-sum" id="topoSum">Leggo la rete…</span></div>
+      <div class="topo-leg"><span><i class="lg-c"></i>centro</span><span><i class="lg-f"></i>foglia</span><span><i class="lg-d"></i>diretto</span><span><i class="lg-k"></i>canale</span></div></div>
+      <svg id="topoSvg" role="img" aria-label="Mappa della rete"><g class="te-g"></g><g class="tp-g"></g><g class="tn-g"></g></svg><div class="topo-card" id="topoCard" hidden></div></div>`;
+    const svg = $('#topoSvg');
+    svg.addEventListener('pointerdown', e => { const g = e.target.closest('.tn'); if (!g) { this.select(null); return; }
+      const p = this.pos.get(g.dataset.id); this.drag = { id: g.dataset.id, moved: false }; p.fx = p.x; p.fy = p.y; svg.setPointerCapture(e.pointerId); this.kick(); });
+    svg.addEventListener('pointermove', e => { if (!this.drag) return; const r = svg.getBoundingClientRect(), p = this.pos.get(this.drag.id);
+      p.fx = e.clientX - r.left; p.fy = e.clientY - r.top; this.drag.moved = true; this.kick(); });
+    svg.addEventListener('pointerup', () => { if (!this.drag) return; const d = this.drag, p = this.pos.get(d.id); this.drag = null;
+      if (!d.moved) { p.fx = p.fy = null; this.select(d.id); } this.kick(); });
+    new ResizeObserver(() => this.kick()).observe(svg);
+    await this.load();
+  },
+  async load() {
+    if (!$('#topoSvg')) return;
+    let d; try { d = await dlApi('/api/rete/topologia'); } catch { return; }
+    if (!$('#topoSvg')) return;
+    const svg = $('#topoSvg'), W = svg.clientWidth || 600, H = svg.clientHeight || 400;
+    for (const n of d.nodes) if (!this.pos.has(n.id)) {
+      const near = d.edges.find(e => (e.a === n.id && this.pos.has(e.b)) || (e.b === n.id && this.pos.has(e.a))), o = near && this.pos.get(near.a === n.id ? near.b : near.a);
+      this.pos.set(n.id, { x: (o?.x ?? W / 2) + (Math.random() - .5) * 80, y: (o?.y ?? H / 2) + (Math.random() - .5) * 80, vx: 0, vy: 0 });
+    }
+    for (const id of [...this.pos.keys()]) if (!d.nodes.some(n => n.id === id)) this.pos.delete(id);
+    // un punto su ogni collegamento con un contatto recente: il traffico che si vede
+    if (this.data && !this.still()) for (const e of d.edges) if (e.online && e.contatto && d.at - e.contatto < 12) {
+      const fwd = e.kind === 'canale' ? e.from === e.a : Math.random() < .5;
+      this.packets.push({ a: fwd ? e.a : e.b, b: fwd ? e.b : e.a, t: 0, k: e.kind });
+    }
+    this.data = d; this.paint(); this.summary(); if (this.sel) this.select(this.sel); this.kick();
+  },
+  kick() { this.heat = 1; if (!this.raf) this.raf = requestAnimationFrame(t => this.tick(t)); },
+  tick(t) {
+    this.raf = 0; const svg = $('#topoSvg'); if (!svg || !this.data) return;
+    const W = svg.clientWidth, H = svg.clientHeight, d = this.data, P = id => this.pos.get(id), R = n => n.me ? 30 : n.centro ? 24 : 16;
+    const steps = this.still() ? 120 : 1;
+    for (let s = 0; s < steps && this.heat > 0; s++) {
+      for (let i = 0; i < d.nodes.length; i++) for (let j = i + 1; j < d.nodes.length; j++) {
+        const a = P(d.nodes[i].id), b = P(d.nodes[j].id); let dx = b.x - a.x, dy = b.y - a.y, q = dx * dx + dy * dy || 1;
+        const f = 9000 / q, l = Math.sqrt(q); dx /= l; dy /= l; a.vx -= dx * f; a.vy -= dy * f; b.vx += dx * f; b.vy += dy * f;
+      }
+      for (const e of d.edges) {
+        const na = d.nodes.find(n => n.id === e.a), nb = d.nodes.find(n => n.id === e.b), a = P(e.a), b = P(e.b);
+        const want = Math.min(W, H) * (na?.centro && nb?.centro ? .42 : .3);
+        let dx = b.x - a.x, dy = b.y - a.y; const l = Math.hypot(dx, dy) || 1, f = (l - want) * .012; dx /= l; dy /= l;
+        a.vx += dx * f * l / 10; a.vy += dy * f * l / 10; b.vx -= dx * f * l / 10; b.vy -= dy * f * l / 10;
+      }
+      let k = 0;
+      for (const n of d.nodes) {
+        const p = P(n.id), r = R(n);
+        p.vx += (W / 2 - p.x) * .002; p.vy += (H / 2 - p.y) * .002;
+        if (p.fx != null) { p.x = p.fx; p.y = p.fy; p.vx = p.vy = 0; continue; }
+        p.vx *= .78; p.vy *= .78; p.x = Math.min(W - r - 8, Math.max(r + 8, p.x + p.vx)); p.y = Math.min(H - r - 30, Math.max(r + 8, p.y + p.vy));
+        k += p.vx * p.vx + p.vy * p.vy;
+      }
+      // sotto un decimo di pixel a fotogramma è fermo: la simulazione si spegne (niente lavoro per niente sul telefono)
+      this.heat = k / d.nodes.length < .01 ? 0 : Math.min(1, k / d.nodes.length);
+    }
+    this.place(t);
+    if (this.heat > 0 || this.packets.length || this.drag) this.raf = requestAnimationFrame(x => this.tick(x));
+  },
+  // posizioni nell'SVG (a ogni fotogramma): linee, nodi e punti in viaggio
+  place(t) {
+    const svg = $('#topoSvg'), P = id => this.pos.get(id), dt = this.last ? Math.min(64, t - this.last) : 16; this.last = t;
+    svg.querySelectorAll('.te').forEach(l => { const a = P(l.dataset.a), b = P(l.dataset.b); if (!a || !b) return;
+      l.setAttribute('x1', a.x); l.setAttribute('y1', a.y); l.setAttribute('x2', b.x); l.setAttribute('y2', b.y); });
+    svg.querySelectorAll('.tn').forEach(g => { const p = P(g.dataset.id); if (p) g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`); });
+    const pg = svg.querySelector('.tp-g');
+    this.packets = this.packets.filter(p => (p.t += dt / 1400) < 1 && P(p.a) && P(p.b));
+    pg.innerHTML = this.packets.map(p => { const a = P(p.a), b = P(p.b), e = p.t < .5 ? 2 * p.t * p.t : 1 - (-2 * p.t + 2) ** 2 / 2;
+      return `<circle class="tp ${p.k}" r="3.5" cx="${(a.x + (b.x - a.x) * e).toFixed(1)}" cy="${(a.y + (b.y - a.y) * e).toFixed(1)}" opacity="${Math.sin(Math.PI * p.t).toFixed(2)}"/>`; }).join('');
+  },
+  paint() {
+    const svg = $('#topoSvg'), d = this.data;
+    // stessa forma della rete: si aggiornano solo stati e scritte, senza ricreare i nodi (fuoco e selezione restano)
+    const sig = d.nodes.map(n => n.id + (n.centro ? 'c' : 'f') + (n.online ? 1 : 0)).join() + '|' + d.edges.map(e => e.a + e.b + e.kind + (e.online ? 1 : 0) + e.from).join();
+    if (svg.dataset.sig === sig) { this.place(performance.now()); return; }
+    svg.dataset.sig = sig;
+    // il tratteggio del canale scorre nel verso della linea: la si disegna dalla foglia che lo tiene aperto al centro
+    svg.querySelector('.te-g').innerHTML = d.edges.map(e => { const [a, b] = e.kind === 'canale' && e.from === e.b ? [e.b, e.a] : [e.a, e.b];
+      return `<line class="te ${e.kind}${e.online ? '' : ' off'}" data-a="${esc(a)}" data-b="${esc(b)}"/>`; }).join('');
+    svg.querySelector('.tn-g').innerHTML = d.nodes.map(n => { const r = n.me ? 30 : n.centro ? 24 : 16;
+      return `<g class="tn${n.me ? ' me' : ''}${n.centro ? ' centro' : ' foglia'}${n.online ? '' : ' off'}${this.sel === n.id ? ' sel' : ''}" data-id="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(n.name)}: ${n.centro ? 'centro' : 'foglia'}${n.online ? '' : ', non raggiungibile'}">
+        ${n.online ? `<circle class="halo" r="${r + 6}"/>` : ''}<circle class="body" r="${r}" style="--th:${tileColor(n.name || '?')}"/>${n.centro ? `<circle class="ring" r="${r + 3.5}"/>` : ''}
+        <text class="ini" dy=".35em">${n.me ? '⌂' : esc((n.name || '?').trim().charAt(0).toUpperCase())}</text>
+        <text class="nm" y="${r + 16}">${esc(n.name)}</text><text class="rl" y="${r + 29}">${n.me ? 'questo server · ' : ''}${n.centro ? 'centro' : 'foglia'}</text></g>`; }).join('');
+    svg.querySelectorAll('.tn').forEach(g => g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.select(g.dataset.id); } });
+    this.place(performance.now());
+  },
+  // maglia: centri collegati direttamente fra loro; stella: foglie attaccate a un centro con il loro canale
+  summary() {
+    const d = this.data, by = id => d.nodes.find(n => n.id === id), el = $('#topoSum'); if (!el) return;
+    const centri = d.nodes.filter(n => n.centro), mesh = d.edges.filter(e => e.kind === 'diretto' && by(e.a)?.centro && by(e.b)?.centro);
+    const stars = centri.filter(c => d.edges.some(e => e.kind === 'canale' && (e.a === c.id || e.b === c.id)));
+    const leaves = d.nodes.filter(n => !n.centro).length, meshN = new Set(mesh.flatMap(e => [e.a, e.b])).size;
+    el.textContent = d.nodes.length < 2 ? 'Solo questo server: collegane un altro in Impostazioni → Federazione'
+      : meshN && stars.length ? `Maglia fra ${meshN} centri, con ${leaves} ${leaves === 1 ? 'foglia' : 'foglie'} a stella`
+      : meshN ? `Maglia fra ${meshN} centri` : stars.length ? `Stella attorno a ${stars.map(c => c.name).join(' e ')}` : `${d.nodes.length} server collegati`;
+  },
+  select(id) {
+    this.sel = id; const card = $('#topoCard'); if (!card) return;
+    $$('#topoSvg .tn').forEach(g => g.classList.toggle('sel', g.dataset.id === id));
+    const n = id && this.data.nodes.find(x => x.id === id); if (!n) { card.hidden = true; return; }
+    const links = this.data.edges.filter(e => e.a === id || e.b === id), other = e => this.data.nodes.find(x => x.id === (e.a === id ? e.b : e.a))?.name || '…';
+    const last = Math.max(0, ...links.map(e => e.contatto || 0));
+    card.innerHTML = `<b>${esc(n.name)}</b>${n.owner ? `<small>di ${esc(n.owner)}</small>` : ''}
+      <p>${n.me ? 'Questo server, ' : ''}${n.centro ? 'centro: ha un indirizzo e gli altri lo raggiungono' : 'foglia: non si raggiunge da fuori, parla dal suo canale'}</p>
+      <p>${n.songs} brani · ${n.online ? `<span class="ok">in linea</span>` : '<span class="err">non raggiungibile</span>'}${last && !n.me ? ` · contatto ${fedAgo(last)}` : ''}</p>
+      ${links.length ? `<ul>${links.map(e => `<li>${e.kind === 'canale' ? 'canale' : 'diretto'} con ${esc(other(e))}${e.online ? '' : ' (spento)'}</li>`).join('')}</ul>` : ''}`;
+    card.hidden = false;
+  }
+};
 async function vRete() {
   if (!srv()) return noServer();
   const n = Scene.nav;
   view.innerHTML = `<h1>Rete</h1><p class="sub">Le librerie collegate a questo server e quelle degli amici degli amici. Da Cerca trovi i loro brani sotto "Nella rete": li ascolti subito e li copi nella tua libreria.</p><div id="netMap"><div class="sk-page">${SK.row.repeat(3)}</div></div>`;
+  if (Topo.ok()) { $('#netMap').insertAdjacentHTML('beforebegin', '<div id="topoBox"></div><h2>Librerie</h2>'); Topo.mount($('#topoBox')); viewInterval(() => document.hidden || Topo.load(), 5000); }
   if (!netOk()) { $('#netMap').innerHTML = '<div class="empty"><h3>Rete non disponibile</h3><p>Questo server non ha ancora le librerie collegate: serve una versione più nuova di Armony.</p></div>'; return; }
   const m = await dlApi('/api/rete/mappa');
   if (stale(n)) return;
@@ -2701,11 +2858,31 @@ async function friendsNow() {
     return arr((await api('getNowPlaying')).nowPlaying?.entry).filter(e => e.username !== s.user && (e.minutesAgo ?? 0) <= 10).map(e => ({ ...norm(e), username: e.username, minutesAgo: e.minutesAgo, player: e.playerName }));
   } catch { return []; }
 }
+// gli amici degli altri server (capacità "fedpresenza"): solo quelli che condividono l'attività, letti ogni 10 secondi
+const fedPresOk = () => netOk() && !!dlSrv()?.me?.caps?.includes('fedpresenza');
+async function fedPresPaint() {
+  const box = $('#presRete'); if (!box) return;
+  let r; try { r = await dlApi('/api/rete/presenza'); } catch { return; }
+  if (!box.isConnected) return;
+  const ppl = r.servers.flatMap(s => s.presenza.map(e => ({ ...e, srv: s }))), acts = r.servers.flatMap(s => s.attivita.map(a => ({ ...a, srv: s }))).sort((a, b) => b.at - a.at).slice(0, 12);
+  box._ppl = ppl;
+  const who = (e, s) => ({ user: e.user + '@' + s.node, name: e.name || e.user });
+  box.innerHTML = !r.servers.length ? '<p class="sub">Nessun server collegato condivide l\'attività dei suoi utenti. Lo attiva il loro amministratore in Impostazioni → Federazione.</p>'
+    : `<div class="pnow">${ppl.length ? ppl.map((e, i) => { const t = e.track || {};
+        return `<div class="pnow-row${e.playing ? '' : ' paused'}"><span class="pgo" style="cursor:default">${pavatar(who(e, e.srv), 'm')}<span class="grow"><b>${esc(e.name || e.user)}${peq(e.playing)}<small> · ${e.playing ? '' : 'in pausa · '}su ${esc(e.srv.name)}${e.radio ? ` · radio «${esc(e.radio)}»` : ''}</small></b>
+          <span class="ptrack"><span class="pic">${t.id && t.cover ? imgTag(`rete|${e.srv.node}|${t.id}`, 80, dlSrv()?.id) : ic('headphones')}</span><span class="grow"><b>${esc(t.title || '')}</b><small>${esc(t.artist || '')}${t.album ? ' · ' + esc(t.album) : ''}</small></span></span></span></span>
+          ${t.id ? `<button class="btn sm" data-rpres="${i}">${ic('headphones')} Ascolta</button>` : ''}</div>`; }).join('') : '<div class="empty">Nessuno sta ascoltando sugli altri server.</div>'}</div>
+      ${acts.length ? `<div class="pfeed">${acts.map(a => `<div class="pact">${pavatar(who(a, a.srv), 's')}<span class="grow"><span><b>${esc(a.name || a.user)}</b> ${esc(a.text)}</span><small>su ${esc(a.srv.name)} · ${ago(a.at * 1000)}</small></span></div>`).join('')}</div>` : ''}`;
+  box.onclick = e => { const b = e.target.closest('[data-rpres]'); if (!b) return;
+    const x = box._ppl[+b.dataset.rpres], t = x.track;
+    setQueue([netTrack({ ...t, id: t.id, path: [x.srv.node] }, { [x.srv.node]: { name: x.srv.name } })], 0); };
+}
 async function vFriends() {
   if (!srv()) return noServer();
   const n = Scene.nav, live = Presence.on();
   view.innerHTML = `<h1>Amici</h1><p class="sub">${live ? 'Chi ascolta cosa' : 'Chi sta ascoltando cosa'} su ${esc(srv().name)}, in tempo reale.</p>${live
     ? `<h2 class="pf-h">In ascolto ora</h2><div class="pnow" id="presNow" data-pres></div><h2>Attività</h2><div class="pfeed" id="presFeed" data-pres></div>` : '<div id="fl"></div>'}
+    ${fedPresOk() ? '<h2>Sugli altri server</h2><div id="presRete"></div>' : ''}
     <h2>Jam vicine</h2><div id="fj"><p class="sub">Cerco…</p></div>
     ${Amici.on() ? '<h2>Il vostro mix</h2><div id="fBlend"></div><h2>Ricevuti</h2><div id="fRic"></div>' : ''}`;
   if (Amici.on()) { Amici.blendBox($('#fBlend')); Amici.ricevuti($('#fRic'), n); }
@@ -2721,6 +2898,7 @@ async function vFriends() {
       : '<div class="empty">Nessun amico sta ascoltando in questo momento.</div>';
   };
   await paint(); if (stale(n)) return; viewInterval(paint, 15000);
+  if (fedPresOk()) { fedPresPaint(); viewInterval(fedPresPaint, 10000); }
   Jam.nearby().then(js => { const b = $('#fj'); if (b) b.innerHTML = js.length ? js.map(j => `<div class="list-item" data-act="jamknock" data-id="${esc(j.id)}" data-base="${esc(j.base || '')}"><span class="pic" style="display:grid;place-items:center">${ic('jam')}</span><span class="grow"><b>${esc(j.name)}</b><small>di ${esc(j.hostName || '?')}${j.server ? ', sul server ' + esc(j.server) : ''}</small></span><span class="btn sm">Chiedi di entrare</span></div>`).join('') : '<div class="empty">Nessuna Jam aperta sulla tua rete.</div>'; });
 }
 
@@ -4463,7 +4641,7 @@ document.addEventListener('contextmenu', e => {
   if (ghost) { const id = ghost.querySelector('[data-act="dzalbum"]')?.dataset.id; if (id) return menu([['album', 'Apri (non in libreria)', go('#/album-dz/' + encodeURIComponent(id))]]); }
   const nav = e.target.closest('#nav a[data-r], #tabs a[data-r]');
   if (nav) {
-    const h = '#/' + nav.dataset.r;
+    const h = nav.getAttribute('href');
     return menu([['chevr', 'Apri', go(h)], ['share', 'Apri in una nuova finestra', () => open(location.pathname + h, '_blank')],
       nav.closest('#tabs') ? ['sliders', 'Personalizza la barra', tabsEditor] : null].filter(Boolean));
   }
@@ -4968,6 +5146,7 @@ async function refreshFed() {
         <details class="fedopt"><summary>Visibilità e ricerca</summary>
           <label class="check"><input type="checkbox" id="fedTrans" ${f.settings.transitive ? 'checked' : ''}><span>Visibile agli amici degli amici<small>Chi è collegato a un tuo collegato trova e ascolta la tua libreria passando da lui. Spento: solo i server che colleghi tu.</small></span></label>
           <label class="check"><input type="checkbox" id="fedUtenti" ${f.settings.utenti ? 'checked' : ''}><span>Mostra i nomi degli utenti ai server collegati<small>Servono a chi vuole invitare i tuoi utenti a collaborare a una sua playlist. Solo i nomi, nient'altro.</small></span></label>
+          <label class="check"><input type="checkbox" id="fedAtt" ${f.settings.attivita ? 'checked' : ''}><span>Condividi l'attività con i server collegati<small>Nella loro pagina Amici si vede chi ascolta cosa qui e cosa fa. Chi ha scelto di non farsi vedere resta nascosto.</small></span></label>
           <label class="f">Dove cercare<select id="fedHops">${[1, 2, 3].map(h => `<option value="${h}" ${f.settings.hops === h ? 'selected' : ''}>${hopsTxt[h]}</option>`).join('')}</select></label></details></div>
       <div class="fedacts">
         <button class="fedtile primary" data-act="fedinv"><span class="fedav">${ic('plus')}</span><span><b>Invita un server</b><small>Crei un codice da mandare a chi vuoi collegare. Lo crea il server raggiungibile da fuori.</small></span></button>
@@ -4985,6 +5164,7 @@ async function refreshFed() {
     $('#fedTrans').onchange = e => save({ transitive: e.target.checked });
     $('#fedHops').onchange = e => save({ hops: +e.target.value });
     $('#fedUtenti').onchange = e => save({ utenti: e.target.checked });
+    $('#fedAtt').onchange = e => save({ attivita: e.target.checked });
   } else $('#fedHead').innerHTML = head;
   // ogni 5 secondi (15 con la pagina nascosta) si rilegge lo stato: chi aspetta una conferma la vede arrivare da sola.
   // Non mentre si usa il menu del verso: si chiuderebbe in mano
@@ -6449,7 +6629,8 @@ async function sidePlaylists() {
     <span class="pic">${p.songCount ? imgTag(p.coverArt, 80) : ic('list')}</span><span class="grow"><b>${esc(p.name)}</b><small>Playlist · ${esc(p.owner || srv()?.user || '')}</small></span></a>`).join('')}` : '';
 }
 async function boot() {
-  $('#nav').innerHTML = NAV.filter(([h]) => (h !== 'rete' || can('rete')) && (h !== 'video' || (S.dl.url && can('download')))).map(([h, l, i]) => `<a href="#/${h}" data-r="${h}">${ic(i)}<span class="lbl">${l}</span></a>`).join('');
+  paintNav();
+  $('#nav').addEventListener('click', e => { const b = e.target.closest('.ngrp'); if (b) navToggle(b.dataset.g); });
   Bus.addEventListener('playlists', sidePlaylists); sidePlaylists();
   paintTabs();
   $('#tabs').oncontextmenu = e => { if (matchMedia('(pointer:fine)').matches) return; e.preventDefault(); tabsEditor(); };  // tenere premuta la barra la personalizza (col mouse c'è il menu)
