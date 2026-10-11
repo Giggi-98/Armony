@@ -30,7 +30,8 @@ import android.widget.RemoteViews;
  * tocco apre l'app: la musica la suona la WebView, quindi avviare il solo servizio non suonerebbe nulla.
  *
  * Tre impaginazioni scelte dalle misure che il launcher comunica: larga (copertina a sinistra), alta
- * (copertina sopra, come One UI) e piccola (copertina accanto ai testi).
+ * (copertina sopra, come One UI) e piccola (copertina accanto ai testi). Il fondo prende il colore della copertina
+ * (w_bg tinto, sotto una sfumatura scura); il titolo lungo scorre.
  */
 public class ArmonyWidget extends AppWidgetProvider {
     /** Extra dell'apertura dell'app: porta il client su "In riproduzione" (MainActivity.onNewIntent). */
@@ -39,6 +40,7 @@ public class ArmonyWidget extends AppWidgetProvider {
     // 320 px bastano per il widget più grande e restano sotto il limite delle transazioni (~400 KB)
     private static final int ART_PX = 320;
     private static Bitmap artFrom, artSmall;
+    private static int artTint;
 
     @Override
     public void onUpdate(Context c, AppWidgetManager m, int[] ids) {
@@ -92,6 +94,7 @@ public class ArmonyWidget extends AppWidgetProvider {
             v.setTextViewText(R.id.w_title, c.getString(R.string.widget_idle));
             v.setTextViewText(R.id.w_artist, c.getString(R.string.widget_idle_sub));
             v.setImageViewResource(R.id.w_cover, R.drawable.widget_logo);
+            v.setInt(R.id.w_bg, "setColorFilter", c.getColor(R.color.widget_bg));
             v.setImageViewResource(R.id.w_toggle, R.drawable.widget_ic_play);
             v.setContentDescription(R.id.w_toggle, c.getString(R.string.widget_play));
             v.setOnClickPendingIntent(R.id.w_toggle, open(c, false));
@@ -106,6 +109,8 @@ public class ArmonyWidget extends AppWidgetProvider {
         Bitmap art = art();
         if (art != null) v.setImageViewBitmap(R.id.w_cover, art);
         else v.setImageViewResource(R.id.w_cover, R.drawable.widget_logo);
+        // il fondo prende il colore della copertina, come il lettore dell'app
+        v.setInt(R.id.w_bg, "setColorFilter", art != null ? artTint : c.getColor(R.color.widget_bg));
         v.setImageViewResource(R.id.w_toggle, playing ? R.drawable.widget_ic_pause : R.drawable.widget_ic_play);
         v.setContentDescription(R.id.w_toggle, c.getString(playing ? R.string.widget_pause : R.string.widget_play));
         v.setOnClickPendingIntent(R.id.w_prev, ArmonyMediaService.action(c, ArmonyMediaService.ACT_PREV));
@@ -135,8 +140,18 @@ public class ArmonyWidget extends AppWidgetProvider {
 
     private static Bitmap art() {
         Bitmap a = ArmonyMediaService.art;
-        if (a != artFrom) { artFrom = a; artSmall = a == null ? null : round(a); }
+        if (a != artFrom) { artFrom = a; artSmall = a == null ? null : round(a); artTint = a == null ? 0 : tint(a); }
         return artSmall;
+    }
+
+    /** Il colore medio della copertina, scurito e un po' meno saturo: fondo pieno ma con testi bianchi leggibili. */
+    private static int tint(Bitmap a) {
+        int px = Bitmap.createScaledBitmap(a, 1, 1, true).getPixel(0, 0);
+        float[] hsv = new float[3];
+        android.graphics.Color.colorToHSV(px, hsv);
+        hsv[1] = Math.min(hsv[1], 0.55f);
+        hsv[2] = Math.max(0.16f, Math.min(hsv[2] * 0.6f, 0.36f));
+        return android.graphics.Color.HSVToColor(hsv);
     }
 
     /** Quadrato centrale, ridotto a ART_PX e con gli angoli arrotondati (anche sugli Android senza ritaglio dei widget). */

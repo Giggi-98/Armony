@@ -4,7 +4,9 @@ Armony - radio da internet (capacità "webradio"): stazioni in diretta salvate s
   GET    /api/webradio               le stazioni salvate
   POST   /api/webradio               {name, url, favicon?, homepage?, tags?, country?} (permesso "radio")
   DELETE /api/webradio/<id>          chi l'ha aggiunta o un amministratore
-  GET    /api/webradio/cerca?q=      ricerca nel catalogo pubblico Radio Browser (radio-browser.info, senza chiavi)
+  GET    /api/webradio/cerca?q=&paese=  ricerca nel catalogo pubblico Radio Browser (radio-browser.info, senza chiavi);
+                                     con solo paese (codice ISO a 2 lettere) le più ascoltate di quella nazione
+  GET    /api/webradio/nazioni       le nazioni del catalogo con quante radio hanno (in memoria per un giorno)
   GET    /api/webradio/<id>/ascolta  la diretta, passando dal server (anche con ?k=: la usa <audio>)
 
 ─── PERCHÉ dal server ───
@@ -31,6 +33,8 @@ import db
 bp = Blueprint("webradio", __name__)
 A = None
 CATALOGO = "https://all.api.radio-browser.info/json/stations/search"
+NAZIONI = "https://all.api.radio-browser.info/json/countries"
+_nazioni = {"t": 0, "items": []}
 
 
 def pubblico(url):
@@ -125,11 +129,17 @@ def togli(sid):
 @bp.get("/api/webradio/cerca")
 def cerca():
     q = (request.args.get("q") or "").strip()[:100]
-    if len(q) < 2:
+    paese = (request.args.get("paese") or "").strip().upper()
+    paese = paese if len(paese) == 2 and paese.isalpha() else ""
+    if len(q) < 2 and not paese:
         return jsonify(items=[])
+    params = {"limit": 60 if paese and len(q) < 2 else 40, "hidebroken": "true", "order": "clickcount", "reverse": "true"}
+    if len(q) >= 2:
+        params["name"] = q
+    if paese:
+        params["countrycode"] = paese
     try:
-        r = A.http.get(CATALOGO, params={"name": q, "limit": 40, "hidebroken": "true", "order": "clickcount", "reverse": "true"},
-                       headers={"User-Agent": "Armony"}, timeout=10)
+        r = A.http.get(CATALOGO, params=params, headers={"User-Agent": "Armony"}, timeout=10)
         r.raise_for_status()
         out = [{"name": (x.get("name") or "").strip()[:80], "url": x.get("url_resolved") or x.get("url"), "favicon": x.get("favicon") or "",
                 "homepage": x.get("homepage") or "", "tags": (x.get("tags") or "")[:200], "country": x.get("country") or "",
@@ -141,6 +151,22 @@ def cerca():
     for x in out:
         x["saved"] = x["url"] in saved
     return jsonify(items=out)
+
+
+@bp.get("/api/webradio/nazioni")
+def nazioni():
+    if time.time() - _nazioni["t"] > 86400 or not _nazioni["items"]:
+        try:
+            r = A.http.get(NAZIONI, params={"hidebroken": "true"}, headers={"User-Agent": "Armony"}, timeout=10)
+            r.raise_for_status()
+            _nazioni["items"] = sorted(({"code": (x.get("iso_3166_1") or "").upper(), "name": x.get("name") or "", "n": x.get("stationcount") or 0}
+                                        for x in r.json() if len(x.get("iso_3166_1") or "") == 2 and (x.get("stationcount") or 0) > 0),
+                                       key=lambda x: -x["n"])
+            _nazioni["t"] = time.time()
+        except Exception as e:  # noqa: BLE001
+            if not _nazioni["items"]:
+                return jsonify(error=f"Il catalogo delle radio non risponde ({e.__class__.__name__})"), 502
+    return jsonify(items=_nazioni["items"])
 
 
 def hls(url, name):

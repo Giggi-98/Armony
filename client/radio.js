@@ -338,15 +338,15 @@ const WebRadio = {
   },
   toggle() { const a = this.el(); if (!this.cur) return; if (a.paused) { if (isPlaying() && !Live.remote()) ctlToggle(); a.play().catch(() => {}); } else a.pause(); },
   stop() { const a = this.audio; this.cur = null; if (a) { a.pause(); a.removeAttribute('src'); a.load(); } this.paint(); },
-  // il segnale in alto a destra: sintonizzati su una radio; toccandolo pausa, la pagina Radio o spegni
+  // il segnale in alto, a sinistra della campanella: sintonizzati su una radio (pulsa mentre suona); toccandolo pausa, la pagina Radio o spegni
   badge() {
     let b = $('#wrNow');
     if (!this.cur) { b?.remove(); return; }
-    if (!b) { b = document.createElement('button'); b.id = 'wrNow'; b.className = 'wrnow'; document.body.append(b);
+    if (!b) { b = document.createElement('button'); b.id = 'wrNow'; b.className = 'wrnow'; $('#hBell').before(b);
       b.onclick = () => { const r = b.getBoundingClientRect(); ctxMenuOrPick([r.left, r.bottom + 6], [
         [this.playing() ? 'pause' : 'play', this.playing() ? 'Pausa' : 'Riprendi', () => this.toggle()], ['radio', 'Apri Radio', () => location.hash = '#/radio'], ['close', 'Spegni la radio', () => this.stop()]], this.cur.name); }; }
     b.classList.toggle('on', this.playing());
-    b.innerHTML = `${ic('radio')}<span>${esc(this.cur.name)}</span>${this.playing() ? peq(true) : ''}`;
+    b.innerHTML = ic('radio'); b.title = this.cur.name;
     b.setAttribute('aria-label', `Radio: ${this.cur.name}${this.playing() ? ', in ascolto' : ', in pausa'}`);
   },
   logo: st => `<span class="wr-logo" style="--pav:${tileColor(st.name)}">${st.favicon ? `<img src="${esc(st.favicon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<b>${esc([...st.name][0] || '?')}</b></span>`,
@@ -363,9 +363,11 @@ const WebRadio = {
   // cerca nel catalogo o incolla l'indirizzo dello stream
   sheet() {
     const d = $('#dlg'); d.className = 'sheet addsongs'; let tok = 0, timer = null, found = [];
+    const paeseOk = !!dlSrv()?.me?.caps?.includes('webradio-paese'), paese = () => $('#wrC')?.value || '';
     d.innerHTML = `<div class="as-head"><span class="grow"><b>Aggiungi una radio</b><small>Resta pronta per tutti, in Radio</small></span><button class="icon-btn" id="wrX" aria-label="Chiudi">${ic('close')}</button></div>
-      <label class="ordq as-q">${ic('search')}<input type="search" id="wrQ" placeholder="Cerca fra migliaia di radio: nome, città…" aria-label="Cerca una radio" autocomplete="off" enterkeyhint="search"></label>
-      <div class="as-list" id="wrRes"><p class="sub as-none">Scrivi il nome di una radio: la cerco nel catalogo pubblico Radio Browser.</p></div>
+      <div class="wr-qrow"><label class="ordq">${ic('search')}<input type="search" id="wrQ" placeholder="Cerca una radio…" aria-label="Cerca una radio" autocomplete="off" enterkeyhint="search"></label>
+        ${paeseOk ? `<select id="wrC" aria-label="Nazione"><option value="">Tutte le nazioni</option></select>` : ''}</div>
+      <div class="as-list" id="wrRes"><p class="sub as-none">Scrivi il nome di una radio${paeseOk ? ' o scegli una nazione' : ''}: la cerco nel catalogo pubblico Radio Browser.</p></div>
       <details class="wr-man"><summary>${ic('link')} Ho l'indirizzo dello stream</summary>
         <div class="wr-form"><input type="text" id="wrN" placeholder="Nome della radio" maxlength="80"><input type="url" id="wrU" placeholder="https://…/stream.mp3 o .m3u, .pls" spellcheck="false" autocapitalize="none"><button class="btn primary" id="wrGo">Aggiungi</button></div></details>`;
     const add = async (x, b) => {
@@ -375,16 +377,28 @@ const WebRadio = {
     };
     const search = async q => {
       const n = ++tok; $('#wrRes').innerHTML = '<p class="sub as-none">Cerco…</p>';
-      let r; try { r = await dlApi('/api/webradio/cerca?q=' + encodeURIComponent(q)); } catch (e) { if (n === tok) $('#wrRes').innerHTML = `<p class="sub as-none">${esc(e.message)}</p>`; return; }
+      let r; try { r = await dlApi('/api/webradio/cerca?q=' + encodeURIComponent(q) + '&paese=' + paese()); } catch (e) { if (n === tok) $('#wrRes').innerHTML = `<p class="sub as-none">${esc(e.message)}</p>`; return; }
       if (n !== tok) return; found = r.items;
       $('#wrRes').innerHTML = found.length ? found.map((x, i) => `<div class="as-row">${this.logo(x)}<span class="grow"><b>${esc(x.name)}</b><small>${esc(this.sub(x))}</small></span>
-          <button class="btn sm${x.saved ? '' : ' primary'}" data-i="${i}" ${x.saved ? 'disabled' : ''}>${x.saved ? 'Già aggiunta' : 'Aggiungi'}</button></div>`).join('') : '<p class="sub as-none">Nessuna radio con questo nome.</p>';
+          <button class="btn sm${x.saved ? '' : ' primary'}" data-i="${i}" ${x.saved ? 'disabled' : ''}>${x.saved ? 'Già aggiunta' : 'Aggiungi'}</button></div>`).join('') : `<p class="sub as-none">Nessuna radio${q ? ' con questo nome' : ''}${paese() ? ' in questa nazione' : ''}.</p>`;
     };
-    $('#wrQ').oninput = e => { clearTimeout(timer); const q = e.target.value.trim(); if (q.length >= 2) timer = setTimeout(() => search(q), 350); };
+    const again = () => { const q = $('#wrQ').value.trim(); if (q.length >= 2 || paese()) search(q.length >= 2 ? q : ''); };
+    $('#wrQ').oninput = () => { clearTimeout(timer); timer = setTimeout(again, 350); };
+    // nazioni coi nomi in italiano, le più ricche di radio in cima; l'ultima scelta resta per la volta dopo
+    if (paeseOk) dlApi('/api/webradio/nazioni').then(r => {
+      const sel = $('#wrC'); if (!sel) return;
+      let dn = null; try { dn = new Intl.DisplayNames(['it'], { type: 'region' }); } catch {}
+      const it = r.items.map(x => ({ ...x, it: (() => { try { return dn?.of(x.code) || x.name; } catch { return x.name; } })() }));
+      const top = it.slice(0, 12), rest = it.slice(12).sort((a, b) => a.it.localeCompare(b.it, 'it'));
+      const opt = x => `<option value="${esc(x.code)}">${esc(x.it)} (${x.n})</option>`;
+      sel.insertAdjacentHTML('beforeend', `<optgroup label="Con più radio">${top.map(opt).join('')}</optgroup><optgroup label="Tutte">${rest.map(opt).join('')}</optgroup>`);
+      const last = store.get('wrPaese', ''); if (last && it.some(x => x.code === last)) { sel.value = last; again(); }
+    }).catch(() => $('#wrC')?.remove());
+    $('#wrC')?.addEventListener('change', e => { store.set('wrPaese', e.target.value); again(); });
     $('#wrRes').onclick = e => { const b = e.target.closest('[data-i]'); if (b) add(found[+b.dataset.i], b); };
     $('#wrGo').onclick = async () => { const name = $('#wrN').value.trim(), url = $('#wrU').value.trim(); if (!name || !url) return toast('Scrivi nome e indirizzo.'); if (await add({ name, url })) d.close(); };
     $('#wrX').onclick = () => d.close();
-    d.onclose = () => { d.className = ''; d.onclose = null; tok++; };
+    d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; tok++; };
     d.showModal(); if (matchMedia('(pointer:fine)').matches) $('#wrQ').focus();
   },
   menu(id, at) {

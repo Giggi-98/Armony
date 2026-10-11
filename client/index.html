@@ -1033,6 +1033,14 @@ aside{view-transition-name:side}
 ::view-transition-old(view){animation:vt-out 160ms ease-out both}
 ::view-transition-new(view){animation:vt-in var(--t-scene) var(--ease) both}
 ::view-transition-group(disc){animation-duration:var(--t-scene);animation-timing-function:var(--ease)}
+/* lettore ↔ testo: lo sfondo sfuma da un colore all'altro, la copertina vola, le righe salgono */
+:root.vt-lyr::view-transition-old(root){animation:vt-out var(--t-scene) ease both}
+:root.vt-lyr::view-transition-new(root){animation:vt-in var(--t-scene) ease both}
+::view-transition-group(cover){z-index:3;animation-duration:var(--t-scene);animation-timing-function:var(--ease)}
+::view-transition-old(cover),::view-transition-new(cover){height:100%;object-fit:cover}
+.lyrbig{animation:lyrup .5s var(--ease-out) .08s both}
+@keyframes lyrup{from{opacity:0;transform:translateY(28px)}}
+@media (prefers-reduced-motion:reduce){.lyrbig{animation:none}}
 @keyframes vt-out{to{opacity:0}}
 @keyframes vt-in{from{opacity:0}}
 
@@ -1084,21 +1092,25 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   :root[data-glow="album"] #glow{--gx:30%;--gy:10%}
   /* in alto: avatar (menu del profilo con le altre sezioni), marchio, lente e tema; la barra scorre via con la pagina */
   aside{position:relative;top:0;z-index:1;height:auto;flex-direction:row;align-items:center;padding:var(--s2) var(--s4);gap:var(--s3);border-right:0;border-bottom:0;overflow:visible;min-height:56px}
-  #hMe{position:relative;display:grid;place-items:center;width:40px;height:40px;margin-left:calc(-1 * var(--s1));padding:0;border:0;border-radius:50%;background:none;cursor:pointer;flex:none}
+  #hMe{position:relative;order:9;display:grid;place-items:center;width:40px;height:40px;margin-right:calc(-1 * var(--s1));padding:0;border:0;border-radius:50%;background:none;cursor:pointer;flex:none}
   #hMe .pav{--sz:32px}
   #hMe .pdot{top:2px;right:2px}
   .brand{font-size:1.15rem;padding:0;margin-right:auto}
   #nav,.ctx{display:none}
-  /* campanella nell'intestazione del telefono: a sinistra della lente (e del tema, sul web) */
-  #hBell{position:absolute;top:calc(var(--sat) + 6px);right:calc(var(--s4) - var(--s1));width:44px;height:44px;background:none;border:0;box-shadow:none;color:var(--ink)}
-  body:has(#themeBtn:not([hidden])) #hBell{right:calc(var(--s4) - var(--s1) + 44px)}
-  body:has(#hBell:not([hidden])) #hSearch{margin-right:40px}
-  body:has(#hBell:not([hidden])):has(#themeBtn:not([hidden])) #hSearch{margin-right:84px}
+  /* a destra, da destra verso sinistra: avatar (menu del profilo), tema (sul web), campanella, radio sintonizzata, lente.
+     Tema, campanella e radio stanno fuori da aside: ciascuno si sposta di 44 px per ognuno di quelli alla sua destra */
+  body:has(#wrNow){--nw:1}
+  #themeBtn{position:absolute;top:calc(var(--sat) + 6px);right:52px;width:44px;height:44px;background:none;border:0;box-shadow:none}
+  #hBell{position:absolute;top:calc(var(--sat) + 6px);right:calc(52px + 44px * var(--nt));width:44px;height:44px;background:none;border:0;box-shadow:none;color:var(--ink)}
   #hBell svg{width:22px;height:22px}
-  #hSearch{width:44px;height:44px;margin-right:calc(-1 * var(--s1));color:var(--ink)}
+  #hSearch{width:44px;height:44px;margin-right:max(0px,calc(44px * (var(--nt) + var(--nb) + var(--nw)) - var(--s3)));color:var(--ink)}
   #hSearch svg{width:22px;height:22px}
-  #themeBtn{position:absolute;top:calc(var(--sat) + 6px);right:calc(var(--s4) - var(--s1));width:44px;height:44px;background:none;border:0;box-shadow:none}
-  body:has(#themeBtn:not([hidden])) #hSearch{margin-right:40px}
+  /* intestazione trasparente sopra la pagina: la fascia colorata di album e playlist sale fin sotto il marchio e la
+     barra di stato, così fra intestazione e pagina non c'è uno stacco di colore */
+  aside{z-index:2;height:var(--hd);min-height:0}
+  :root{--hd:60px}
+  .phero{margin-top:calc(-1 * (var(--pad-t) + var(--hd) + var(--sat)));padding-top:calc(var(--sat) + var(--hd) + var(--hit) + var(--s4))}
+  .ph-back{top:calc(var(--sat) + var(--hd) + var(--s1))}
   /* il lettore in basso: una scheda (copertina, titolo, dispositivo, cuore, ▶) col colore della copertina e una linea
      d'avanzamento sul bordo inferiore; sotto le sezioni. Il resto dei comandi sta nel lettore a tutto schermo */
   .player{grid-template-columns:minmax(0,1fr) auto auto auto;grid-template-areas:"np dev star play" "ex ex ex ex" "tabs tabs tabs tabs";gap:0;padding:var(--s2) var(--s2) 0;align-content:end;min-height:0;background:var(--bg);border-top:0;box-shadow:none}
@@ -1180,16 +1192,18 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:.85em
   dialog.sheet::before{content:"";position:absolute;top:8px;left:50%;width:36px;height:4px;margin-left:-18px;border-radius:99px;background:var(--line)}
 }
 /* menu del profilo (telefono): un foglio da sinistra con le sezioni che non stanno nella barra in basso */
-dialog.drawer{margin:0 auto 0 0;height:100%;max-height:100%;width:min(86vw,340px);max-width:none;border:0;border-radius:0 var(--r-xl) var(--r-xl) 0;padding:calc(var(--sat) + var(--s5)) var(--s2) calc(var(--sab) + var(--s4));background:var(--surface);overflow-y:auto;position:fixed}
-dialog.drawer[open]{animation:drin .26s var(--ease-out)}
-@keyframes drin{from{transform:translateX(-100%)}}
+/* il menu del profilo entra da destra, sotto l'avatar che lo apre, ed esce dalla stessa parte */
+dialog.drawer{margin:0 0 0 auto;height:100%;max-height:100%;width:min(86vw,340px);max-width:none;border:0;border-radius:var(--r-xl) 0 0 var(--r-xl);padding:calc(var(--sat) + var(--s5)) var(--s2) calc(var(--sab) + var(--s4));background:var(--surface);overflow-y:auto;position:fixed;
+  opacity:1;transform:translateX(100%);transition:transform 280ms var(--ease-out),display 280ms allow-discrete,overlay 280ms allow-discrete}
+dialog.drawer[open]{transform:none}
+@starting-style{dialog.drawer[open]{transform:translateX(100%)}}
 dialog.drawer::backdrop{background:rgb(0 0 0 / .5)}
 dialog.drawer .dr-me{display:flex;align-items:center;gap:var(--s3);padding:0 var(--s3) var(--s4)}
 dialog.drawer .dr-me b{display:block;font-size:1.1rem}
 dialog.drawer .dr-me small,dialog.drawer .mi small{display:block;color:var(--muted);font-size:var(--fs-small);font-weight:500}
 :is(dialog.drawer,dialog.profpop) .dr-sep{height:1px;background:var(--line);margin:var(--s2) var(--s3)}
 dialog.drawer .mi{min-height:52px}
-@media (prefers-reduced-motion:reduce){dialog.drawer[open]{animation:none}}
+@media (prefers-reduced-motion:reduce){dialog.drawer{transform:none;opacity:0;transition:opacity 150ms ease,display 150ms allow-discrete,overlay 150ms allow-discrete}dialog.drawer[open]{opacity:1}@starting-style{dialog.drawer[open]{opacity:0}}}
 /* === P: presenza, chi ascolta cosa sul server (Presence in armony.js) === */
 .pav{--sz:32px;width:var(--sz);height:var(--sz);flex:none;border-radius:50%;display:inline-grid;place-items:center;background:var(--pav);color:#fff;font:700 calc(var(--sz) * .45)/1 var(--body)}
 .pav.xs{--sz:16px}.pav.s{--sz:24px}.pav.m{--sz:44px}.pav.l{--sz:56px}.pav.xl{--sz:88px}
@@ -1636,11 +1650,12 @@ dialog.profpop:not([open]){display:none}
   #bPlay svg{width:28px;height:28px}
   /* «In riproduzione»: tutto in una schermata, sfondo dal colore della copertina che sfuma al nero, testo bianco */
   :root[data-r="ora"]{overflow:hidden;overscroll-behavior:none}
-  :root[data-r="ora"] body{overflow:hidden;overscroll-behavior:none;background:linear-gradient(180deg,var(--np-bg,#33364e) 0%,color-mix(in srgb,var(--np-bg,#33364e) 40%,#0e0e12) 58%,#0e0e12 100%)}
+  /* la sfumatura non si ripete: sotto la pagina (barra dei gesti, tastiera che si chiude) continua il colore del fondo */
+  :root[data-r="ora"] body{overflow:hidden;overscroll-behavior:none;background:linear-gradient(180deg,var(--np-bg,#33364e) 0%,color-mix(in srgb,var(--np-bg,#33364e) 40%,#0e0e12) 58%,#0e0e12 100%) 0 0/100% 100dvh no-repeat #0e0e12}
   :root[data-r="ora"] #glow{display:none}
   :root[data-r="ora"] :is(main,.player){--ink:#fff;--muted:rgb(255 255 255 / .7);--accent-text:#fff;color:#fff}
   :root[data-r="ora"] .player{background:transparent}
-  :root[data-r="ora"] main{height:calc(100dvh - var(--player-h) - var(--sab));overflow:hidden;padding-bottom:0}
+  :root[data-r="ora"] main{height:calc(100dvh - var(--sat) - var(--player-m,calc(var(--player-h) + var(--sab))));overflow:hidden;padding-bottom:0}
   :root[data-r="ora"] .now{display:flex;flex-direction:column;align-items:stretch;height:100%;gap:0}
   :root[data-r="ora"] .now>.np-head{flex:none;margin-bottom:var(--s3)}
   :root[data-r="ora"] .now>div:nth-child(2){flex:1;min-height:0;display:flex;flex-direction:column}
@@ -1712,13 +1727,30 @@ dialog.addsongs:not([open]){display:none}
 @media (hover:hover) and (pointer:fine){.as-row:hover{background:var(--surface2)}}
 @media (max-width:860px){dialog.addsongs{height:88dvh;width:100%}}
 /* segnale «sintonizzato su una radio» (radio.js, WebRadio.badge): in alto a destra, a sinistra dei tasti */
-.wrnow{position:fixed;top:calc(var(--sat) + var(--s4));right:calc(var(--s5) + 148px);z-index:6;display:inline-flex;align-items:center;gap:6px;max-width:240px;height:40px;padding:0 var(--s3);border-radius:99px;border:1px solid var(--line);background:var(--surface);color:var(--ink);box-shadow:var(--shadow-float);font:600 .84rem var(--body);cursor:pointer;animation:pin .2s var(--ease-out)}
-.wrnow svg{width:18px;height:18px;flex:none;color:var(--muted)}
-.wrnow span:not(.peq){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wrnow.on{border-color:var(--accent)}
-.wrnow.on svg{color:var(--accent-text)}
-@media (max-width:860px){.wrnow{top:calc(var(--sat) + 60px);right:var(--s3);height:34px;max-width:62vw}}
-:root[data-r="ora"] .wrnow{display:none}
+/* titoli lunghi che scorrono (Marquee in armony.js): la copia segue l'originale a --mq-gap, il giro torna al punto di partenza */
+.mq{text-overflow:clip!important;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent)}
+.mq-in{display:inline-flex;gap:var(--mq-gap);vertical-align:top;animation:mq var(--mq-t) linear infinite}
+.mq-in>span{flex:none;white-space:nowrap}
+@keyframes mq{0%,25%{transform:translateX(0)}100%{transform:translateX(var(--mq))}}
+@media (prefers-reduced-motion:reduce){.mq-in{animation:none}}
+/* radio da internet sintonizzata: un'antenna che pulsa a sinistra della campanella (in pausa resta ferma) */
+body{--nt:0;--nb:0;--np:0;--nw:0}
+body:has(#themeBtn:not([hidden])){--nt:1}
+body:has(#hBell:not([hidden])){--nb:1}
+body:has(#hProf:not([hidden])){--np:1}
+.wrnow{position:fixed;top:calc(var(--sat) + var(--s4));right:calc(var(--s5) + 48px * (var(--nt) + var(--nb) + var(--np)));z-index:5;width:40px;height:40px;padding:0;display:grid;place-items:center;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--muted);box-shadow:var(--shadow-float);cursor:pointer}
+.wrnow svg{width:20px;height:20px;position:relative}
+.wrnow.on{color:var(--accent-text)}
+.wrnow.on::before,.wrnow.on::after{content:"";position:absolute;inset:-1px;border-radius:50%;border:2px solid var(--accent);opacity:0;animation:wrpulse 2.4s var(--ease-out) infinite;pointer-events:none}
+.wrnow.on::after{animation-delay:1.2s}
+@keyframes wrpulse{from{opacity:.7;transform:scale(1)}to{opacity:0;transform:scale(1.7)}}
+@media (prefers-reduced-motion:reduce){.wrnow.on::before{animation:none;opacity:.6}.wrnow.on::after{display:none}}
+@media (max-width:860px){
+  .wrnow{position:absolute;top:calc(var(--sat) + 6px);right:calc(52px + 44px * (var(--nt) + var(--nb)));width:44px;height:44px;border:0;background:none;box-shadow:none}
+  .wrnow svg{width:22px;height:22px}
+  .wrnow.on::before,.wrnow.on::after{inset:4px}
+}
+:root:is([data-r="ora"],[data-r="testo"]) .wrnow{display:none}
 /* coda dal lettore del telefono (QSheet) */
 dialog.qsheet{display:flex;flex-direction:column;padding:0;height:min(86dvh,760px);max-height:none}
 dialog.qsheet:not([open]){display:none}
@@ -1748,18 +1780,26 @@ dialog.qsheet:not([open]){display:none}
 .qs-tools button.on{color:var(--accent-text);background:var(--accent-soft)}
 .qs-tools button:active,.qs-row:active{opacity:.75}
 /* Radio da internet (radio.js, WebRadio) */
-.wrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--s2);margin-bottom:var(--s6)}
+.wrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr));gap:var(--s2);margin-bottom:var(--s6)}
 .wr-card{position:relative;display:flex;align-items:center;gap:var(--s3);padding:var(--s3);border-radius:var(--r-l);background:var(--surface);border:1px solid var(--line);cursor:pointer;touch-action:manipulation;transition:border-color .15s,background .15s}
 .wr-card.on{border-color:var(--accent);background:var(--accent-soft)}
 .wr-card .grow{flex:1;min-width:0}
-.wr-card b,.wr-card small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wr-card small{color:var(--muted);font-size:.84rem}
+/* nome e descrizione per intero: il nome va a capo se serve, la descrizione su due righe al massimo */
+.wr-card b{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;overflow-wrap:anywhere}
+.wr-card small{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;color:var(--muted);font-size:.84rem;line-height:1.4;margin-top:2px}
+.wr-card .wr-logo{width:56px;height:56px}
 .wr-logo{position:relative;width:48px;height:48px;flex:none;border-radius:var(--r-m);overflow:hidden;display:grid;place-items:center;background:var(--pav);color:#fff;font-weight:800}
 .wr-logo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#fff}
 .wr-play{width:36px;height:36px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:var(--on-accent)}
 .wr-play svg{width:16px;height:16px;margin-left:2px}
+/* senza contorno: a 16 px il tratto riempiva lo spazio fra le due barre della pausa (sembrava uno stop) */
+.wr-play svg,.wr-play svg *{stroke:none}
+.wr-card.on .wr-play svg{margin-left:0}
 .wr-more{flex:none;color:var(--muted)}
 .wr-card:active{transform:scale(.99)}
+.wr-qrow{display:flex;gap:var(--s2);align-items:center;margin:0 var(--s4) var(--s2)}
+.wr-qrow .ordq{flex:1 1 0;height:40px}
+.wr-qrow select{flex:0 1 auto;width:auto;max-width:44%;height:40px;padding-block:0;border:0;border-radius:99px;background-color:var(--surface2)}
 .wr-man{margin:0 var(--s4) var(--s4)}
 .wr-man summary{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--muted);font-weight:600;font-size:.9rem;list-style:none;padding:var(--s2) 0}
 .wr-man summary::-webkit-details-marker{display:none}

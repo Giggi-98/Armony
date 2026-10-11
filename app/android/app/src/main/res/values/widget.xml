@@ -4,9 +4,12 @@
     <color name="widget_bg">#1B1E36</color>
     <color name="widget_surface">#2A2E55</color>
     <color name="widget_ink">#F1ECE1</color>
-    <color name="widget_muted">#A0A5C8</color>
+    <color name="widget_muted">#BFF1ECE1</color>
     <color name="widget_accent">#F4A63C</color>
     <color name="widget_on_accent">#191C38</color>
+    <!-- il play: tondo chiaro con il simbolo scuro, come nel lettore dell'app sul telefono -->
+    <color name="widget_play">#F7F4EE</color>
+    <color name="widget_on_play">#121212</color>
     <!-- da Android 12 il raggio è quello del sistema (values-v31) -->
     <dimen name="widget_radius">24dp</dimen>
     <string name="widget_label">In riproduzione</string>

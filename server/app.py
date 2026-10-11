@@ -65,7 +65,7 @@ Armony - server di supporto.
   /api/profilo/avatar, /api/avatar/<utente>   foto profilo (amici.py, capacità "avatar"): solo a chi è collegato
   /api/amici/utenti, /api/collab, /api/manda, /api/blend, /api/password   fra amici (amici.py): playlist collaborative,
                         «Manda a un amico», il mix di due amici, cambio password. Capacità "amici"
-  /api/webradio         radio da internet salvate sul server, ricerca nel catalogo Radio Browser, ascolto passando dal
+  /api/webradio         radio da internet salvate sul server, ricerca nel catalogo Radio Browser (anche per nazione), ascolto passando dal
                         server (webradio.py; capacità "webradio")
   /api/notifiche        notifiche dell'utente (notifiche.py): elenco, non lette, segnate come lette, gettone e nuove
                         per l'app Android chiusa (/api/notifiche/nuove è pubblica: vale il gettone); arrivano anche sul
@@ -155,7 +155,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
 RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),

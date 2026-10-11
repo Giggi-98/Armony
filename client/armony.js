@@ -408,6 +408,26 @@ const Turntable = {
     el._raf = requestAnimationFrame(step);
   }
 };
+// titoli troppo lunghi: scorrono piano (30 px/s), si fermano all'inizio e ripartono, come su Spotify. Il testo è
+// doppio (la copia è inert e aria-hidden); a riposo, con "riduci movimento", resta il taglio coi puntini
+const Marquee = {
+  ro: new ResizeObserver(es => es.forEach(e => Marquee.fit(e.target))),
+  seen: new WeakSet(),
+  fit(el) {
+    if (!el?.isConnected) return;
+    if (!this.seen.has(el)) { this.seen.add(el); this.ro.observe(el); }
+    const w = el.querySelector(':scope>.mq-in');
+    if (w) { el.replaceChildren(...w.firstChild.childNodes); }
+    el.classList.remove('mq');
+    if (calm() || el.scrollWidth <= el.clientWidth + 1) return;
+    const gap = 48, d = el.scrollWidth + gap, a = document.createElement('span'), b = document.createElement('span');
+    a.append(...el.childNodes); b.append(...[...a.childNodes].map(n => n.cloneNode(true))); b.inert = true; b.setAttribute('aria-hidden', 'true');
+    const box = document.createElement('span'); box.className = 'mq-in'; box.append(a, b); el.append(box);
+    el.style.setProperty('--mq', -d + 'px'); el.style.setProperty('--mq-gap', gap + 'px');
+    el.style.setProperty('--mq-t', (d / 30 / .75).toFixed(1) + 's'); el.classList.add('mq');
+  },
+  all(root = document) { root.querySelectorAll('#npT,#npA,.now-title h1,.now-meta,.lyrhead b,.lyrhead small').forEach(el => this.fit(el)); }
+};
 // cambio di pagina con le View Transitions dove esistono: il contenuto si dissolve, e andando a
 // "In riproduzione" la copertina del lettore si espande nel disco grande (e torna indietro all'uscita)
 const Scene = {
@@ -416,15 +436,20 @@ const Scene = {
     if (!document.startViewTransition || from === null) return run();
     const morph = calm() || !currentTrack() ? null : to === 'ora' && from !== 'ora' ? 'in' : from === 'ora' && to !== 'ora' ? 'out' : null;
     const mini = $('#disc'), rec = () => $('#bigdisc .rec'), name = (el, n) => { if (el) el.style.viewTransitionName = n; };
+    // dal lettore al testo (il microfono) e ritorno: la copertina grande vola nel quadratino in alto e lo sfondo sfuma
+    const lyr = calm() ? null : from === 'ora' && to === 'testo' ? 'in' : from === 'testo' && to === 'ora' ? 'out' : null;
+    const big = () => $('.np-art img'), small = () => $('.lyrhead .pic img'), root = document.documentElement;
     if (morph === 'in') name(mini, 'disc'); else if (morph === 'out') name(rec(), 'disc');
+    if (lyr) { root.classList.add('vt-lyr'); name(lyr === 'in' ? big() : small(), 'cover'); }
     return new Promise((res, rej) => {
       const vt = document.startViewTransition(() => {
         run().then(res, rej);
         if (morph === 'in') { name(mini, ''); name(rec(), 'disc'); } else if (morph === 'out') name(mini, 'disc');
+        if (lyr) name(lyr === 'in' ? small() : big(), 'cover');
       });
       // una navigazione che ne interrompe un'altra rifiuta ready/finished: è normale, non è un errore
       vt.ready.catch(() => {});
-      vt.finished.catch(() => {}).finally(() => { name(mini, ''); name(rec(), ''); });
+      vt.finished.catch(() => {}).finally(() => { name(mini, ''); name(rec(), ''); name(big(), ''); name(small(), ''); root.classList.remove('vt-lyr'); });
     });
   }
 };
@@ -501,9 +526,11 @@ async function route() {
   const changed = location.hash !== Scene.hash, from = Scene.r, n = ++Scene.nav;
   if (changed && Scene.hash) Scene.back = Scene.r === 'ora' || Scene.r === 'testo' ? Scene.back : Scene.hash;  // dove torna la freccia del lettore
   Scene.hash = location.hash; Scene.r = r;
-  document.documentElement.dataset.r = r;  // il telefono cambia il lettore in basso su "In riproduzione" (index.html)
   const run = async () => {
     if (stale(n)) return;
+    // dentro il cambio di scena: messo prima, l'istantanea della pagina vecchia avrebbe già gli stili della nuova
+    // (il lettore a tutto schermo fotografato con quelli del testo: copertina sparita, disco grande fuori posto)
+    document.documentElement.dataset.r = r;  // il telefono cambia il lettore in basso su "In riproduzione" (index.html)
     if (typeof VPlayer !== 'undefined') VPlayer.dock();  // il video in corso esce dalla pagina vecchia e continua in piccolo (video.js; const di un altro script: non sta in window)
     delete view.dataset.pl; delete document.documentElement.dataset.login;  // la pagina d'accesso lo rimette (utenti.js)
     view.innerHTML = skeleton(r, id);
@@ -635,7 +662,7 @@ function lMore() {
     Object.entries(it.data || {}).forEach(([k, v]) => x.dataset[k] = v);
     view.append(x); x.click(); x.remove();
   });
-  d.onclose = () => { d.className = ''; d.onclose = null; };
+  d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; };
   closeOutside(d); d.showModal();
 }
 function lArtistCard(a) {
@@ -695,7 +722,7 @@ function ctxMenuOrPick(at, items, title) {
   const d = $('#dlg'); d.className = 'sheet';
   d.innerHTML = `${title ? `<div class="head"><b>${esc(title)}</b></div>` : ''}${items.map(([i, l], n) => `<button class="mi" data-n="${n}">${ic(i)}<span>${esc(l)}</span></button>`).join('')}`;
   d.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { d.close(); items[+b.dataset.n][2](); });
-  d.onclose = () => { d.className = ''; d.onclose = null; }; closeOutside(d); d.showModal();
+  d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; }; closeOutside(d); d.showModal();
 }
 // tempo reale: mentre una playlist o un album sono aperti, i brani nuovi entrano al loro posto e quelli tolti escono,
 // senza ridisegnare la pagina (ogni 20 s, e subito all'evento 'libreria' di Bus)
@@ -1437,7 +1464,7 @@ async function reorderPl(id) {
     try { await srvApi(srv(), '/api/playlist/ordina', { method: 'POST', body: JSON.stringify({ pid: id, ids }) }); d.close(); toast('Nuovo ordine salvato.'); route(); }
     catch (e) { $('#roOk').disabled = false; toast(/409/.test(e.message) ? 'La playlist è cambiata nel frattempo: riapri «Riordina».' : e.message); }
   };
-  d.onclose = () => { clearInterval(scroller); d.className = ''; d.onclose = null; };
+  d.onclose = () => { clearInterval(scroller); afterClose(d, () => d.className = ''); d.onclose = null; };
   d.showModal();
 }
 // "+" della Libreria, come Spotify: crea una playlist o importala
@@ -2465,6 +2492,7 @@ function updateNowPlaying() {
   $('#disc').innerHTML = t && t.coverArt && srv(t.serverId) ? `<img src="${esc(coverUrl(t.coverArt, 80, t.serverId))}" alt="" onerror="this.outerHTML='<div class=lbl></div>'">` : '<div class="lbl"></div>';
   // telecomando: sotto il titolo il dispositivo che suona (come la riga verde di Spotify)
   if (t && Live.remote()) { $('#npA').innerHTML = `<span class="ondev">${ic('speaker')}${esc(Live.devices.get(Live.target) || 'Altro dispositivo')}</span>`; }
+  Marquee.fit($('#npT')); Marquee.fit($('#npA'));
   // il mini lettore del telefono prende il colore della copertina
   const mu = t?.coverArt && srv(t.serverId) ? coverUrl(t.coverArt, 80, t.serverId) : '';
   Glow.colors(mu).then(c => { if (!sameTrack(currentTrack(), t)) return; $('#player').style.setProperty('--mini', c && Glow.usable(c) ? Glow.tone(c.c1, .6, c.neutral) : 'transparent'); });
@@ -2766,7 +2794,7 @@ async function vLyrics() {
       <span class="pic">${cover ? `<img src="${esc(cover)}" alt="">` : ic('album')}</span>
       <span class="grow"><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></span></div>
     <div class="lyrbig" id="lyrBig"><p class="lyrmsg">Cerco il testo…</p></div><div class="lyrfoot" id="lyrFoot"></div></div>`;
-  lyrTint($('#lyrPage'), t); lyrFit();
+  lyrTint($('#lyrPage'), t); lyrFit(); Marquee.all(view);
   const lyr = await Lyrics.get(t);
   const box = $('#lyrBig');
   if (!box || !sameTrack(currentTrack(), t)) return;
@@ -2826,7 +2854,9 @@ function lyrFit() {
   if (!matchMedia('(max-width:860px)').matches) { pg.style.height = ''; return; }
   pg.style.height = Math.max(240, $('#player').getBoundingClientRect().top - pg.getBoundingClientRect().top) + 'px';
 }
-new ResizeObserver(() => lyrFit()).observe($('#player'), { box: 'border-box' }); addEventListener('resize', lyrFit);
+// l'altezza vera del lettore (righe che vanno a capo, safe-area, caratteri grandi): "In riproduzione" sul telefono
+// misura il proprio spazio da qui, così titolo e copertina non finiscono mai sotto la barra di avanzamento
+new ResizeObserver(() => { document.documentElement.style.setProperty('--player-m', $('#player').offsetHeight + 'px'); lyrFit(); }).observe($('#player'), { box: 'border-box' }); addEventListener('resize', lyrFit);
 
 /* ================= in riproduzione: testi e visualizzatore ================= */
 async function vNow() {
@@ -2857,6 +2887,7 @@ async function vNow() {
     <div><div class="tabs">${[['lyr', 'Testi'], ['next', 'Prossimi'], ['info', 'Dettagli']].map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div><div id="nowPane"></div></div></div>`;
   view.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { sessionStorage.setItem('armony:nowtab', b.dataset.tab); vNow(); });
   $('#nowStar').onclick = () => toggleStar(currentTrack()); paintStar();
+  Marquee.all(view);
   Turntable.set($('#bigdisc .rec'), isPlaying(), true);  // il disco grande nasce già alla velocità del piccolo
   const pane = $('#nowPane');
   let lyr = null;
@@ -3790,7 +3821,7 @@ async function addSongsSheet(pid, name) {
       d.close(); toast(ids.length === 1 ? 'Brano aggiunto.' : `${ids.length} brani aggiunti.`); emitSoon('playlists'); route();
     } catch (e) { $('#asGo').disabled = false; toast(e.message); }
   };
-  d.onclose = () => { d.className = ''; d.onclose = null; tok++; };
+  d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; tok++; };
   d.showModal(); sugg();
   if (matchMedia('(pointer:fine)').matches) $('#asQ').focus();
 }
@@ -4003,7 +4034,7 @@ const NotifPop = {
     const d = $('#dlg'); if (d.open && d.classList.contains('notifpop')) return d.close();
     d.className = 'notifpop'; d.setAttribute('aria-label', 'Notifiche');
     const r = $('#hBell').getBoundingClientRect(); d.style.top = Math.round(r.bottom + 8) + 'px'; d.style.right = Math.max(8, Math.round(innerWidth - r.right - 8)) + 'px';
-    this.paint(); closeOutside(d); d.addEventListener('close', () => { d.style.top = d.style.right = ''; $('#hBell').setAttribute('aria-expanded', 'false'); }, { once: true });
+    this.paint(); closeOutside(d); d.addEventListener('close', () => { afterClose(d, () => d.style.top = d.style.right = ''); $('#hBell').setAttribute('aria-expanded', 'false'); }, { once: true });
     d.showModal(); $('#hBell').setAttribute('aria-expanded', 'true');
     Notif.load();  // le ultime dal server: il riquadro si ridisegna da sé (Notif.views)
   },
@@ -4204,7 +4235,7 @@ function coverPicker(s, ids, album, q) {
     toast('Copertina cambiata. La libreria si aggiorna tra poco.');
     updateNowPlaying(); setTimeout(() => { coverBust = Date.now(); route(); updateNowPlaying(); }, 4000);
   };
-  d.onclose = () => { d.className = ''; d.onclose = null; };
+  d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; };
   closeOutside(d); d.showModal(); if (q) search();
 }
 function songMenu(t, ctx = {}) {
@@ -4251,7 +4282,7 @@ function songMenu(t, ctx = {}) {
   d.innerHTML = `<div class="head"><span class="pic">${imgTag(t.coverArt, 100, t.serverId)}</span><span style="min-width:0"><b style="display:block">${esc(t.title)}</b><small style="color:var(--muted)">${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}${t.fed ? '<br>' + netSrc(t.fed) : ''}</small></span></div>
     ${items.map(([i, l, , cls], n) => `<button class="mi${cls ? ' ' + cls : ''}" data-n="${n}">${ic(i)}${esc(l)}</button>`).join('')}`;
   d.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { d.close(); items[+b.dataset.n][2](); });
-  d.onclose = () => { d.className = ''; d.onclose = null; };
+  d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; };
   d.showModal();
 }
 
@@ -4712,7 +4743,7 @@ async function scanQR() {
   const stop = () => { done = true; clearTimeout(timer); stream?.getTracks().forEach(t => t.stop()); };
   return new Promise(async res => {
     const end = v => { if (done) return; stop(); d.close(); res(v); };
-    d.onclose = () => { d.className = ''; d.onclose = null; stop(); res(null); };
+    d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; stop(); res(null); };
     $('#qrStop').onclick = () => end(null);
     d.showModal();
     try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
@@ -5001,10 +5032,19 @@ function fillSelectors() {
 }
 function setQuality(q) { P.quality = q; savePrefs(); fillSelectors(); toast(`Qualità: ${QUALITIES[q].label}. Vale dal prossimo brano.`); }
 // server in uso e qualità: dalla riga in fondo alla barra laterale (in alto su telefono)
+// la classe (foglio, menu, popover) si toglie a chiusura finita: tolta subito, il dialog che sta ancora sparendo
+// cambierebbe forma per un istante (icone giganti, contenuto rimescolato). Se nel frattempo si riapre, resta com'è
+// un menu che ne apre un altro sullo stesso dialog (d.close(); eqDialog()) riceve l'evento "close" quando è già
+// riaperto: arriverebbe al gestore del dialog nuovo, che gli toglierebbe la classe (menu con icone giganti) e lo
+// spegnerebbe (l'equalizzatore non rispondeva). Un dialog di nuovo aperto quell'evento non lo vede
+document.addEventListener('close', e => { if (e.target instanceof HTMLDialogElement && e.target.open) e.stopImmediatePropagation(); }, true);
+function afterClose(d, f) { const c = d.className; setTimeout(() => { if (!d.open && d.className === c) f(); }, 320); }
 // i fogli di navigazione si chiudono anche toccando fuori (su telefono non c'è Esc)
 function closeOutside(d) {
-  d.onclick = e => { const r = d.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close(); };
-  d.onclose = () => { d.className = ''; d.onclose = null; d.onclick = null; };
+  // solo un tocco sullo sfondo (il bersaglio è il dialog stesso): un pulsante che apre un altro dialog più piccolo
+  // finirebbe "fuori" dal nuovo e lo chiuderebbe subito (era l'equalizzatore dal menu del lettore)
+  d.onclick = e => { if (e.target !== d) return; const r = d.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close(); };
+  d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; d.onclick = null; };
 }
 function ctxDialog() {
   const d = $('#dlg'); d.className = 'sheet';
@@ -5113,7 +5153,7 @@ function qualityDialog() {
   const d = $('#dlg'); d.className = 'sheet';
   d.innerHTML = `<div class="head"><b>Qualità di ascolto</b></div>${Object.entries(QUALITIES).map(([k, q]) => `<button class="mi" data-q="${k}">${k === P.quality ? ic('heart', true) : ic('album')}${q.label}</button>`).join('')}`;
   d.querySelectorAll('[data-q]').forEach(el => el.onclick = () => { setQuality(el.dataset.q); d.close(); });
-  d.onclose = () => { d.className = ''; d.onclose = null; }; d.showModal();
+  d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; }; d.showModal();
 }
 function eqDialog() {
   Engine.graph();
@@ -5145,13 +5185,13 @@ function eqDialog() {
     savePrefs(); Engine.applyEq(); paint();
   };
   $('#eqReset').onclick = () => { P.eqAuto = false; P.eq = Array(10).fill(0); savePrefs(); Engine.applyEq(); paint(); };
-  d.onclose = () => { d.className = ''; d.onclose = null; AutoEq.onpaint = null; }; d.showModal();
+  d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; AutoEq.onpaint = null; }; d.showModal();
 }
 function speedDialog() {
   const d = $('#dlg'); d.className = 'sheet';
   d.innerHTML = `<div class="head"><b>Velocità di riproduzione</b></div>${[0.75, 0.9, 1, 1.1, 1.25, 1.5, 2].map(v => `<button class="mi" data-v="${v}">${v === P.speed ? ic('heart', true) : ic('speed')}${String(v).replace('.', ',')}×${v === 1 ? ' (normale)' : ''}</button>`).join('')}`;
   d.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { P.speed = +b.dataset.v; savePrefs(); Engine.decks.forEach(a => a.playbackRate = P.speed); d.close(); if (location.hash.startsWith('#/ora')) vNow(); });
-  d.onclose = () => { d.className = ''; d.onclose = null; }; d.showModal();
+  d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; }; d.showModal();
 }
 
 /* ================= azioni (delegazione eventi) ================= */
@@ -5216,7 +5256,7 @@ view.addEventListener('click', async e => {
       case 'bio': {
         const d = $('#dlg2'); d.className = 'bio';
         d.innerHTML = `<h3>${esc(S.bio?.name || '')}</h3><p class="biotxt">${esc(S.bio?.text || '')}</p><div class="row"><button class="btn" onclick="this.closest('dialog').close()">Chiudi</button></div>`;
-        d.onclose = () => { d.className = ''; d.onclose = null; }; closeOutside(d); d.showModal(); break;
+        d.onclose = () => { afterClose(d, () => d.className = ''); d.onclose = null; }; closeOutside(d); d.showModal(); break;
       }
       case 'qremote': if (Live.remote()) Live.cmd('skipto', i); break;
       case 'artist': location.hash = '#/artista/' + encodeURIComponent(id); break;

@@ -27,6 +27,22 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Telefono: avatar a destra, intestazione trasparente, dialog che non cambiano forma chiudendosi
+**Contesto:** sul telefono l'avatar (menu del profilo) stava a sinistra del marchio, come Spotify; sulle pagine con la
+fascia colorata (album, playlist) l'intestazione restava del colore del fondo, con uno stacco netto. Un menu che ne
+apriva un altro sullo stesso dialog (⋯ → Velocità, Equalizzatore) riceveva in ritardo l'evento "close" del primo:
+il gestore nuovo gli toglieva la classe (icone giganti) o lo spegneva (l'equalizzatore non partiva), e un tocco sul
+menu vecchio "cadeva fuori" dal dialog nuovo e lo chiudeva.
+**Scelta:** marchio a sinistra e avatar a destra (il menu entra da destra); intestazione trasparente con la fascia
+colorata che le passa sotto. Un "close" arrivato a un dialog di nuovo aperto si ferma (ascoltatore in cattura su
+document); la classe si toglie a dissolvenza finita; si chiude toccando fuori solo se il bersaglio è lo sfondo.
+`data-r` si imposta dentro il cambio di scena, così l'istantanea della pagina vecchia ha ancora i suoi stili.
+**Alternative scartate:** l'avatar a sinistra come Spotify (chiesto esplicitamente il contrario: il marchio al suo
+posto); un dialog separato per ogni menu (tanti elementi in più per un problema di tempi).
+**Conseguenze:** a destra possono stare fino a cinque icone (lente, radio, campanella, tema sul web, avatar): ognuna
+si sposta di 44 px per quelle visibili alla sua destra (variabili --nt/--nb/--nw in index.html).
+**Da rivedere se:** si aggiunge un'altra icona fissa in alto sul telefono: a 360 px di larghezza non ci sta più.
+
 ## 2026-10-11 — Radio da internet fuori dal lettore; HLS con ffmpeg
 
 **Contesto:** con la radio dentro la coda, avviarla cancellava brano, coda e posizione della musica; RTL 102.5 non partiva (flusso principale in HLS, escluso; quelli Shoutcast da questa rete non rispondono).
