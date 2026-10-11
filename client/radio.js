@@ -311,21 +311,52 @@ document.addEventListener('click', e => {
 
 /* ---------------- radio da internet (server/webradio.py, capacità "webradio") ----------------
    Stazioni in diretta salvate sul server e pronte per tutti: si cercano nel catalogo Radio Browser o si incolla
-   l'indirizzo dello stream. Si ascoltano come un brano della coda (t.web), con la diretta che passa dal server */
+   l'indirizzo dello stream. Suonano su un audio tutto loro, fuori dal lettore: brano, coda e posizione della musica
+   restano dov'erano (in pausa). In alto a destra un segnale dice che questo dispositivo è sintonizzato; la musica che
+   riparte spegne la radio, la radio che parte ferma la musica */
 const WebRadio = {
   items: [],
   ok() { return !!dlSrv()?.session && !!dlSrv()?.me?.caps?.includes('webradio'); },
   async load() { try { this.items = (await dlApi('/api/webradio')).items; } catch { this.items = []; } this.paint(); },
   sub: st => [st.country, (st.tags || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 2).join(', '), st.bitrate ? `${st.codec || ''} ${st.bitrate} kbps`.trim() : st.codec].filter(Boolean).join(' · '),
-  track(st) { return { id: 'web:' + st.id, web: st.id, title: st.name, artist: this.sub(st) || 'Radio da internet', album: 'Radio da internet', duration: 0, serverId: dlSrv().id }; },
-  async play(st) { if (Radio.st) await Radio.leave(true); setQueue([this.track(st)], 0); },
+  audio: null, cur: null,
+  el() {
+    if (this.audio) return this.audio;
+    const a = this.audio = new Audio(); a.preload = 'none';
+    ['playing', 'pause', 'waiting'].forEach(ev => a.addEventListener(ev, () => this.paint()));
+    a.addEventListener('error', () => { if (this.cur && a.getAttribute('src')) { toast(`«${this.cur.name}» non risponde.`); this.stop(); } });
+    return a;
+  },
+  playing() { return !!this.cur && !!this.audio && !this.audio.paused; },
+  async play(st) {
+    if (Radio.st) await Radio.leave(true);
+    if (isPlaying() && !Live.remote()) ctlToggle();  // la musica si ferma e resta lì, con la sua posizione
+    const a = this.el(); this.cur = st;
+    a.src = `${S.dl.url.replace(/\/+$/, '')}/api/webradio/${encodeURIComponent(st.id)}/ascolta?${authQ(dlSrv(), S.dl.token)}`;
+    a.volume = Engine.el.volume; a.play().catch(e => { if (e.name !== 'AbortError') toast('Tocca di nuovo la radio per farla partire.'); });
+    this.paint();
+  },
+  toggle() { const a = this.el(); if (!this.cur) return; if (a.paused) { if (isPlaying() && !Live.remote()) ctlToggle(); a.play().catch(() => {}); } else a.pause(); },
+  stop() { const a = this.audio; this.cur = null; if (a) { a.pause(); a.removeAttribute('src'); a.load(); } this.paint(); },
+  // il segnale in alto a destra: sintonizzati su una radio; toccandolo pausa, la pagina Radio o spegni
+  badge() {
+    let b = $('#wrNow');
+    if (!this.cur) { b?.remove(); return; }
+    if (!b) { b = document.createElement('button'); b.id = 'wrNow'; b.className = 'wrnow'; document.body.append(b);
+      b.onclick = () => { const r = b.getBoundingClientRect(); ctxMenuOrPick([r.left, r.bottom + 6], [
+        [this.playing() ? 'pause' : 'play', this.playing() ? 'Pausa' : 'Riprendi', () => this.toggle()], ['radio', 'Apri Radio', () => location.hash = '#/radio'], ['close', 'Spegni la radio', () => this.stop()]], this.cur.name); }; }
+    b.classList.toggle('on', this.playing());
+    b.innerHTML = `${ic('radio')}<span>${esc(this.cur.name)}</span>${this.playing() ? peq(true) : ''}`;
+    b.setAttribute('aria-label', `Radio: ${this.cur.name}${this.playing() ? ', in ascolto' : ', in pausa'}`);
+  },
   logo: st => `<span class="wr-logo" style="--pav:${tileColor(st.name)}">${st.favicon ? `<img src="${esc(st.favicon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<b>${esc([...st.name][0] || '?')}</b></span>`,
   paint() {
+    this.badge();
     const box = $('#wrList'); if (!box) return;
-    const now = currentTrack()?.web, on = isPlaying();
+    const now = this.cur?.id, on = this.playing();
     box.innerHTML = this.items.length ? this.items.map(st => `<div class="wr-card${now === st.id ? ' on' : ''}" data-wr="${esc(st.id)}" role="button" tabindex="0" aria-label="Ascolta ${esc(st.name)}">
         ${this.logo(st)}<span class="grow"><b>${esc(st.name)}</b><small>${esc(this.sub(st) || 'In diretta')}</small></span>
-        <span class="wr-play" aria-hidden="true">${now === st.id && on ? ic('pause', true) : ic('play', true)}</span>
+        <span class="wr-play" aria-hidden="true">${now === st.id && on ? ic('pause') : ic('play', true)}</span>
         ${can('radio') ? `<button class="icon-btn wr-more" data-wrmore="${esc(st.id)}" aria-label="Altro">${ic('more')}</button>` : ''}</div>`).join('')
       : `<p class="rempty">Nessuna radio da internet${can('radio') ? ': aggiungine una, resterà pronta per tutti.' : '.'}</p>`;
   },
@@ -367,9 +398,11 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-wradd]')) return WebRadio.sheet();
   const c = e.target.closest('[data-wr]'); if (!c) return;
   const st = WebRadio.items.find(x => x.id === c.dataset.wr); if (!st) return;
-  currentTrack()?.web === st.id ? ctlToggle() : WebRadio.play(st);
+  WebRadio.cur?.id === st.id ? WebRadio.toggle() : WebRadio.play(st);
 });
-Bus.addEventListener('play', () => WebRadio.paint()); Bus.addEventListener('track', () => WebRadio.paint());
+// la musica riparte: la radio si spegne (un solo suono alla volta); il volume del lettore vale anche per la radio
+Bus.addEventListener('play', () => { if (WebRadio.playing() && isPlaying()) WebRadio.stop(); });
+document.addEventListener('input', e => { if (e.target.id === 'vol' && WebRadio.audio) WebRadio.audio.volume = Engine.el.volume; });
 
 async function vRadio() {
   if (!srv()) return noServer();

@@ -1711,6 +1711,14 @@ dialog.addsongs:not([open]){display:none}
 .as-foot{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4) calc(var(--s3) + var(--sab));border-top:1px solid var(--line);font-weight:600}
 @media (hover:hover) and (pointer:fine){.as-row:hover{background:var(--surface2)}}
 @media (max-width:860px){dialog.addsongs{height:88dvh;width:100%}}
+/* segnale «sintonizzato su una radio» (radio.js, WebRadio.badge): in alto a destra, a sinistra dei tasti */
+.wrnow{position:fixed;top:calc(var(--sat) + var(--s4));right:calc(var(--s5) + 148px);z-index:6;display:inline-flex;align-items:center;gap:6px;max-width:240px;height:40px;padding:0 var(--s3);border-radius:99px;border:1px solid var(--line);background:var(--surface);color:var(--ink);box-shadow:var(--shadow-float);font:600 .84rem var(--body);cursor:pointer;animation:pin .2s var(--ease-out)}
+.wrnow svg{width:18px;height:18px;flex:none;color:var(--muted)}
+.wrnow span:not(.peq){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wrnow.on{border-color:var(--accent)}
+.wrnow.on svg{color:var(--accent-text)}
+@media (max-width:860px){.wrnow{top:calc(var(--sat) + 60px);right:var(--s3);height:34px;max-width:62vw}}
+:root[data-r="ora"] .wrnow{display:none}
 /* coda dal lettore del telefono (QSheet) */
 dialog.qsheet{display:flex;flex-direction:column;padding:0;height:min(86dvh,760px);max-height:none}
 dialog.qsheet:not([open]){display:none}

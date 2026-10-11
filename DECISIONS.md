@@ -27,6 +27,14 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-11 — Radio da internet fuori dal lettore; HLS con ffmpeg
+
+**Contesto:** con la radio dentro la coda, avviarla cancellava brano, coda e posizione della musica; RTL 102.5 non partiva (flusso principale in HLS, escluso; quelli Shoutcast da questa rete non rispondono).
+**Scelta:** WebRadio ha un `<audio>` suo: avviarla mette in pausa la musica senza toccarla, un segnale in alto a destra dice su che radio si è sintonizzati, la musica che riparte spegne la radio. Il server accetta anche HLS: ffmpeg legge la playlist (controllata prima: pubblica, davvero HLS) e passa un flusso AAC continuo senza ricodificare; ffmpeg si chiude quando l'ascolto finisce.
+**Alternative scartate:** lasciare la radio nella coda come brano finto (cancella ciò che si stava ascoltando); hls.js nel client (una libreria in più e i pezzi da far passare dal server uno per uno); ricodificare tutto in MP3 (CPU per ascoltatore senza motivo).
+**Conseguenze:** i pezzi HLS li scarica ffmpeg, che non ripete il controllo sugli indirizzi pubblici per ogni pezzo (stanno di solito sullo stesso servizio della playlist); le radio non compaiono sugli altri dispositivi né nel telecomando. Nell'app Android la radio non ha i comandi nella notifica.
+**Da rivedere se:** la radio deve continuare a schermo spento sull'app con i comandi di sistema.
+
 ## 2026-10-11 — Radio da internet: salvate sul server, ascoltate passando dal server, solo indirizzi pubblici
 
 **Contesto:** l'utente vuole aggiungere radio esterne e lasciarle pronte nella pagina Radio.

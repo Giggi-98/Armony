@@ -9,7 +9,8 @@ Armony - radio da internet (capacità "webradio"): stazioni in diretta salvate s
 
 ─── PERCHÉ dal server ───
 Molte radio trasmettono in http: da Armony in https il browser le bloccherebbe, e senza CORS il grafico dell'audio
-(equalizzatore, visualizzatore) resterebbe muto. Il server apre la diretta e la passa così com'è.
+(equalizzatore, visualizzatore) resterebbe muto. Il server apre la diretta e la passa così com'è; quelle in HLS (.m3u8,
+come RTL 102.5 o Radio Deejay) le legge ffmpeg e le passa come flusso AAC continuo, senza ricodificare.
 
 ─── PERCHÉ i controlli sugli indirizzi ───
 L'indirizzo lo scrive un utente: il server non deve diventare una porta verso sé stesso o la rete di casa (Navidrome su
@@ -18,6 +19,7 @@ a mano, al più 4), così anche un nome che cambia indirizzo dopo il salvataggio
 """
 import ipaddress
 import socket
+import subprocess
 import time
 import urllib.parse
 import uuid
@@ -97,8 +99,6 @@ def aggiungi():
         url = pubblico(str(d.get("url") or "").strip()[:500])
     except ValueError as e:
         return jsonify(error=str(e)), 400
-    if url.lower().split("?")[0].endswith(".m3u8"):  # HLS: pezzi da una playlist che cambia, il browser non la suona da solo
-        return jsonify(error="Questa radio trasmette in HLS (.m3u8), che Armony non riproduce: cercane un altro indirizzo (MP3 o AAC)"), 400
     if db.one("SELECT 1 FROM webradio WHERE url = ?", url):
         return jsonify(error="Questa radio c'è già"), 409
     fav = str(d.get("favicon") or "").strip()[:500]
@@ -134,7 +134,7 @@ def cerca():
         out = [{"name": (x.get("name") or "").strip()[:80], "url": x.get("url_resolved") or x.get("url"), "favicon": x.get("favicon") or "",
                 "homepage": x.get("homepage") or "", "tags": (x.get("tags") or "")[:200], "country": x.get("country") or "",
                 "codec": x.get("codec") or "", "bitrate": x.get("bitrate") or 0} for x in r.json()
-               if (x.get("url_resolved") or x.get("url")) and not x.get("hls") and ".m3u8" not in (x.get("url_resolved") or x.get("url") or "").lower()]
+               if x.get("url_resolved") or x.get("url")]
     except Exception as e:  # noqa: BLE001
         return jsonify(error=f"Il catalogo delle radio non risponde ({e.__class__.__name__})"), 502
     saved = {r["url"] for r in db.all_("SELECT url FROM webradio")}
@@ -143,11 +143,42 @@ def cerca():
     return jsonify(items=out)
 
 
+def hls(url, name):
+    """HLS (.m3u8: la diretta a pezzi, da una playlist che cambia): ffmpeg la legge e la passa come un flusso AAC
+    continuo, senza ricodificare. La playlist si controlla prima (indirizzo pubblico, è davvero HLS); i pezzi stanno
+    di solito sullo stesso servizio."""
+    r = apri(url, stream=False, timeout=(6, 10))
+    if r.status_code != 200 or "#EXTM3U" not in r.text[:200]:
+        raise ValueError(f"la playlist HLS ha risposto {r.status_code}")
+    p = subprocess.Popen(["ffmpeg", "-nostdin", "-loglevel", "error", "-reconnect", "1", "-reconnect_streamed", "1",
+                          "-protocol_whitelist", "https,http,tls,tcp,crypto,hls,file", "-i", r.url, "-vn", "-c:a", "copy", "-f", "adts", "pipe:1"],
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def flusso():
+        try:
+            while True:
+                b = p.stdout.read(16 * 1024)
+                if not b:
+                    break
+                yield b
+        finally:
+            p.kill()
+            p.wait()
+    return Response(stream_with_context(flusso()), mimetype="audio/aac", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+                    direct_passthrough=True)
+
+
 @bp.get("/api/webradio/<sid>/ascolta")
 def ascolta(sid):
     st = db.one("SELECT url, name FROM webradio WHERE id = ?", sid)
     if not st:
         return jsonify(error="Radio non trovata"), 404
+    if st["url"].lower().split("?")[0].endswith(".m3u8"):
+        try:
+            return hls(st["url"], st["name"])
+        except Exception as e:  # noqa: BLE001
+            A.diagnosi.avviso("radio", f"la radio «{st['name']}» (HLS) non risponde: {e}", user=g.who.get("user"))
+            return jsonify(error="La radio non risponde"), 502
     try:
         r = apri(diretta(st["url"]), timeout=(8, 60))
     except Exception as e:  # noqa: BLE001 — la radio è spenta, l'indirizzo è cambiato, rete
