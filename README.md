@@ -51,7 +51,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - Pensato per stare su internet: Navidrome raggiungibile solo da Armony, chiavi per dispositivo, limiti ai tentativi di password.
 
 **Server collegati**
-- Colleghi il tuo server a quello di un amico (con un codice di sicurezza da confrontare): in Cerca compare "Nella rete" con i loro brani, anche degli amici dei vostri amici. Li ascolti subito o li copi nella tua libreria. La pagina **Rete** mostra la mappa. Per ogni collegamento scegli il verso: vi vedete a vicenda, solo tu offri o solo tu ricevi. Funziona anche per i server dietro NAT, senza porte aperte: si appoggiano a uno raggiungibile e la rete si forma da sola, a maglia o a stella. Ti puoi **abbonare** alle playlist pubbliche degli amici: ne hai una copia che resta uguale all'originale.
+- Colleghi il tuo server a quello di un amico (con un codice di sicurezza da confrontare): in Cerca compare "Nella rete" con i loro brani, anche degli amici dei vostri amici. Li ascolti subito o li copi nella tua libreria. La pagina **Rete** mostra la mappa. Per ogni collegamento scegli il verso: vi vedete a vicenda, solo tu offri o solo tu ricevi. Funziona anche per i server dietro NAT, senza porte aperte: si appoggiano a uno raggiungibile e la rete si forma da sola, a maglia o a stella. Non serve nemmeno un indirizzo pubblico: chi non ce l'ha lascia vuoto il campo e incolla l'invito del server raggiungibile. Ti puoi **abbonare** alle playlist pubbliche degli amici: ne hai una copia che resta uguale all'originale.
 
 **App Android**
 - Musica a schermo spento, comandi nella notifica, aggiornamenti dall'app stessa.

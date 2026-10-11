@@ -178,8 +178,11 @@ def fed_req(node, method, path, params=None, body=None, stream=False, timeout=10
     nid = node["id"]
     # un nodo che tiene aperto il canale e che di recente non si è raggiunto direttamente: la richiesta va lì (vedi
     # «canale inverso»). La prova diretta la fa probe() in sottofondo: dentro una richiesta costerebbe secondi
-    if chan_ok(nid) and time.time() - direct_ok.get(nid, 0) > 1800:
+    if chan_ok(nid) and (not node["url"] or time.time() - direct_ok.get(nid, 0) > 1800):
         return via_chan(node, method, full, h, data, timeout), sig
+    if not node["url"]:
+        # foglia senza indirizzo: si raggiunge solo dal canale che apre lei (entro un minuto dall'avvio o dall'accettazione)
+        raise FedError(f"{node.get('name') or 'Il nodo'} non ha un indirizzo raggiungibile: aspetta che apra il suo canale")
     try:
         r = A.http.request(method, node["url"].rstrip("/") + full, data=data or None, headers=h, timeout=timeout,
                            stream=stream, allow_redirects=False)
@@ -273,7 +276,7 @@ def fed_sign(resp):
 
 def hello_payload():
     # caps: funzioni in più senza alzare PROTO (un PROTO diverso chiude il collegamento)
-    return dict(nodo=ME, nome=A.NAME, proprietario=owner(), proto=PROTO, app=A.VERSION, pub=PUB, caps=["epoca", "verso", "canale"])
+    return dict(nodo=ME, nome=A.NAME, proprietario=owner(), proto=PROTO, app=A.VERSION, pub=PUB, caps=["epoca", "verso", "canale", "foglia"])
 
 
 @bp.get("/fed/hello")
@@ -333,7 +336,8 @@ def pair():
         return jsonify(error="Invito scaduto, già usato o non valido: chiedine uno nuovo"), 403
     nid = g.fed_node["id"]
     try:
-        url = clean_url(d.get("url"))
+        # vuoto: una foglia senza indirizzo raggiungibile (dietro NAT, CGNAT, firewall), che parla solo dal canale
+        url = clean_url(d.get("url")) if d.get("url") else ""
         if nid == ME:
             raise ValueError("Non puoi collegare un server a sé stesso")
     except ValueError as e:
@@ -578,8 +582,10 @@ def loop():
             build_catalog()
             # in parallelo: un nodo spento non deve fermare gli altri per un minuto ciascuno. Chi non risponde si
             # riprova sempre più piano (10 min, 20, 40… fino a 6 ore); "offro" = non prendo niente da lui
+            # in attesa di conferma, il primo giorno ogni minuto: l'avviso «accettato» a una foglia senza indirizzo non arriva
             due = [n for n in nodes("attivo") + nodes("attesa") if n.get("dir") != "offro"
-                   and time.time() - max(n["synced"] or 0, fails.get(n["id"], (0, 0))[1]) > min(6 * 3600, REFRESH_S * 2 ** fails.get(n["id"], (0, 0))[0])]
+                   and time.time() - max(n["synced"] or 0, fails.get(n["id"], (0, 0))[1])
+                   > (60 if n["state"] == "attesa" and time.time() - n["created"] < 86400 else min(6 * 3600, REFRESH_S * 2 ** fails.get(n["id"], (0, 0))[0]))]
             for f in [pool.submit(refresh, n["id"]) for n in due]:
                 try:
                     f.result(timeout=90)
@@ -650,7 +656,7 @@ def probe():
 def probe_one(nid):
     n = node(nid)
     try:
-        if n and A.http.get(n["url"].rstrip("/") + "/fed/hello", timeout=5).json().get("nodo") == nid:
+        if n and n["url"] and A.http.get(n["url"].rstrip("/") + "/fed/hello", timeout=5).json().get("nodo") == nid:
             direct_ok[nid] = time.time()
     except (requests.RequestException, ValueError):
         pass
@@ -728,9 +734,15 @@ def chan_poll():
         gen = c["gen"]
         if gen > 1:
             c["q"].put(None)  # sveglia l'attesa di prima: al più una per nodo tiene un thread
+    aperto = time.time() - c["at"] > CHAN_POLL + 20  # canale nuovo o riaperto dopo un'interruzione
     c["at"] = time.time()
     if nid not in direct_ok:
         pool.submit(probe_one, nid)  # canale appena aperto: si prova subito se in realtà si raggiunge
+    n = node(nid) if aperto else None
+    if n and (n["error"] or not n["synced"]) and n.get("dir") != "offro":
+        # il catalogo chiesto quando il canale non c'era ancora (foglia senza indirizzo): si riprende subito, non fra 20 minuti
+        fails.pop(nid, None)
+        pool.submit(refresh, nid)
     out, end = [], time.time() + CHAN_POLL
     while time.time() < end and gen == c["gen"]:
         try:
@@ -1127,14 +1139,20 @@ def fed_settings():
     return fed_status()
 
 
-def ensure_me(d):
-    # indirizzo e proprietario: se mancano li porta il client dell'amministratore (l'indirizzo con cui lui raggiunge il server)
+def ensure_me(d, serve_url=True):
+    # indirizzo e proprietario: se mancano li porta il client dell'amministratore (l'indirizzo con cui lui raggiunge il server).
+    # Uno interno (127.0.0.1, aperto dal server stesso) non vale per gli altri: si ignora
     if not my_url() and d.get("url"):
-        set_setting("url", clean_url(d["url"]))
+        try:
+            set_setting("url", clean_url(d["url"]))
+        except ValueError:
+            pass
     if not owner() and g.who.get("user"):
         set_setting("owner", g.who["user"])
-    if not my_url():
-        raise ValueError("Imposta prima l'indirizzo con cui gli altri server raggiungono questo")
+    # l'invito lo usa chi deve raggiungerci; per agganciarsi a un altro server l'indirizzo non serve (canale inverso)
+    if serve_url and not my_url():
+        raise ValueError("Per creare un invito serve l'indirizzo con cui gli altri server raggiungono questo (Indirizzo per gli altri "
+                         "server). Se questo server non si raggiunge da fuori, fatti mandare l'invito da un server raggiungibile e incollalo qui")
 
 
 @bp.post("/api/fed/invites")
@@ -1153,7 +1171,7 @@ def fed_invite():
 def fed_join():
     d = request.get_json(silent=True) or {}
     try:
-        ensure_me(d)
+        ensure_me(d, serve_url=False)
         inv = parse_code(d.get("code"))
         url = clean_url(inv["u"])
     except ValueError as e:
@@ -1166,6 +1184,9 @@ def fed_join():
         return jsonify(error="La chiave del server non è quella dell'invito: qualcuno si è messo in mezzo, o l'indirizzo è sbagliato"), 409
     if int(h.get("proto") or 0) != PROTO:
         return jsonify(error=f"Versione incompatibile: aggiorna Armony su {h.get('nome') or url} o qui"), 409
+    if not my_url() and "foglia" not in (h.get("caps") or []):
+        return jsonify(error=f"{h.get('nome') or url} è una versione che vuole l'indirizzo di questo server: aggiornalo ad Armony 0.50 "
+                             "o scrivi qui l'indirizzo per gli altri server"), 409
     nid = node_id(inv["k"])
     if nid == ME:
         return jsonify(error="Questo è il codice di questo stesso server"), 400

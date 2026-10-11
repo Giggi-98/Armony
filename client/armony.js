@@ -4842,13 +4842,14 @@ async function refreshFed() {
     <div class="panel stack">
       <p style="margin:0">Questo server è <b>${esc(f.me.nome)}</b>: ${f.me.songs} brani, ${f.me.albums} album. Impronta <code>${esc(f.me.short)}</code></p>
       <div class="grid2"><label class="f">Proprietario<input type="text" id="fedOwner" value="${esc(f.settings.owner)}" placeholder="Il tuo nome" maxlength="60"></label>
-        <label class="f">Indirizzo per gli altri server<input type="url" id="fedUrl" value="${esc(f.settings.url)}" placeholder="${esc(fedBase())}" autocapitalize="none" autocomplete="off"></label></div>
+        <label class="f">Indirizzo per gli altri server<input type="url" id="fedUrl" value="${esc(f.settings.url)}" placeholder="${esc(/^https?:\/\/(127\.|localhost|\[::1\])/.test(fedBase()) ? 'Nessuno: si aggancia agli altri' : fedBase())}" autocapitalize="none" autocomplete="off"></label></div>
+      <p class="sub" style="margin:0;font-size:.88rem">Se questo server non si raggiunge da fuori (rete di casa senza porte aperte, CGNAT, firewall), lascia vuoto l'indirizzo: incolla l'invito di un server raggiungibile e la tua libreria passa da lui.</p>
       <label class="check"><input type="checkbox" id="fedTrans" ${f.settings.transitive ? 'checked' : ''}><span>Visibile agli amici degli amici<small>Chi è collegato a un tuo collegato trova e ascolta la tua libreria passando da lui. Spento: solo i server che colleghi tu.</small></span></label>
       <label class="f">Dove cercare<select id="fedHops">${[1, 2, 3].map(h => `<option value="${h}" ${f.settings.hops === h ? 'selected' : ''}>${hopsTxt[h]}</option>`).join('')}</select></label>
     </div>
     <div class="row" style="margin:var(--s4) 0 var(--s2)"><button class="btn primary" data-act="fedinv">${ic('plus')} Crea un invito</button><button class="btn" data-act="fedjoin">Incolla un invito</button></div>
     ${f.nodes.length ? f.nodes.map(x => { const [l, c] = st(x); return `<div class="list-item fednode">
-      <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${esc(x.url)}${x.state === 'attivo' ? ` · ${x.songs} brani, ${x.albums} album` : ''}${x.app ? ' · Armony ' + esc(x.app) : ''}${x.synced ? ' · aggiornato ' + new Date(x.synced * 1000).toLocaleString() : ''}</small>
+      <span class="grow"><b>${esc(x.name)}${x.owner ? ` <small>di ${esc(x.owner)}</small>` : ''}</b><small>${esc(x.url || 'senza indirizzo: passa dal suo canale')}${x.state === 'attivo' ? ` · ${x.songs} brani, ${x.albums} album` : ''}${x.app ? ' · Armony ' + esc(x.app) : ''}${x.synced ? ' · aggiornato ' + new Date(x.synced * 1000).toLocaleString() : ''}</small>
         ${x.reach === 'canale' ? `<small style="display:block">${ic('wifi')} Non si raggiunge da fuori: parla con te dal suo canale, la sua libreria arriva lo stesso</small>` : x.reach === 'uscita' ? `<small style="display:block">${ic('wifi')} Questo server non si raggiunge da fuori: resta collegato in uscita, la tua libreria passa dal canale</small>` : ''}
         ${x.error ? `<small style="display:block;color:var(--danger)">${esc(x.error)}</small>` : ''}<small style="display:block">Codice di sicurezza <span class="safety">${esc(x.safety)}</span></small></span>
       <span class="tag ${c}">${esc(l)}</span>
