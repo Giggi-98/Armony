@@ -186,7 +186,8 @@ def fed_req(node, method, path, params=None, body=None, stream=False, timeout=10
     data = raw if raw is not None else json.dumps(body).encode() if body is not None else b""
     date = int(time.time())
     sig = b64e(KEY.sign(canon(method, full, date, node["id"], data)))
-    h = {"X-Fed-Node": ME, "X-Fed-Date": str(date), "X-Fed-To": node["id"], "X-Fed-Sig": sig, **(headers or {})}
+    # X-Fed-App: la mia versione, per la scheda di chi riceve (fuori dalla firma: serve solo a mostrarla)
+    h = {"X-Fed-Node": ME, "X-Fed-Date": str(date), "X-Fed-To": node["id"], "X-Fed-Sig": sig, "X-Fed-App": A.VERSION, **(headers or {})}
     if body is not None:
         h["Content-Type"] = "application/json"
     nid = node["id"]
@@ -320,7 +321,8 @@ def fed_guard():
         return jsonify(error="Troppe richieste da questo nodo"), 429
     g.fed_node, g.fed_sig = n, sig
     if n["state"] != "nuovo":
-        db.run("UPDATE fed_nodes SET seen = ? WHERE id = ?", time.time(), nid)
+        # la versione arriva a ogni richiesta: chi non scarica il suo catalogo (verso «offro») la vedeva ferma all'abbinamento
+        db.run("UPDATE fed_nodes SET seen = ?, app = coalesce(?, app) WHERE id = ?", time.time(), (request.headers.get("X-Fed-App") or "")[:20] or None, nid)
     return None
 
 
