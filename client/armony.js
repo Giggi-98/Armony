@@ -4787,6 +4787,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   adm && caps.includes('youtube') ? ['srv', 'youtube', 'YouTube', 'film', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>'] : null,
   adm && dlSrv()?.me?.caps?.includes('salute') ? ['srv', 'salute', 'Salute della libreria', 'check', 'salute libreria doppioni copertine tag generi album spezzati testi lrclib pulizia', '<div id="saluteBox"><p class="sub">Controllo la libreria…</p></div>'] : null,
   adm && dlSrv()?.me?.caps?.includes('trasferimento') ? ['srv', 'trasferimento', 'Trasferimento', 'send', 'trasferimento trasloco sposta server nuovo casa migrazione identità', '<div id="trBox"><p class="sub">Caricamento…</p></div>'] : null,
+  adm && caps.includes('bluetooth') ? ['srv', 'bluetooth', 'Casse Bluetooth', 'speaker', 'bluetooth casse alexa echo abbina collega dove suona', '<div id="btBox"><p class="sub">Caricamento…</p></div>'] : null,
   adm ? ['srv', 'aggiornamenti', 'Aggiornamenti', 'repeat', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>'] : null,
   // stato del server (diagnosi.js) con dentro lo spazio del disco; sui server che non lo conoscono, solo lo spazio
   adm && ds?.session && caps.includes('diagnosi') ? ['srv', 'stato', 'Stato del server', 'pulse', 'cpu processore memoria ram carico rete thread ascolti flussi dispositivi risorse monitor disco spazio occupato libero', '<div id="statoBox"><p class="sub">Misuro…</p></div><h3>Spazio</h3><div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>']
@@ -4833,7 +4834,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   $('#cacheMB').onchange = e => { P.cacheMB = +e.target.value; savePrefs(); if (!P.cacheMB) ACache.clear().then(() => { $('#cacheUse').textContent = '0 MB usati'; }); else ACache.trim(); };
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint(); refreshBot();
+  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint(); refreshBot(); refreshBt();
   $('#pubSave')?.addEventListener('click', async () => {
     try {
       const r = await dlApi('/api/indirizzo', { method: 'PUT', body: JSON.stringify({ url: $('#pubUrl').value.trim() }) });
@@ -5271,6 +5272,65 @@ function trSheet() {
    Ogni utente collega le sue chat con un codice di 6 cifre (10 minuti); da lì comandi e notifiche. Mentre il codice è
    aperto la pagina si rilegge ogni 3 secondi: appena il bot lo riceve, la chat compare da sola */
 let botT = 0;
+async function botCanali(rb) {
+  const box = $('#botCanali'); if (!box) return;
+  let r; try { r = await srvApi(srv(), '/api/bot/canali'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  const emo = { telegram: '✈️', discord: '🎮' };
+  box.innerHTML = `${r.canali.map(c => `<div class="panel stack"><div class="row between" style="flex-wrap:nowrap"><span class="grow" style="min-width:0"><b>${emo[c.rete]} ${esc(c.nome)}</b><small style="display:block;color:var(--muted)">${c.agganciato ? '✅ ' + esc(c.dove || 'agganciato') : '⏳ da agganciare'} · ${c.utenti.length ? esc(c.utenti.join(', ')) : 'nessun utente'}</small></span>
+      <button class="icon-btn" data-cn="${c.id}" aria-label="Modifica">${ic('pen')}</button></div>
+      <div class="chips">${c.tipi.map(t => `<span class="tag">${esc(r.tipi[t] || t)}</span>`).join('') || '<small class="sub">nessun tipo scelto</small>'}</div>
+      <div class="row">${c.agganciato ? `<button class="btn sm" data-cp="${c.id}">Prova</button>` : ''}<button class="btn sm" data-cc="${c.id}">${c.agganciato ? 'Aggancia altrove' : 'Aggancia'}</button><button class="btn sm danger" data-cx="${c.id}">${ic('trash')} Elimina</button></div></div>`).join('')}
+    <button class="btn" id="cnNew" ${rb.telegram.on || rb.discord.on ? '' : 'disabled'}>${ic('plus')} Nuovo canale</button>`;
+  const api = (p, m, b) => srvApi(srv(), '/api/bot/canali' + p, { method: m, body: b ? JSON.stringify(b) : undefined });
+  $('#cnNew').onclick = () => canaleSheet(r, rb);
+  box.querySelectorAll('[data-cn]').forEach(b => b.onclick = () => canaleSheet(r, rb, r.canali.find(c => c.id === b.dataset.cn)));
+  box.querySelectorAll('[data-cp]').forEach(b => b.onclick = () => api(`/${b.dataset.cp}/prova`, 'POST').then(() => toast('📨 Messaggio di prova mandato.')).catch(e => toast(e.message)));
+  box.querySelectorAll('[data-cc]').forEach(b => b.onclick = async () => { try { const j = await api(`/${b.dataset.cc}/codice`, 'POST'); canaleCodice(r.canali.find(c => c.id === b.dataset.cc), j, rb); } catch (e) { toast(e.message); } });
+  box.querySelectorAll('[data-cx]').forEach(b => b.onclick = async () => { if (confirm('Eliminare questo canale? Il bot smette di scriverci.')) { await api(`/${b.dataset.cx}`, 'DELETE').catch(e => toast(e.message)); botCanali(rb); } });
+}
+// crea o modifica un canale: nome, rete (solo alla creazione), utenti da seguire, cosa raccontare
+function canaleSheet(r, rb, c) {
+  const d = $('#dlg'); d.className = 'sheet smart';
+  const reti = ['telegram', 'discord'].filter(k => rb[k].on);
+  d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">${c ? 'Modifica il canale' : 'Nuovo canale'}</b><small style="color:var(--muted)">Il bot ci racconta cosa fanno gli utenti scelti (chi ha nascosto cosa ascolta non compare).</small></span></div>
+    <div class="smbody">
+      <label class="f">Nome<input type="text" id="cnNome" value="${esc(c?.nome || '')}" placeholder="Es. Famiglia, Amici del calcetto" maxlength="60"></label>
+      ${c ? '' : `<div class="seg" role="radiogroup" aria-label="Dove">${reti.map((k, i) => `<label><input type="radio" name="cnRete" value="${k}" ${i ? '' : 'checked'}><span>${k === 'telegram' ? '✈️ Telegram' : '🎮 Discord'}</span></label>`).join('')}</div>`}
+      <b>Utenti da seguire</b>
+      <div class="stack" style="gap:0">${r.utenti.map(u => `<label class="check"><input type="checkbox" data-cu="${esc(u)}" ${c?.utenti.includes(u) ? 'checked' : ''}><span>${esc(u)}</span></label>`).join('') || '<p class="sub">Nessun utente ha ancora usato Armony.</p>'}</div>
+      <b>Cosa raccontare</b>
+      <div class="stack" style="gap:0">${Object.entries(r.tipi).map(([k, l]) => `<label class="check"><input type="checkbox" data-ct="${k}" ${!c || c.tipi.includes(k) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>
+      <div class="row"><button class="btn primary" id="cnOk">${c ? 'Salva' : 'Crea e aggancia'}</button><button class="btn" id="cnNo">Annulla</button></div></div>`;
+  $('#cnNo').onclick = () => d.close();
+  $('#cnOk').onclick = async () => {
+    const body = { nome: $('#cnNome').value.trim(), utenti: [...d.querySelectorAll('[data-cu]:checked')].map(i => i.dataset.cu), tipi: [...d.querySelectorAll('[data-ct]:checked')].map(i => i.dataset.ct) };
+    try {
+      if (c) { await srvApi(srv(), `/api/bot/canali/${c.id}`, { method: 'PUT', body: JSON.stringify(body) }); d.close(); toast('Canale salvato.'); botCanali(rb); return; }
+      const j = await srvApi(srv(), '/api/bot/canali', { method: 'POST', body: JSON.stringify({ ...body, rete: d.querySelector('input[name="cnRete"]:checked')?.value }) });
+      d.close(); botCanali(rb); canaleCodice(j, j, rb);
+    } catch (e) { toast(e.message); }
+  };
+  closeOutside(d); d.showModal();
+}
+// il codice per agganciare: si rilegge ogni 3 secondi finché il bot non lo riceve
+function canaleCodice(c, j, rb) {
+  const d = $('#dlg'); d.className = 'sheet smart'; let t = 0;
+  const bot = j.bot ? (c.rete === 'telegram' ? '@' + j.bot : j.bot) : 'il bot';
+  d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">Aggancia «${esc(c.nome)}»</b><small style="color:var(--muted)">Il codice vale 10 minuti, una volta.</small></span></div>
+    <div class="smbody"><div class="panel stack botcode"><b>Codice: <span class="code">${esc(j.codice)}</span></b>
+      ${c.rete === 'telegram' ? `<p class="sub" style="margin:0">1. Aggiungi <b>${esc(bot)}</b> al gruppo (per un canale: come amministratore).<br>2. Scrivi lì: <code>/canale@${esc(j.bot || 'NomeDelBot')} ${esc(j.codice)}</code></p>`
+        : `<p class="sub" style="margin:0">1. Il bot deve essere nel tuo server Discord (link «Aggiungi il bot a un server Discord» qui sopra).<br>2. Nel canale scrivi: <code>/canale ${esc(j.codice)}</code></p>`}</div>
+      ${c.agganciato ? '' : '<p class="sub" role="status">⏳ Aspetto che il bot riceva il codice…</p>'}
+      <div class="row"><button class="btn" id="cnFine">Chiudi</button></div></div>`;
+  const giro = async () => {
+    if (!d.open) return;
+    try { const r = await srvApi(srv(), '/api/bot/canali'); if (r.canali.find(x => x.id === c.id)?.agganciato) { toast(`✅ «${c.nome}» agganciato.`); d.close(); botCanali(rb); return; } } catch {}
+    t = setTimeout(giro, 3000);
+  };
+  $('#cnFine').onclick = () => d.close();
+  d.addEventListener('close', () => { clearTimeout(t); botCanali(rb); }, { once: true });
+  closeOutside(d); d.showModal(); if (!c.agganciato) t = setTimeout(giro, 3000);
+}
 async function refreshBot(attesa) {
   const box = $('#botBox'); if (!box) return;
   clearTimeout(botT);
@@ -5280,7 +5340,7 @@ async function refreshBot(attesa) {
   const adm = srv()?.me?.admin, nomi = { telegram: '✈️ Telegram', discord: '🎮 Discord' };
   const card = k => {
     const b = r[k], mie = r.chats.filter(c => c.rete === k);
-    if (!b.on) return `<div class="panel stack"><b>${nomi[k]}</b><p class="sub" style="margin:0">${adm ? `Non attivo: metti <code>${k === 'telegram' ? 'TELEGRAM_BOT_TOKEN' : 'DISCORD_BOT_TOKEN'}</code> nel file <code>.env</code> del server e riavvia Armony (LEGGIMI, «Bot»).` : 'Non attivo su questo server: chiedilo all\'amministratore.'}</p></div>`;
+    if (!b.on) return `<div class="panel stack"><b>${nomi[k]}</b><p class="sub" style="margin:0">${adm ? 'Non attivo: inserisci il token qui sotto, in «Configurazione dei bot».' : 'Non attivo su questo server: chiedilo all\'amministratore.'}</p></div>`;
     return `<div class="panel stack"><div class="row between" style="flex-wrap:nowrap"><b>${nomi[k]}${b.nome ? ` <small style="color:var(--muted);font-weight:500">${esc(k === 'telegram' ? '@' + b.nome : b.nome)}</small>` : ''}</b><button class="btn sm primary" data-bot="${k}">${ic('plus')} Collega</button></div>
       ${mie.map(c => `<label class="check"><input type="checkbox" data-botn="${k}|${esc(c.chat)}" ${c.notifiche ? 'checked' : ''}><span>${esc(c.nome || c.chat)}<small>Collegata il ${new Date(c.created * 1000).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · notifiche di Armony anche lì · <a href="#" data-botx="${k}|${esc(c.chat)}">scollega</a></small></span></label>`).join('') || '<p class="sub" style="margin:0">Nessuna chat collegata.</p>'}
       ${k === 'discord' && b.invito ? `<a class="btn sm" href="${esc(b.invito)}" target="_blank" rel="noopener">Aggiungi il bot a un server Discord</a>` : ''}</div>`;
@@ -5288,7 +5348,23 @@ async function refreshBot(attesa) {
   const cod = attesa && attesa.codice ? `<div class="panel stack botcode"><b>Il tuo codice: <span class="code">${esc(attesa.codice)}</span></b>
       <p class="sub" style="margin:0">${attesa.rete === 'telegram' ? 'Apri il bot e premi «Avvia», oppure scrivigli' : 'Scrivi al bot, in privato o in un server dove c\'è,'} <code>/collega ${esc(attesa.codice)}</code>. Vale 10 minuti, una volta.</p>
       ${attesa.link ? `<a class="btn primary" href="${esc(attesa.link)}" target="_blank" rel="noopener">${ic('send')} Apri Telegram</a>` : ''}</div>` : '';
-  box.innerHTML = `<p class="sub">🤖 Da una chat: /cerca, /ora, /amici, /scarica un link, /pausa, /avanti. E le notifiche di Armony anche lì. Ogni chat collegata agisce come te, con i tuoi permessi.</p>${cod}${card('telegram')}${card('discord')}`;
+  const guida = { telegram: 'In Telegram scrivi a <b>@BotFather</b>, <code>/newbot</code>, scegli un nome e un nome utente che finisce con «bot»: ti dà il token.',
+    discord: 'Su <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">discord.com/developers/applications</a>: <b>New Application</b> → <b>Bot</b> → <b>Reset Token</b>. Non servono «intents».' };
+  const conf = k => { const b = r[k], c = b.config || {};
+    return `<div class="stack botconf"><div class="row between" style="flex-wrap:nowrap"><b>${nomi[k]}</b><small class="${b.errore ? 'federr' : ''}" style="margin:0">${b.errore ? '⚠️ ' + esc(b.errore) : b.nome ? '✅ attivo: ' + esc(k === 'telegram' ? '@' + b.nome : b.nome) : b.on ? '⏳ si collega…' : 'spento'}</small></div>
+      <p class="sub" style="margin:0">${guida[k]}${c.fine ? ` Ora: token che finisce con <code>${esc(c.fine)}</code>${c.pagina ? '' : ', dal file .env'}.` : ''}</p>
+      <div class="row" style="flex-wrap:nowrap"><input type="password" class="grow" data-tk="${k}" placeholder="Incolla il token" autocomplete="off" spellcheck="false" style="min-width:0"><button class="btn sm primary" data-tks="${k}">Salva</button>${c.pagina ? `<button class="btn sm" data-tkx="${k}">Togli</button>` : ''}</div></div>`; };
+  box.innerHTML = `<p class="sub">🤖 Da una chat: /cerca, /ora, /amici, /scarica un link, /pausa, /avanti. E le notifiche di Armony anche lì. Ogni chat collegata agisce come te, con i tuoi permessi.</p>${cod}${card('telegram')}${card('discord')}
+    ${adm ? `<h3 class="fedh">⚙️ Configurazione dei bot</h3><div class="panel stack">${conf('telegram')}${conf('discord')}</div>
+    <h3 class="fedh">📣 Canali</h3><p class="sub">Un gruppo o un canale Telegram, o un canale Discord, dove il bot racconta cosa fanno gli utenti che scegli: cosa ascoltano, chi torna in linea, playlist, download, Jam, radio.</p><div id="botCanali"><p class="sub">Caricamento…</p></div>` : ''}`;
+  if (adm) botCanali(r);
+  box.querySelectorAll('[data-tks],[data-tkx]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.tks || b.dataset.tkx, tk = b.dataset.tks ? box.querySelector(`[data-tk="${k}"]`).value.trim() : '';
+    if (b.dataset.tks && !tk) return toast('Incolla prima il token.');
+    b.disabled = true;
+    try { const j = await srvApi(srv(), '/api/bot/config', { method: 'PUT', body: JSON.stringify({ rete: k, token: tk }) }); toast(tk ? `✅ ${j.nome || 'Bot'} attivo.` : 'Token tolto.'); setTimeout(refreshBot, 1500); }
+    catch (e) { toast(e.message); b.disabled = false; }
+  });
   box.querySelectorAll('[data-bot]').forEach(b => b.onclick = async () => {
     try { const j = await srvApi(srv(), '/api/bot/codice', { method: 'POST', body: JSON.stringify({ rete: b.dataset.bot }) }); refreshBot({ ...j, rete: b.dataset.bot, n: r.chats.length }); }
     catch (e) { toast(e.message); }
@@ -5300,6 +5376,33 @@ async function refreshBot(attesa) {
     await srvApi(srv(), `/api/bot/${k}/${encodeURIComponent(c)}`, { method: 'DELETE' }).catch(er => toast(er.message)); refreshBot();
   });
   if (attesa && attesa.scade * 1000 > Date.now()) botT = setTimeout(() => box.isConnected && refreshBot(attesa), 3000);
+}
+/* ================= casse Bluetooth del server (casa.py, dopo deploy/bluetooth.sh sull'host) =================
+   Abbinate una volta da qui, poi stanno in «Dove suona» come le TV: sceglierle le collega. */
+async function refreshBt(lista) {
+  const box = $('#btBox'); if (!box) return;
+  let r = lista; if (!r) { try { r = await srvApi(srv(), '/api/casa/bluetooth'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; } }
+  if (!box.isConnected) return;
+  const ab = r.dispositivi.filter(d => d.abbinato), altre = r.dispositivi.filter(d => !d.abbinato);
+  const riga = d => `<div class="row between" style="flex-wrap:nowrap;gap:var(--s3)"><span class="grow" style="min-width:0"><b>${d.cassa ? '🔊' : '📱'} ${esc(d.nome)}</b>
+      <small style="display:block;color:var(--muted)">${d.abbinato ? (d.collegato ? (d.cassa ? '🟢 collegata' : '🟢 collegato') : d.cassa ? 'abbinata, non collegata' : 'abbinato, non collegato') : d.cassa ? 'cassa trovata' : 'dispositivo trovato'} · ${esc(d.mac)}</small></span>
+      ${d.abbinato ? `${d.collegato ? `<button class="btn sm" data-bta="scollega|${esc(d.mac)}">Scollega</button>` : `<button class="btn sm" data-bta="collega|${esc(d.mac)}">Collega</button>`}<button class="btn sm" data-bta="dimentica|${esc(d.mac)}" aria-label="Dimentica ${esc(d.nome)}">${ic('close')}</button>`
+        : `<button class="btn sm primary" data-bta="abbina|${esc(d.mac)}">Abbina</button>`}</div>`;
+  box.innerHTML = `<p class="sub">🔊 Casse collegate al server con il Bluetooth, anche le Alexa. Una cassa abbinata compare in «Dove suona» di chi è in casa: sceglierla la collega e la musica esce da lì.</p>
+    <div class="panel stack">${ab.map(riga).join('') || '<p class="sub" style="margin:0">Nessuna cassa abbinata.</p>'}</div>
+    <h3 class="fedh">📡 Abbina una cassa</h3><p class="sub">Metti la cassa in modalità abbinamento (per un\'Alexa: «Alexa, associa il Bluetooth»), poi cerca. Un\'Alexa si collega a un solo dispositivo alla volta: se è sul telefono, non è sul server.</p>
+    <div class="panel stack">${altre.map(riga).join('') || (lista ? '<p class="sub" style="margin:0">Niente di nuovo qui vicino.</p>' : '')}
+      <div class="row"><button class="btn" id="btCerca">${ic('search')} Cerca casse</button></div></div>`;
+  $('#btCerca').onclick = async () => { const b = $('#btCerca'); b.disabled = true; b.innerHTML = `${ic('search')} Cerco… (12 secondi)`;
+    try { refreshBt(await srvApi(srv(), '/api/casa/bluetooth/cerca', { method: 'POST' })); } catch (e) { toast(e.message); b.disabled = false; b.innerHTML = `${ic('search')} Cerca casse`; } };
+  box.querySelectorAll('[data-bta]').forEach(b => b.onclick = async () => {
+    const [azione, mac] = b.dataset.bta.split('|');
+    if (azione === 'dimentica' && !confirm('Dimenticare questa cassa? Per usarla di nuovo andrà abbinata.')) return;
+    b.disabled = true; if (azione !== 'dimentica') b.textContent = { abbina: 'Abbino…', collega: 'Collego…', scollega: 'Scollego…' }[azione];
+    try { await srvApi(srv(), '/api/casa/bluetooth/' + mac, { method: 'POST', body: JSON.stringify({ azione }) }); toast({ abbina: '✅ Abbinata: ora è in «Dove suona».', collega: '🟢 Collegata.', scollega: 'Scollegata.', dimentica: 'Dimenticata.' }[azione]); }
+    catch (e) { toast(e.message); }
+    refreshBt();
+  });
 }
 /* ================= playlist intelligenti (capacità "intelligenti", server/libreria.py) =================
    Le regole le valuta Navidrome: si aggiornano da sole e le vedono anche le app Subsonic. Qui un costruttore a righe:

@@ -155,6 +155,12 @@ MIGRATIONS = [
                            created REAL NOT NULL, PRIMARY KEY (rete, chat));
     CREATE INDEX bot_chat_user ON bot_chat(user);
     """,
+    # 18: canali dei bot (bot.py): un gruppo o canale Telegram, o un canale Discord, dove il bot racconta cosa fanno gli
+    # utenti scelti (tipi: ascolto, linea, playlist, download, jam, radio). chat vuota finché non si aggancia con /canale
+    """
+    CREATE TABLE bot_canali (id TEXT PRIMARY KEY, nome TEXT NOT NULL, rete TEXT NOT NULL, chat TEXT, chat_nome TEXT,
+                             utenti TEXT NOT NULL DEFAULT '[]', tipi TEXT NOT NULL DEFAULT '[]', created REAL NOT NULL);
+    """,
 ]
 
 _local = threading.local()

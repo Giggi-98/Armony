@@ -94,6 +94,7 @@ def agli_amici(u, chiave, ogni, titolo, corpo="", link="#/amici"):
     if not u or not share or now - gia.get(chiave, 0) < ogni:
         return
     gia[chiave] = now
+    A.bot.feed(u, {"linea": "linea", "ascolto": "ascolto", "pl": "playlist"}.get(chiave.split(":")[0], ""), titolo.replace("{nome}", nome) + (f"\n{corpo}" if corpo else ""), link)
     for r in db.all_("SELECT DISTINCT user FROM devices WHERE state = 'fidato' AND user != ?", u):
         if vuole(r["user"]):
             notifica(r["user"], "attivita", titolo.replace("{nome}", nome), corpo, link)

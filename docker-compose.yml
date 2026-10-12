@@ -69,6 +69,8 @@ services:
       ARMONY_PORT: "${ARMONY_PORT:-8080}"
       ARMONY_POT_URL: "http://127.0.0.1:${POT_PORT:-4416}"
       ARMONY_MULTICAST: "1"
+      # casse Bluetooth del mini PC: le tre ARMONY_BT_* le scrive deploy/bluetooth.sh. Senza, al loro posto /dev/null
+      ARMONY_BT_UID: "${ARMONY_BT_UID:-}"
       NAVIDROME_URL: "http://127.0.0.1:${NAVIDROME_PORT:-4533}"
       MUSIC_DIR: "/music"
       VIDEO_DIR: "/videos"
@@ -81,6 +83,9 @@ services:
       - ./data/armony:/data
       # solo lettura: il percorso vero dei brani da eliminare (/api/tracks/delete)
       - ./data/navidrome:/navidrome:ro
+      # bus di sistema dell'host (BlueZ, usato da un utente che può parlare solo con lui) e PipeWire dell'utente
+      - ${ARMONY_BT_DBUS:-/dev/null}:/run/armony-dbus:ro
+      - ${ARMONY_BT_PULSE:-/dev/null}:/run/armony-pulse:ro
     depends_on:
       - navidrome
       - pot

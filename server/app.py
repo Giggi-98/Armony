@@ -77,7 +77,12 @@ Armony - server di supporto.
                         canale /api/live ({"type": "notifica"}). Capacità "notifiche"; /api/notifiche/attivita accende
                         o spegne gli avvisi sugli amici (in linea, cosa ascoltano, playlist condivise): "notattivita"
   /api/bot              bot di Telegram e Discord (bot.py): codice per collegare una chat al proprio utente, chat
-                        collegate, notifiche anche lì. Capacità "bot"
+                        collegate, notifiche anche lì; per l'amministratore token e canali (gruppi dove il bot
+                        racconta cosa fanno gli utenti scelti). Capacità "bot"
+  /api/casa             TV e casse di casa (casa.py): DLNA e Chromecast trovati in rete, che diventano dispositivi del
+                        canale dal vivo; /api/casa/flusso e /copertina pubbliche ma solo dalla rete di casa, col gettone.
+                        Capacità "casa". /api/casa/bluetooth (admin): casse Bluetooth del server da cercare,
+                        abbinare, collegare; capacità "bluetooth" solo dopo deploy/bluetooth.sh sull'host
   /api/playlist/ordina  nuovo ordine di una playlist, riscritta in modo sicuro (importa.py, capacità "plordina")
   /api/playlist/togli   toglie un brano da una playlist per id, non per posizione (importa.py, capacità "pltogli")
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
@@ -134,6 +139,7 @@ import radio
 import trasferimento
 import libreria
 import bot
+import casa
 
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
 VIDEO_DIR = os.environ.get("VIDEO_DIR", "/videos")
@@ -166,10 +172,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento", "intelligenti", "salute", "trasfcasa", "notattivita", "bot"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento", "intelligenti", "salute", "trasfcasa", "notattivita", "bot", "casa"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/intelligente", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/bot", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/trasferimento", "admin"), ("/api/salute", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/intelligente", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/bot", "user"), ("/api/casa/flusso", None), ("/api/casa/copertina", None), ("/api/casa/bluetooth", "admin"), ("/api/casa", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/trasferimento", "admin"), ("/api/salute", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -308,7 +314,7 @@ def me_payload():
 
 def caps():
     # "plserver": le playlist dei brani importati le completa il server (serve l'amministratore di Navidrome e il suo DB)
-    return CAPS + (["plserver"] if nd_admin() and os.path.exists(NAVIDROME_DB) else [])
+    return CAPS + (["plserver"] if nd_admin() and os.path.exists(NAVIDROME_DB) else []) + (["bluetooth"] if casa.bt_ok() else [])
 
 
 @app.put("/api/indirizzo")
@@ -1066,7 +1072,7 @@ def live_stream():
             except queue.Full:
                 pass
         others = {c["device"]: c["name"] for c in lconns[u].values() if c["device"] != dev}
-        hello = {"type": "hello", "devices": [{"device": d, "name": n} for d, n in others.items()],
+        hello = {"type": "hello", "devices": [{"device": d, "name": n} for d, n in others.items()] + casa.per(me),
                  "states": [s for d, s in lstates.get(u, {}).items() if d != dev], "cmds": cmd_pending(u, dev, time.time())}
     if old and hb:
         pres_gone(u, dev)
@@ -1147,6 +1153,8 @@ def live_stato():
     dev, cid = request.args.get("device") or "", request.args.get("cmd") or ""
     with llock:
         devs = {c["device"]: c["name"] for c in lconns.get(u, {}).values() if not c.get("stop")}
+    devs.update({x["device"]: x["name"] for x in casa.per({"net": dispositivi.net(), "admin": g.who["admin"]})})
+    with llock:
         states = list(lstates.get(u, {}).values())
         cmds = cmd_pending(u, dev, now) if dev else []  # canale che non regge: i comandi arrivano anche così
         c = lcmds.get(u, {}).get(cid)
@@ -1185,6 +1193,11 @@ def live_cmd():
     # enqueue/playnext: brani in coda da un telecomando (capacità "liveq"), value = {"tracks": [...]}
     if cmd not in ("play", "pause", "toggle", "next", "prev", "seek", "shuffle", "repeat", "transfer", "handoff", "skipto", "enqueue", "playnext"):
         return jsonify(error="Comando non valido"), 400
+    if casa.esiste(to):
+        try:
+            return jsonify(ok=True, id=manda_cmd(u, to, cmd, d.get("value"), str(d.get("from") or "")[:40]))
+        except (ValueError, RuntimeError, requests.RequestException) as e:
+            return jsonify(error=str(e)[:200]), 409
     with llock:
         present = any(c["device"] == to for c in lconns.get(u, {}).values())
     if not present:
@@ -1196,8 +1209,14 @@ def live_cmd():
 
 
 def manda_cmd(u, to, cmd, value=None, frm="bot"):
-    """Un comando a un dispositivo dell'utente (da un telecomando o dal bot): arriva dal canale dal vivo."""
+    """Un comando a un dispositivo dell'utente (da un telecomando o dal bot): arriva dal canale dal vivo. Le TV di casa
+    lo eseguono subito sul server (casa.py), e il comando risulta già eseguito."""
     i = uuid.uuid4().hex[:12]
+    if casa.esiste(to):
+        casa.comando(u, to, cmd, value)
+        with llock:
+            lcmds.setdefault(u, {})[i] = {"to": to, "cmd": cmd, "value": None, "from": frm, "ts": time.time(), "done": "eseguito"}
+        return i
     with llock:
         lcmds.setdefault(u, {})[i] = {"to": to, "cmd": cmd, "value": value, "from": frm, "ts": time.time(), "done": None}
     live_put(u, {"type": "cmd", "id": i, "cmd": cmd, "value": value, "from": frm}, only=to)
@@ -1306,6 +1325,7 @@ def attivita(u, kind, text, link=None, merge=None, many=None, inc=1, window=600)
     now = time.time()
     with alock:
         a = next((x for x in acts if merge and x["user"] == u and x["kind"] == kind and x["merge"] == merge and now - x["at"] < window), None)
+        nuova = a is None
         if a:
             acts.remove(a)
             a.update(n=a["n"] + inc, at=now, link=link or a["link"], name=name)
@@ -1318,6 +1338,9 @@ def attivita(u, kind, text, link=None, merge=None, many=None, inc=1, window=600)
     # salvate: dopo un riavvio (un aggiornamento) il diario degli amici non riparte vuoto
     db.run("INSERT INTO settings (key, value) VALUES ('attivita', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", keep)
     pres_put({"type": "activity", "item": out})
+    if nuova and kind in ("download", "upload", "jam", "radio"):  # ai canali dei bot: solo la prima di un gruppo
+        emo = {"download": "⬇️", "upload": "⬆️", "jam": "🎉", "radio": "📻"}[kind]
+        bot.feed(u, "download" if kind == "upload" else kind, f"{emo} {name} {out['text']}")
     pid = link.get("playlist") if isinstance(link, dict) else None
     if kind == "playlist" and pid and text.startswith(("ha creato", "ha condiviso")):
         notifiche.agli_amici(u, "pl:" + pid, 86400, "📀 {nome} " + text, "", f"#/playlist/{pid}")
@@ -2856,6 +2879,7 @@ importa.init(app, sys.modules[__name__])
 scelta.init(app, sys.modules[__name__])
 notifiche.init(app, sys.modules[__name__])
 bot.init(app, sys.modules[__name__])
+casa.init(app, sys.modules[__name__])
 webradio.init(app, sys.modules[__name__])
 amici.init(app, sys.modules[__name__])
 utenti.init(app, sys.modules[__name__])
@@ -2893,6 +2917,7 @@ if __name__ == "__main__":
     federazione.start()
     libreria.start()  # il giro dei testi in sottofondo
     bot.start()  # Telegram e Discord, se nel .env ci sono i loro token
+    casa.start()  # TV e casse di casa (DLNA) come dispositivi di «Dove suona»
     trasferimento.start()  # dopo un trasferimento appena applicato: indirizzi nuovi e annuncio ai collegati
     radio.start()
     diagnosi.start()

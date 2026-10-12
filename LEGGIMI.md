@@ -224,14 +224,32 @@ Se nel sistema è attivo «Riduci movimento», Armony lo rispetta: niente dischi
 
 "In riproduzione", album e artisti prendono la luce dei colori della copertina; se un brano non ha testo, al suo posto compaiono i prossimi brani.
 
+## TV e casse di casa
+
+Il server cerca da solo in casa le **smart TV** (Samsung, LG, Sony…), le **casse di rete** (Sonos, amplificatori) e i **Chromecast** o le **Android/Google TV**, e le mette in **«Dove suona»** con un 📺 davanti al nome, accanto ai tuoi telefoni e computer. Le scegli come un altro dispositivo: la coda passa alla TV dallo stesso punto, e dal telefono la comandi (pausa, avanti, indietro, salto) come un telecomando; a fine brano la TV va avanti da sola. Funziona anche dal bot (`/pausa`, `/avanti`). La TV scarica i brani dal server dentro casa, in mp3 a 320 kbps, il formato che leggono tutte.
+
+Serve che il server sia nella stessa rete delle TV e con la rete «host» di Docker (come di base su Linux) e il multicast acceso (`ARMONY_MULTICAST=1`, di base). Le TV le vede chi è collegato dalla rete di casa, o un amministratore: un amico da fuori non può far suonare la tua TV. I brani degli altri server e le radio restano sul telefono. Le **Alexa** non accettano musica in rete da altri programmi: si usano come casse Bluetooth, dal Bluetooth del server (qui sotto).
+
+**Casse Bluetooth del server.** Se la macchina di Armony ha il Bluetooth (quasi tutti i mini PC), può suonare su casse Bluetooth, anche le **Alexa** (un Echo fa da cassa Bluetooth). Si prepara una volta, sulla macchina, dalla cartella di Armony:
+
+```bash
+sudo sh deploy/bluetooth.sh
+```
+
+Lo script (Debian/Ubuntu) installa BlueZ e PipeWire, accende il Bluetooth a ogni avvio, fa partire PipeWire anche senza nessuno collegato alla macchina, crea l'utente di sistema `armony-bt` (Armony lo usa per abbinare le casse: può parlare solo con il Bluetooth, non con il resto del sistema), scrive `ARMONY_BT_UID`, `ARMONY_BT_DBUS` e `ARMONY_BT_PULSE` nel `.env` e riavvia Armony. Poi, in **Impostazioni → Casse Bluetooth** (solo l'amministratore), metti la cassa in modalità abbinamento (per un'Alexa: «Alexa, associa il Bluetooth»), premi **Cerca casse** e **Abbina**. Da lì la cassa compare in «Dove suona» con un 🔊 e si usa come le TV: sceglierla la collega se non lo è. Ogni cassa è un dispositivo a sé, quindi in due stanze possono suonare code diverse. Un'Alexa si collega a un solo dispositivo alla volta: se è collegata al telefono, non è sul server.
+
 ## Bot di Telegram e Discord
 
-Armony può avere un bot su Telegram e uno su Discord: da una chat cerchi brani (`/cerca`), vedi cosa stai ascoltando (`/ora`) e cosa ascoltano gli amici (`/amici`), scarichi da un link (`/scarica`, con il permesso «Scarica musica»), metti in pausa o vai avanti sul dispositivo che suona (`/pausa`, `/avanti`, `/indietro`). E le notifiche di Armony arrivano anche lì (`/notifiche no` le spegne). I bot sono facoltativi e li crea l'amministratore, una volta:
+Armony può avere un bot su Telegram e uno su Discord: da una chat cerchi brani (`/cerca`), vedi cosa stai ascoltando (`/ora`) e cosa ascoltano gli amici (`/amici`), scarichi da un link (`/scarica`, con il permesso «Scarica musica»), metti in pausa o vai avanti sul dispositivo che suona (`/pausa`, `/avanti`, `/indietro`). E le notifiche di Armony arrivano anche lì (`/notifiche no` le spegne). I bot sono facoltativi e li crea l'amministratore, una volta, e incolla il token in **Impostazioni → Bot Telegram e Discord → Configurazione dei bot** (Armony lo prova subito; in alternativa `TELEGRAM_BOT_TOKEN` e `DISCORD_BOT_TOKEN` nel `.env`):
 
-- **Telegram**: in Telegram scrivi a **@BotFather**, `/newbot`, scegli un nome (es. «Armony di Gigi») e un nome utente che finisce con `bot`. Ti dà un token: mettilo in `.env` come `TELEGRAM_BOT_TOKEN=…`.
-- **Discord**: su https://discord.com/developers/applications → **New Application** → **Bot** → **Reset Token**, copia il token in `.env` come `DISCORD_BOT_TOKEN=…`. Non servono «intents» privilegiati.
+- **Telegram**: in Telegram scrivi a **@BotFather**, `/newbot`, scegli un nome (es. «Armony di Gigi») e un nome utente che finisce con `bot`. Ti dà il token.
+- **Discord**: su https://discord.com/developers/applications → **New Application** → **Bot** → **Reset Token**. Non servono «intents» privilegiati.
 
-Poi `docker compose up -d armony`. Non servono porte aperte: il server chiede lui i messaggi a Telegram e Discord.
+Non servono porte aperte: il server chiede lui i messaggi a Telegram e Discord.
+
+**Canali.** Nella stessa pagina l'amministratore crea dei **canali**: un gruppo o un canale Telegram, o un canale testuale Discord, dove il bot racconta cosa fanno gli utenti che sceglie (🎧 cosa ascoltano, 👋 chi torna in linea, 📀 playlist, ⬇️ download e caricamenti, 🎉 Jam, 📻 radio: si scelgono i tipi). Si aggancia aggiungendo il bot al gruppo (per un canale Telegram, come amministratore) e scrivendo lì il comando che mostra Armony, per esempio `/canale@ArmonyBot 123456`; «Prova» ci manda un messaggio. Chi ha spento «Mostra agli altri cosa ascolto» non compare.
+
+**Musica nel canale vocale di Discord.** Entra in un canale vocale e usa `/suona <brano>`, `/album <titolo>` o `/playlist <nome>`: il bot entra con te e suona dalla libreria del server, a turno (`/coda` mostra cosa c'è, `/salta` passa al prossimo, `/esci` lo fa uscire). Vale per chi ha collegato il suo utente.
 
 Ogni utente collega le sue chat in **Impostazioni → Bot Telegram e Discord**: «Collega» dà un codice di 6 cifre (vale 10 minuti, una volta). Su Telegram «Apri Telegram» lo manda da solo; su Discord si scrive `/collega 123456` al bot. Da lì quella chat agisce come te, con i tuoi permessi: dalla stessa pagina la scolleghi. Su Telegram il bot risponde solo in chat privata. Per Discord, «Aggiungi il bot a un server Discord» lo porta nel tuo server; la prima volta i comandi possono metterci fino a un'ora a comparire.
 

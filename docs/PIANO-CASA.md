@@ -8,10 +8,10 @@ su quali suonare», «integrazione con bot Discord e Telegram».
 
 | Fase | Cosa | Stato |
 |---|---|---|
-| 1 | **Bot Telegram e Discord**: collegamento con codice, notifiche, `/cerca` `/ora` `/amici` `/scarica` `/pausa` `/avanti` `/indietro` | ✅ fatto (0.62), da provare con i token veri |
-| 2 | **Musica nel canale vocale Discord**: `/suona` (brano, album, playlist, la tua coda), `/coda`, `/salta`, `/esci`; il bot suona dal server, ffmpeg + Opus | da fare |
-| 3 | **TV e casse in rete**: ricerca DLNA/UPnP (SSDP) e Google Cast (mDNS) dal server, che sta in casa con la rete host; compaiono in «Dove suona» come dispositivi; il server manda i brani e passa al successivo | da fare |
-| 4 | **Bluetooth del mini PC**: il server si collega a casse Bluetooth (anche le Alexa, che fanno da cassa Bluetooth) e suona lì; scelta da «Dove suona» | da fare, si prova solo sul mini PC |
+| 1 | **Bot Telegram e Discord**: collegamento con codice, notifiche, `/cerca` `/ora` `/amici` `/scarica` `/pausa` `/avanti` `/indietro`; token dalla pagina e canali per gruppi di utenti | ✅ fatto (0.62, canali dopo), da provare con i token veri |
+| 2 | **Musica nel canale vocale Discord**: `/suona`, `/album`, `/playlist`, `/coda`, `/salta`, `/esci`; il bot suona dal server, ffmpeg + Opus | ✅ fatto: audio provato (Opus da Navidrome), il canale vocale da provare col token vero |
+| 3 | **TV e casse in rete**: ricerca DLNA/UPnP (SSDP) e Google Cast (mDNS) dal server, che sta in casa con la rete host; compaiono in «Dove suona» come dispositivi; il server manda i brani e passa al successivo | ✅ fatto: DLNA provato con un renderer finto, Chromecast da provare a casa |
+| 4 | **Bluetooth del mini PC**: il server si collega a casse Bluetooth (anche le Alexa, che fanno da cassa Bluetooth) e suona lì; scelta da «Dove suona» | ✅ fatto: `sudo sh deploy/bluetooth.sh` sull'host, poi Impostazioni → Casse Bluetooth. Provato con D-Bus vero, un BlueZ finto e PipeWire/Pulse con una cassa finta; da provare sul mini PC con le casse vere |
 
 ### Note su ogni fase
 
@@ -25,8 +25,8 @@ Bluetooth (fase 4) o, più avanti, con una skill Alexa (account sviluppatore Ama
 **Fase 4.** Serve configurare il mini PC: BlueZ e PipeWire sull'host, il container di Armony che parla con loro
 (socket di PipeWire e D-Bus montati). Più casse Bluetooth insieme si possono unire in un'uscita sola (PipeWire
 «combine-sink»), ma restano piccoli sfasamenti fra loro, e un Echo accetta un solo dispositivo Bluetooth alla volta
-(se è collegato al telefono, non al server). Da decidere prima di cominciare: lo faccio io via SSH sul mini PC o
-lanci tu uno script `deploy/bluetooth.sh`?
+(se è collegato al telefono, non al server). Fatto con lo script `deploy/bluetooth.sh` (niente SSH dall'agente al mini
+PC): ogni cassa è un dispositivo a sé, niente uscita combinata (vedi DECISIONS.md).
 
 ## Cosa possiamo fare con i bot (idee, da scegliere)
 
