@@ -154,7 +154,27 @@ def set_setting(k, v):
 
 
 def my_url():
-    return setting("url", "")
+    return A.dominio_url() or setting("url", "")
+
+
+def annuncia():
+    """Il mio indirizzo per gli altri server è cambiato (ARMONY_DOMAIN nel .env, impostazioni, trasferimento): lo dico a
+    tutti i collegati che raggiungo, una volta. Chi riceve lo accetta solo se là risponde la mia stessa chiave, quindi un
+    indirizzo che da lui non si raggiunge non sostituisce quello buono. Si ricorda l'ultimo annunciato: all'avvio si
+    riprova solo se è cambiato."""
+    url = my_url()
+    if not url or setting("annunciato", "") == url:
+        return
+
+    def giro():
+        time.sleep(10)
+        for n in nodes():
+            try:
+                fed_json(n, "POST", "/fed/v1/indirizzo", body={"url": url}, timeout=(5, 20))
+            except FedError:
+                pass  # una foglia non si raggiunge: lo saprà al prossimo contatto (o dal vecchio, «spostato»)
+        set_setting("annunciato", url)
+    threading.Thread(target=giro, daemon=True).start()
 
 
 def transitive():
@@ -1212,8 +1232,9 @@ def fed_status():
 def fed_settings():
     d = request.get_json(silent=True) or {}
     try:
-        if "url" in d:
+        if "url" in d and not A.dominio_url():
             set_setting("url", clean_url(d["url"]) if d["url"] else "")
+            annuncia()
     except ValueError as e:
         return jsonify(error=str(e)), 400
     if "owner" in d:
@@ -2007,6 +2028,7 @@ def init(flask_app, host):
 
 def start():
     load_identity()  # dopo db.migrate(): la cartella dei dati esiste
+    annuncia()  # indirizzo cambiato da spento (ARMONY_DOMAIN nuovo nel .env): i collegati lo sanno subito
     for n in nodes():
         if setting("canale:" + n["id"]) == "1":
             chan_want[n["id"]] = True

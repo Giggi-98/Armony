@@ -324,6 +324,7 @@ def main():
         errs = prepara(src)
         for n, e in errs.items():
             print(f"  ✗ installazione di {n.upper()} non riuscita:\n{e}")
+            esiti.append((f"installazione di {n.upper()}", False, "vedi sopra"))  # senza server non è un collaudo passato
         if not errs:
             prove()
     finally:

@@ -179,6 +179,21 @@ http.mount("http://", requests.adapters.HTTPAdapter(pool_connections=4, pool_max
 
 
 # ------------------------------------------------------------------ base
+# intestazioni di sicurezza per tutte le risposte (anche senza Caddy): niente pagine di Armony dentro un riquadro di un
+# altro sito, tipi dei file presi alla lettera, l'indirizzo completo non esce verso altri siti; fotocamera (QR) e
+# microfono solo per la pagina stessa. HSTS lo mette Caddy, che è il solo a parlare in HTTPS
+SICUREZZA = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin",
+             "Content-Security-Policy": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+             "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()"}
+
+
+@app.after_request
+def sicurezza(resp):
+    for k, v in SICUREZZA.items():
+        resp.headers.setdefault(k, v)
+    return resp
+
+
 @app.after_request
 def cors(resp):
     resp.headers["Access-Control-Allow-Origin"] = "*"
@@ -266,15 +281,25 @@ def info():
 
 
 # indirizzo pubblico del server (es. https://armony.nome.ts.net): lo decide l'amministratore una volta e vale per tutti
-# i dispositivi, per i link condivisi, gli inviti, il QR dell'app e la federazione. ARMONY_PUBLIC_URL fa da valore iniziale
+# i dispositivi, per i link condivisi, gli inviti, il QR dell'app e la federazione. ARMONY_PUBLIC_URL fa da valore iniziale.
+# Con ARMONY_DOMAIN (Caddy, HTTPS) l'indirizzo è quello e basta: un valore rimasto nel database (imparato dal browser di
+# casa, portato da un trasferimento) non può sostituirlo
+def dominio_url():
+    d = os.environ.get("ARMONY_DOMAIN", "").strip().strip("/")
+    return f"https://{d}" if d else ""
+
+
 def public_url():
+    if dominio_url():
+        return dominio_url()
     r = db.one("SELECT value FROM settings WHERE key = 'public_url'")
     return (r["value"] if r else os.environ.get("ARMONY_PUBLIC_URL", "")).strip().rstrip("/")
 
 
 def me_payload():
     return dict(user=g.who["user"], admin=g.who["admin"], upload=g.who["upload"], download=g.who["download"], delete=g.who["delete"], perm=g.who["perm"],
-                name=NAME, version=VERSION, api=API_LEVEL, caps=caps(), public=public_url(), **dispositivi.me_extra(g.who))
+                name=NAME, version=VERSION, api=API_LEVEL, caps=caps(), public=public_url(), public_fisso=bool(dominio_url()),
+                **dispositivi.me_extra(g.who))
 
 
 def caps():
@@ -285,9 +310,15 @@ def caps():
 @app.put("/api/indirizzo")
 def set_public_url():
     u = str((request.get_json(silent=True) or {}).get("url") or "").strip().rstrip("/")
+    if dominio_url():
+        return jsonify(error=f"L'indirizzo è {dominio_url()}, deciso da ARMONY_DOMAIN nel file .env del server: si cambia lì"), 409
     if u and not re.match(r"^https?://[^\s/]+(:\d+)?$", u):
         return jsonify(error="Scrivi solo l'indirizzo, per esempio https://armony.nome.ts.net"), 400
+    prima = public_url()
     db.run("INSERT INTO settings (key, value) VALUES ('public_url', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", u)
+    if u and federazione.setting("url", "") in ("", prima):  # l'indirizzo per gli altri server lo seguiva: lo segue ancora
+        federazione.set_setting("url", u)
+        federazione.annuncia()
     return jsonify(ok=True, public=public_url())
 
 
@@ -2838,5 +2869,5 @@ if __name__ == "__main__":
     # (dispositivi.client_ip: limiti dei tentativi, registro, Jam vicine). Da altri indirizzi l'intestazione si scarta
     # connection_limit: dal Funnel ogni copertina di una pagina è una connessione a sé (HTTP/2 fuori, HTTP/1.1 dentro):
     # con il limite di 100 una pagina piena di copertine bloccava tutti gli altri. asyncore_use_poll: oltre 1024 descrittori
-    serve(app, host="0.0.0.0", port=PORT, threads=THREADS, channel_timeout=600, connection_limit=1000, asyncore_use_poll=True,
+    serve(app, host="0.0.0.0", port=PORT, threads=THREADS, channel_timeout=600, connection_limit=1000, asyncore_use_poll=True, ident="",
           trusted_proxy="127.0.0.1", trusted_proxy_headers={"x-forwarded-for"}, trusted_proxy_count=1)

@@ -24,6 +24,13 @@
 			disable_http_challenge
 		}
 	}
+	# HSTS: per un anno il browser apre questo nome solo in HTTPS (niente includeSubDomains: i nomi accanto non sono
+	# nostri). Le altre intestazioni di sicurezza le mette Armony; qui si toglie anche «Server», che dice il software
+	header {
+		defer
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
 	# X-Forwarded-For: Caddy mette solo l'indirizzo vero di chi si collega (quelli mandati dal client li scarta);
 	# waitress se ne fida perché arriva da 127.0.0.1. flush -1: canale dal vivo e audio passano subito
 	reverse_proxy 127.0.0.1:{$ARMONY_PORT:8080} {

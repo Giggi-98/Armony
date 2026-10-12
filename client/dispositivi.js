@@ -70,12 +70,12 @@ const Disp = {
   // risposta del server: sessione, in attesa, revocato o errore
   take(s, r, j) {
     if (r.ok && j.session) {
-      s.armony = true; s.session = j.session; s.dev = j.dev; s.tk = j.ticket; delete s.pending; delete s.revoked;
+      s.armony = true; s.session = j.session; s.dev = j.dev; s.tk = j.ticket; delete s.pending; delete s.revoked; delete s.stale;
       delete j.session; delete j.t; delete j.s; s.me = j; return j;
     }
     if (j.code === 'attesa') { s.armony = true; s.dev = j.dev; s.pending = j.fp || '—'; delete s.session; delete s.tk; }
     if (j.code === 'revocato') this.revoke(s, false);
-    const e = new Error(j.error || `Errore ${r.status}`); e.code = j.code; throw e;
+    const e = new Error(j.error || `Errore ${r.status}`); e.code = j.code; e.status = r.status; throw e;
   },
   // con la chiave: sessione nuova firmando la sfida. null = la chiave qui non vale più, si passa alla password
   async signIn(s, k) {
@@ -166,11 +166,14 @@ const Disp = {
   },
   gate(r) {
     const s = srv();
-    if (!s || s.local || r === 'impostazioni' || r === 'abbina' || (!s.pending && !s.revoked)) return null;
+    if (!s || s.local || r === 'impostazioni' || r === 'abbina' || (!s.pending && !s.revoked && !s.stale)) return null;
     return () => this.gateView(s);
   },
   gateView(s) {
-    view.innerHTML = s.revoked ? `<div class="gate"><span class="gate-ic">${ic('lock')}</span><h1>Questo dispositivo è stato revocato</h1>
+    view.innerHTML = s.stale ? `<div class="gate"><span class="gate-ic">${ic('lock')}</span><h1>Accedi di nuovo</h1>
+      <p class="sub">${esc(s.name)} non riconosce più il tuo utente: il server è stato reinstallato o trasferito, oppure la password è cambiata.</p>
+      <div class="row"><button class="btn primary" data-dg="relog">Accedi con la password</button><a class="btn" href="#/impostazioni">Impostazioni</a></div></div>`
+      : s.revoked ? `<div class="gate"><span class="gate-ic">${ic('lock')}</span><h1>Questo dispositivo è stato revocato</h1>
       <p class="sub">L'accesso a ${esc(s.name)} è stato tolto da un tuo dispositivo o dall'amministratore. Per rientrare usa un codice di abbinamento da un dispositivo fidato, o accedi con la password (il dispositivo dovrà essere approvato). Con «Ripristina» riparti da zero.</p>
       <div class="row"><button class="btn primary" data-dg="code">Ho un codice di abbinamento</button><button class="btn" data-dg="relog">Accedi con la password</button><button class="btn danger" data-dg="reset">Ripristina</button></div></div>`
       : `<div class="gate"><span class="gate-ic">${ic('shield')}</span><h1>In attesa di approvazione</h1>
@@ -178,7 +181,7 @@ const Disp = {
       ${s.pending === '—' ? '<p class="small gate-wait">Senza HTTPS questo dispositivo non ha una chiave: chi approva lo riconosce dal nome e dall\'indirizzo.</p>'
         : `<p class="gate-fp"><small>Codice del dispositivo</small><b>${esc(s.pending)}</b><small>Deve essere lo stesso sullo schermo di chi approva.</small></p>`}
       <p class="small gate-wait" role="status">Entri da solo appena approvato.</p>
-      <div class="row"><button class="btn" data-dg="code">Ho un codice di abbinamento</button><a class="btn" href="#/impostazioni">Impostazioni</a></div></div>`;
+      <div class="row"><button class="btn" data-dg="code">Ho un codice di abbinamento</button><button class="btn" data-dg="relog">Accedi con la password</button><a class="btn" href="#/impostazioni">Impostazioni</a></div></div>`;
     view.querySelector('[data-dg=relog]')?.addEventListener('click', () => serverDialog(s));
     view.querySelector('[data-dg=code]')?.addEventListener('click', () => serverDialog(null, { url: s.url, mode: 'codice' }));
     view.querySelector('[data-dg=reset]')?.addEventListener('click', () => resetApp());
@@ -186,7 +189,7 @@ const Disp = {
   },
   async poll(s) {
     if (this.polling || !s.pending) return; this.polling = true;
-    try { await armonyLogin(s); } catch {} finally { this.polling = false; }
+    try { await armonyLogin(s); } catch (e) { if (e.status === 401 && !e.code) { delete s.pending; s.stale = true; route(); } } finally { this.polling = false; }
     persistServers();
     if (s.session) { toast(`Approvato: benvenuto su ${s.name}.`); Live.connect(); route(); PrefSync.pull(); }
     else if (s.revoked) route();

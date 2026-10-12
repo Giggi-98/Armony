@@ -29,6 +29,7 @@ lettura, e Navidrome va fermato.
 """
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import secrets
@@ -124,6 +125,18 @@ def ip_casa():
         return None
 
 
+def di_casa(url):
+    """Un indirizzo che da internet non si raggiunge: IP della rete di casa, localhost, nomi .local/.lan."""
+    h = (urllib.parse.urlsplit(url or "").hostname or "").lower()
+    if h == "localhost" or h.endswith((".local", ".lan")):
+        return True
+    try:
+        a = ipaddress.ip_address(h)
+    except ValueError:
+        return False
+    return a.is_private or a.is_loopback or a.is_link_local
+
+
 def visto(tipo, chi):
     if chi:
         visti[(tipo, chi)] = time.time()
@@ -173,7 +186,10 @@ def ricevi():
             "expires": exp, "url": url, "confermato": False})
     shutil.rmtree(base_dir(), ignore_errors=True)
     code = "ART1" + b64e(json.dumps({"u": url, "k": pub, "s": secret, "n": A.NAME}, separators=(",", ":")).encode())
-    return jsonify(code=code, expires=exp, avviso="Questo server ha già collegamenti o collaboratori: verranno sostituiti da quelli del vecchio" if pieno else None)
+    avvisi = (["Questo server ha già collegamenti o collaboratori: verranno sostituiti da quelli del vecchio"] if pieno else []) + (
+        [f"Questo server si presenterà come {url}, che da internet non si raggiunge: se il vecchio si usa da fuori casa, "
+         "metti prima ARMONY_DOMAIN nel .env (o Impostazioni → Indirizzo pubblico) e crea un codice nuovo"] if di_casa(url) else [])
+    return jsonify(code=code, expires=exp, avviso=" · ".join(avvisi) or None)
 
 
 @bp.post("/api/trasferimento/conferma")
@@ -235,7 +251,7 @@ def t_stato():
     if err:
         return err
     return jsonify(confermato=bool(d.get("confermato")), stage=d["stage"], libero=libero(), nome=A.NAME, app=A.VERSION,
-                   servizio=servizio(), ora=time.time())
+                   servizio=servizio(), ora=time.time(), url=A.public_url() or F.my_url())
 
 
 def servizio():
@@ -373,7 +389,7 @@ def dopo_applicazione():
     try:
         with open(os.path.join(base_dir(), "manifesto.json")) as f:
             m = json.load(f)
-        url = m["url_nuovo"]
+        url = A.dominio_url() or m["url_nuovo"]  # il .env di questo server sa meglio del vecchio come lo si raggiunge
         db.run("INSERT INTO settings (key, value) VALUES ('public_url', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", url)
         F.set_setting("url", url)
         db.run("DELETE FROM settings WHERE key = 'fed_spostato'")
@@ -385,14 +401,8 @@ def dopo_applicazione():
         A.diagnosi.log("errore", "trasferimento", f"dopo l'applicazione: {e}")
         return
 
-    def annuncia():
-        time.sleep(10)
-        for n in F.nodes():
-            try:
-                F.fed_json(n, "POST", "/fed/v1/indirizzo", body={"url": url}, timeout=(5, 20))
-            except F.FedError:
-                pass  # una foglia non si raggiunge: lo saprà dal vecchio («spostato»)
-    threading.Thread(target=annuncia, daemon=True).start()
+    F.set_setting("annunciato", "")  # il database è del vecchio: l'indirizzo nuovo va annunciato comunque
+    F.annuncia()
     A.diagnosi.log("info", "trasferimento", f"questo server è ora {m.get('nome')}, all'indirizzo {url}")
 
 
@@ -646,6 +656,15 @@ def verifica():
         return [{"nome": "Il server nuovo risponde", "ok": False, "blocca": True, "msg": str(e)[:200], "stato": None}]
     rtt = time.time() - t0
     out.append({"nome": "Il server nuovo risponde", "ok": True, "msg": d.get("via") or d.get("url")})
+    # l'indirizzo con cui il nuovo si presenterà a dispositivi e server collegati: quello di adesso, non quello del codice
+    nu = s.get("url") or d.get("url")
+    if nu and nu != d.get("url"):
+        st_up(url=nu)
+    mio = A.public_url() or F.my_url()
+    male = di_casa(nu) and mio and not di_casa(mio)
+    out.append({"nome": "Indirizzo pubblico del nuovo", "ok": not male, "blocca": True,
+                "msg": f"{nu}: da internet non si raggiunge, e dispositivi e server collegati che oggi usano {mio} andrebbero lì. "
+                       "Sul nuovo metti ARMONY_DOMAIN nel .env (o Impostazioni → Indirizzo pubblico), poi riprova" if male else nu})
     out.append({"nome": "Codice di sicurezza confermato sul nuovo", "ok": bool(s.get("confermato")), "blocca": True,
                 "msg": "" if s.get("confermato") else "Sul nuovo premete «È uguale, conferma»"})
     same = s.get("app") == A.VERSION
@@ -734,6 +753,7 @@ def stato():
         out["confermato"], out["libero"] = s.get("confermato"), s.get("libero")
         out["raggiungibile"] = bool(s)
         out["blocco"] = any(not c["ok"] and c.get("blocca") for c in out["verifica"])
+        out["url"] = st().get("url")  # la verifica può averlo appena aggiornato con quello di adesso del nuovo
         out["misure"] = {"brani": misura(True, False)[1], "video": sum(x["size"] for x in elenco("video", A.VIDEO_DIR))}
     if d.get("stage") in ("trasferito", "concluso"):
         now = time.time()

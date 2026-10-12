@@ -54,6 +54,13 @@ nuovo arriva nella risposta: a garantire che dall'altra parte ci sia proprio lui
 nuovo deve confermare prima dell'avvio. La copia passa dall'indirizzo usato per agganciarsi (`via`); ai server
 collegati e ai dispositivi si annuncia comunque l'indirizzo pubblico del nuovo (`url`, preso dalla sua risposta).
 
+**L'indirizzo del nuovo** *(0.60.1)*: conta quello che il nuovo ha *adesso* (lo chiede `/trasf/v1/stato`), non quello
+scritto nel codice. Con `ARMONY_DOMAIN` nel `.env` del nuovo è sempre `https://` + quel nome, anche dopo l'applicazione
+(il manifesto del vecchio non lo sostituisce). Se il vecchio ha un indirizzo raggiungibile da internet e il nuovo si
+presenterebbe con uno di casa (IP privato, `localhost`, `.local`), la verifica blocca l'avvio: dispositivi e server
+collegati verrebbero mandati dove non arrivano. L'annuncio ai collegati passa da `federazione.annuncia()`, lo stesso che
+scatta quando l'indirizzo cambia per qualunque motivo.
+
 ### 3. Scelte, sul vecchio
 - Copiare i brani? Il nuovo dice quanto spazio ha libero, il vecchio quanto serve.
 - Copiare i video?
