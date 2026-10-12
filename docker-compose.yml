@@ -61,6 +61,8 @@ services:
       ARMONY_AVVISI: "${ARMONY_AVVISI:-}"
       # per il controllo giornaliero di nome e certificato (diagnosi.controlla_dominio), se c'è il profilo "https"
       ARMONY_DOMAIN: "${ARMONY_DOMAIN:-}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN:-}"
       ARMONY_HTTPS_PORT: "${ARMONY_HTTPS_PORT:-8460}"
       NAVIDROME_ADMIN_USER: "${NAVIDROME_ADMIN_USER:-}"
       NAVIDROME_ADMIN_PASS: "${NAVIDROME_ADMIN_PASS:-}"

@@ -224,6 +224,17 @@ Se nel sistema è attivo «Riduci movimento», Armony lo rispetta: niente dischi
 
 "In riproduzione", album e artisti prendono la luce dei colori della copertina; se un brano non ha testo, al suo posto compaiono i prossimi brani.
 
+## Bot di Telegram e Discord
+
+Armony può avere un bot su Telegram e uno su Discord: da una chat cerchi brani (`/cerca`), vedi cosa stai ascoltando (`/ora`) e cosa ascoltano gli amici (`/amici`), scarichi da un link (`/scarica`, con il permesso «Scarica musica»), metti in pausa o vai avanti sul dispositivo che suona (`/pausa`, `/avanti`, `/indietro`). E le notifiche di Armony arrivano anche lì (`/notifiche no` le spegne). I bot sono facoltativi e li crea l'amministratore, una volta:
+
+- **Telegram**: in Telegram scrivi a **@BotFather**, `/newbot`, scegli un nome (es. «Armony di Gigi») e un nome utente che finisce con `bot`. Ti dà un token: mettilo in `.env` come `TELEGRAM_BOT_TOKEN=…`.
+- **Discord**: su https://discord.com/developers/applications → **New Application** → **Bot** → **Reset Token**, copia il token in `.env` come `DISCORD_BOT_TOKEN=…`. Non servono «intents» privilegiati.
+
+Poi `docker compose up -d armony`. Non servono porte aperte: il server chiede lui i messaggi a Telegram e Discord.
+
+Ogni utente collega le sue chat in **Impostazioni → Bot Telegram e Discord**: «Collega» dà un codice di 6 cifre (vale 10 minuti, una volta). Su Telegram «Apri Telegram» lo manda da solo; su Discord si scrive `/collega 123456` al bot. Da lì quella chat agisce come te, con i tuoi permessi: dalla stessa pagina la scolleghi. Su Telegram il bot risponde solo in chat privata. Per Discord, «Aggiungi il bot a un server Discord» lo porta nel tuo server; la prima volta i comandi possono metterci fino a un'ora a comparire.
+
 ## Collegare i server degli amici
 Se anche un amico ha Armony, potete collegare i vostri server: in Cerca, sotto i tuoi risultati, compare "Nella rete" con i brani che hanno loro, e anche gli amici dei vostri amici. Li ascolti subito (passano dal tuo server) e con "Copia" li metti nella tua libreria, nella cartella `federati/` (in Navidrome è la libreria "Dalla rete"). La pagina **Rete** si apre con la **mappa dal vivo**: ogni server è un cerchio (i *centri*, che hanno un indirizzo e fanno da punto d'incontro, con un anello; le *foglie*, che non si raggiungono da fuori, più piccole), i collegamenti diretti sono linee piene, i canali delle foglie linee tratteggiate che scorrono verso il loro centro, e quando due server si parlano un punto viaggia sulla linea. In alto un riassunto dice com'è fatta la rete adesso («Stella attorno a Casa», «Maglia fra 3 centri, con 2 foglie a stella»). I cerchi si trascinano e, toccandoli, dicono chi sono e con chi parlano; si aggiorna da sola ogni 5 secondi. Il ruolo non si sceglie: chi ha un indirizzo fa da centro, chi no si aggancia, e fra centri si forma la maglia. Sotto la mappa restano le librerie, con quanti brani hanno.
 

@@ -4716,6 +4716,7 @@ function vSettings(id = location.hash.split('/')[2]) {
     ${srv()?.me?.caps?.includes('notattivita') ? `<label class="check"><input type="checkbox" id="nAtt" ${Notif.att !== false ? 'checked' : ''}><span>✨ Amici in linea e cosa ascoltano<small>👋 chi torna in linea, 🎧 chi comincia ad ascoltare, 📀 le playlist condivise. Pochi avvisi: al massimo uno ogni tre ore per amico. Vale per il tuo utente su tutti i dispositivi.</small></span></label>` : ''}
     <p class="small" style="color:var(--muted);margin:0">${NATIVE ? 'Con l\'app chiusa del tutto gli avvisi non arrivano: li ritrovi nella campanella quando la riapri.' : 'Con il browser chiuso gli avvisi non arrivano: li ritrovi nella campanella.'}</p></div>`] : null,
 
+  srv()?.me?.caps?.includes('bot') ? ['dev', 'bot', 'Bot Telegram e Discord', 'send', 'bot telegram discord chat comandi notifiche collega', '<div id="botBox"><p class="sub">Caricamento…</p></div>'] : null,
   ['dev', 'ascolto', 'Ascolto', 'headphones', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
     <div class="grid2">
       <label class="f">Qualità<select data-p="quality">${opt(qOpts, P.quality)}</select></label>
@@ -4832,7 +4833,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   $('#cacheMB').onchange = e => { P.cacheMB = +e.target.value; savePrefs(); if (!P.cacheMB) ACache.clear().then(() => { $('#cacheUse').textContent = '0 MB usati'; }); else ACache.trim(); };
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint();
+  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint(); refreshBot();
   $('#pubSave')?.addEventListener('click', async () => {
     try {
       const r = await dlApi('/api/indirizzo', { method: 'PUT', body: JSON.stringify({ url: $('#pubUrl').value.trim() }) });
@@ -5265,6 +5266,40 @@ function trSheet() {
   $('#trChiudi').onclick = () => d.close();
   d.addEventListener('close', () => clearTimeout(tm), { once: true });
   closeOutside(d); d.showModal(); giro();
+}
+/* ================= bot di Telegram e Discord (capacità "bot", server/bot.py) =================
+   Ogni utente collega le sue chat con un codice di 6 cifre (10 minuti); da lì comandi e notifiche. Mentre il codice è
+   aperto la pagina si rilegge ogni 3 secondi: appena il bot lo riceve, la chat compare da sola */
+let botT = 0;
+async function refreshBot(attesa) {
+  const box = $('#botBox'); if (!box) return;
+  clearTimeout(botT);
+  let r; try { r = await srvApi(srv(), '/api/bot'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  if (!box.isConnected) return;
+  if (attesa && r.chats.length > attesa.n) { toast(`✅ ${attesa.rete === 'telegram' ? 'Telegram' : 'Discord'} collegato.`); attesa = null; }
+  const adm = srv()?.me?.admin, nomi = { telegram: '✈️ Telegram', discord: '🎮 Discord' };
+  const card = k => {
+    const b = r[k], mie = r.chats.filter(c => c.rete === k);
+    if (!b.on) return `<div class="panel stack"><b>${nomi[k]}</b><p class="sub" style="margin:0">${adm ? `Non attivo: metti <code>${k === 'telegram' ? 'TELEGRAM_BOT_TOKEN' : 'DISCORD_BOT_TOKEN'}</code> nel file <code>.env</code> del server e riavvia Armony (LEGGIMI, «Bot»).` : 'Non attivo su questo server: chiedilo all\'amministratore.'}</p></div>`;
+    return `<div class="panel stack"><div class="row between" style="flex-wrap:nowrap"><b>${nomi[k]}${b.nome ? ` <small style="color:var(--muted);font-weight:500">${esc(k === 'telegram' ? '@' + b.nome : b.nome)}</small>` : ''}</b><button class="btn sm primary" data-bot="${k}">${ic('plus')} Collega</button></div>
+      ${mie.map(c => `<label class="check"><input type="checkbox" data-botn="${k}|${esc(c.chat)}" ${c.notifiche ? 'checked' : ''}><span>${esc(c.nome || c.chat)}<small>Collegata il ${new Date(c.created * 1000).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · notifiche di Armony anche lì · <a href="#" data-botx="${k}|${esc(c.chat)}">scollega</a></small></span></label>`).join('') || '<p class="sub" style="margin:0">Nessuna chat collegata.</p>'}
+      ${k === 'discord' && b.invito ? `<a class="btn sm" href="${esc(b.invito)}" target="_blank" rel="noopener">Aggiungi il bot a un server Discord</a>` : ''}</div>`;
+  };
+  const cod = attesa && attesa.codice ? `<div class="panel stack botcode"><b>Il tuo codice: <span class="code">${esc(attesa.codice)}</span></b>
+      <p class="sub" style="margin:0">${attesa.rete === 'telegram' ? 'Apri il bot e premi «Avvia», oppure scrivigli' : 'Scrivi al bot, in privato o in un server dove c\'è,'} <code>/collega ${esc(attesa.codice)}</code>. Vale 10 minuti, una volta.</p>
+      ${attesa.link ? `<a class="btn primary" href="${esc(attesa.link)}" target="_blank" rel="noopener">${ic('send')} Apri Telegram</a>` : ''}</div>` : '';
+  box.innerHTML = `<p class="sub">🤖 Da una chat: /cerca, /ora, /amici, /scarica un link, /pausa, /avanti. E le notifiche di Armony anche lì. Ogni chat collegata agisce come te, con i tuoi permessi.</p>${cod}${card('telegram')}${card('discord')}`;
+  box.querySelectorAll('[data-bot]').forEach(b => b.onclick = async () => {
+    try { const j = await srvApi(srv(), '/api/bot/codice', { method: 'POST', body: JSON.stringify({ rete: b.dataset.bot }) }); refreshBot({ ...j, rete: b.dataset.bot, n: r.chats.length }); }
+    catch (e) { toast(e.message); }
+  });
+  box.querySelectorAll('[data-botn]').forEach(i => i.onchange = () => { const [k, c] = i.dataset.botn.split('|'); srvApi(srv(), `/api/bot/${k}/${encodeURIComponent(c)}`, { method: 'PUT', body: JSON.stringify({ notifiche: i.checked }) }).catch(e => toast(e.message)); });
+  box.querySelectorAll('[data-botx]').forEach(a => a.onclick = async e => {
+    e.preventDefault(); const [k, c] = a.dataset.botx.split('|');
+    if (!confirm('Scollegare questa chat? Non potrà più agire come te.')) return;
+    await srvApi(srv(), `/api/bot/${k}/${encodeURIComponent(c)}`, { method: 'DELETE' }).catch(er => toast(er.message)); refreshBot();
+  });
+  if (attesa && attesa.scade * 1000 > Date.now()) botT = setTimeout(() => box.isConnected && refreshBot(attesa), 3000);
 }
 /* ================= playlist intelligenti (capacità "intelligenti", server/libreria.py) =================
    Le regole le valuta Navidrome: si aggiornano da sole e le vedono anche le app Subsonic. Qui un costruttore a righe:

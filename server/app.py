@@ -76,6 +76,8 @@ Armony - server di supporto.
                         per l'app Android chiusa (/api/notifiche/nuove è pubblica: vale il gettone); arrivano anche sul
                         canale /api/live ({"type": "notifica"}). Capacità "notifiche"; /api/notifiche/attivita accende
                         o spegne gli avvisi sugli amici (in linea, cosa ascoltano, playlist condivise): "notattivita"
+  /api/bot              bot di Telegram e Discord (bot.py): codice per collegare una chat al proprio utente, chat
+                        collegate, notifiche anche lì. Capacità "bot"
   /api/playlist/ordina  nuovo ordine di una playlist, riscritta in modo sicuro (importa.py, capacità "plordina")
   /api/playlist/togli   toglie un brano da una playlist per id, non per posizione (importa.py, capacità "pltogli")
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
@@ -131,6 +133,7 @@ import metadati
 import radio
 import trasferimento
 import libreria
+import bot
 
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
 VIDEO_DIR = os.environ.get("VIDEO_DIR", "/videos")
@@ -163,10 +166,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento", "intelligenti", "salute", "trasfcasa", "notattivita"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento", "intelligenti", "salute", "trasfcasa", "notattivita", "bot"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/intelligente", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/trasferimento", "admin"), ("/api/salute", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/intelligente", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/bot", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/trasferimento", "admin"), ("/api/salute", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -1189,11 +1192,16 @@ def live_cmd():
     value = d.get("value")
     if not isinstance(value, (int, float, dict)) or len(json.dumps(value)) > 600_000:  # una coda di 1000 brani
         value = None
-    i, frm = uuid.uuid4().hex[:12], str(d.get("from") or "")[:40]
+    return jsonify(ok=True, id=manda_cmd(u, to, cmd, value, str(d.get("from") or "")[:40]))
+
+
+def manda_cmd(u, to, cmd, value=None, frm="bot"):
+    """Un comando a un dispositivo dell'utente (da un telecomando o dal bot): arriva dal canale dal vivo."""
+    i = uuid.uuid4().hex[:12]
     with llock:
         lcmds.setdefault(u, {})[i] = {"to": to, "cmd": cmd, "value": value, "from": frm, "ts": time.time(), "done": None}
     live_put(u, {"type": "cmd", "id": i, "cmd": cmd, "value": value, "from": frm}, only=to)
-    return jsonify(ok=True, id=i)
+    return i
 
 
 # ------------------------------------------------------------------ presenza e attività: chi ascolta cosa, su tutto il server
@@ -2490,13 +2498,19 @@ def download():
         return jsonify(error="Qualità video non valida"), 400
     if j["mode"] not in ("audio", "video"):
         return jsonify(error="Modalità non valida"), 400
+    return jsonify(nuovo_download(j, g.who["user"])), 201
+
+
+def nuovo_download(j, by):
+    """Un lavoro di download in coda (dalla pagina Scarica o dal bot). Mancando, valgono i predefiniti della pagina."""
+    j = dict({"mode": "audio", "format": "mp3", "quality": "best", "playlist": False, "folder": "Scaricati", "sponsorblock": False, "meta": {}}, **j)
     jid = uuid.uuid4().hex[:10]
     with jlock:
         jobs[jid] = dict(j, id=jid, status="in coda", progress=0, title=(f"{j['meta'].get('artist', '')} - {j['meta'].get('title', '')}" if j["meta"] else None),
-                         created=time.time(), updated=time.time(), by=g.who["user"])
+                         created=time.time(), updated=time.time(), by=by)
         jsave(jid)
     jq.put((jid, j))
-    return jsonify(jobs[jid]), 201
+    return jobs[jid]
 
 
 TRACK_STR = ("title", "album", "albumartist", "date", "isrc", "label", "cover", "spotify")
@@ -2841,6 +2855,7 @@ diagnosi.init(app, sys.modules[__name__])
 importa.init(app, sys.modules[__name__])
 scelta.init(app, sys.modules[__name__])
 notifiche.init(app, sys.modules[__name__])
+bot.init(app, sys.modules[__name__])
 webradio.init(app, sys.modules[__name__])
 amici.init(app, sys.modules[__name__])
 utenti.init(app, sys.modules[__name__])
@@ -2877,6 +2892,7 @@ if __name__ == "__main__":
     threading.Thread(target=gc_rooms, daemon=True).start()
     federazione.start()
     libreria.start()  # il giro dei testi in sottofondo
+    bot.start()  # Telegram e Discord, se nel .env ci sono i loro token
     trasferimento.start()  # dopo un trasferimento appena applicato: indirizzi nuovi e annuncio ai collegati
     radio.start()
     diagnosi.start()

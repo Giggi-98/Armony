@@ -149,6 +149,12 @@ MIGRATIONS = [
     CREATE TABLE fed_collab (pid TEXT NOT NULL, node TEXT NOT NULL, user TEXT NOT NULL, added REAL, PRIMARY KEY (pid, node, user));
     CREATE INDEX fed_collab_nu ON fed_collab(node, user);
     """,
+    # 17: chat di Telegram e Discord collegate a un utente (bot.py): agiscono come lui, e ci arrivano le sue notifiche
+    """
+    CREATE TABLE bot_chat (rete TEXT NOT NULL, chat TEXT NOT NULL, user TEXT NOT NULL, nome TEXT, notifiche INTEGER NOT NULL DEFAULT 1,
+                           created REAL NOT NULL, PRIMARY KEY (rete, chat));
+    CREATE INDEX bot_chat_user ON bot_chat(user);
+    """,
 ]
 
 _local = threading.local()

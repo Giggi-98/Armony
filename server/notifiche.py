@@ -50,6 +50,7 @@ def notifica(user, kind, title, body="", link=None, only_once=None):
     cur = db.conn().execute("INSERT INTO notifiche (user, ts, kind, title, body, link, once) VALUES (?, ?, ?, ?, ?, ?, ?)",
                             (user, now, kind, str(title)[:120], str(body or "")[:300], link if link and str(link).startswith("#/") else None, only_once))
     nid = cur.lastrowid
+    A.bot.inoltra(user, title[:120], str(body or "")[:300], link if link and str(link).startswith("#/") else None)
     db.run("DELETE FROM notifiche WHERE user = ? AND id NOT IN (SELECT id FROM notifiche WHERE user = ? ORDER BY id DESC LIMIT ?)", user, user, KEEP)
     A.live_put(user, {"type": "notifica", "item": {"id": nid, "ts": now, "kind": kind, "title": str(title)[:120],
                                                    "body": str(body or "")[:300], "link": link, "letta": 0}})

@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-12 — Bot di Telegram e Discord: il server chiede i messaggi, chat collegate con un codice
+**Contesto:** l'utente vuole bot Telegram e Discord: notifiche, comandi, poi musica nei canali vocali di Discord.
+**Scelta:** `server/bot.py`, dentro Armony. Telegram con `getUpdates` ad attesa lunga e `requests` (niente librerie); Discord con `discord.py` (gateway e, poi, voce: farlo a mano non vale la pena). Una sola logica dei comandi per i due. Una chat si collega a un utente con un codice di 6 cifre creato in Armony (10 minuti, una volta) e agisce come lui, con i suoi permessi; Telegram solo in chat private. Le notifiche di Armony si inoltrano alle chat collegate che le vogliono. Token in `.env`.
+**Alternative scartate:** webhook di Telegram (serve un indirizzo HTTPS raggiungibile e una rotta pubblica: il polling funziona anche dal server di sviluppo dietro NAT); un servizio a parte nel compose (altri thread e un altro posto da aggiornare; i bot leggono stato dal vivo, utenti e permessi che stanno nel processo di Armony); collegare con utente e password dentro la chat (passerebbero da Telegram/Discord).
+**Conseguenze:** una dipendenza in più nell'immagine (`discord.py`); i comandi slash di Discord, la prima volta, impiegano fino a un'ora a comparire; un token sbagliato si vede nel registro eventi (area «bot») e si riprova ogni pochi minuti.
+**Da rivedere se:** il server deve stare spento a lungo e i bot devono rispondere lo stesso, o se i bot servono a più server Armony insieme.
+
 ## 2026-10-12 — Notifiche sugli amici: poche, decise dal server, spegnibili per utente
 **Contesto:** l'utente vuole avvisi tipo «X sta ascoltando», «X si è collegato». La presenza (chi ascolta cosa) c'è già sul canale dal vivo, con la privacy decisa dal server; le notifiche no.
 **Scelta:** tipo di notifica nuovo «attivita» con tre avvisi: in linea (primo dispositivo collegato dopo almeno 2 ore senza, e non se entro 90 secondi comincia ad ascoltare), sta ascoltando (inizio o ripresa, al più uno ogni 3 ore per amico), playlist pubblica creata o condivisa. Rispettano «Mostra agli altri cosa ascolto». Arrivano agli utenti con un dispositivo fidato; ognuno li spegne per il suo utente sul server (`notattivita:<utente>`), non per dispositivo. Le assenze contano solo da quando il server è acceso: al riavvio niente valanga di «è in linea». Un'emoji per tipo davanti al titolo di ogni notifica.
