@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-12 — Trasferimento nella rete di casa: senza codice, solo dalla rete di casa, codice di sicurezza obbligatorio
+**Contesto:** il server di prova e il mini PC di casa sono nella stessa rete; copiare il codice ART1 da uno schermo all'altro è scomodo, e l'indirizzo pubblico del nuovo dentro casa può non rispondere (router senza «hairpin») o fare un giro inutile.
+**Scelta:** il vecchio elenca i server Armony del multicast e chiede a ognuno se ha «Ricevi un server» aperto (`/trasf/v1/pronto`), oppure si scrive l'indirizzo che il nuovo mostra. Senza codice il nuovo accetta solo richieste dalla rete di casa (`dispositivi.is_local`) e manda la sua chiave usa e getta nella risposta; la conferma del codice di sicurezza sul nuovo, già obbligatoria prima dell'avvio, è ciò che esclude un intruso. La copia passa dall'indirizzo di casa (`via`), agli altri si annuncia quello pubblico (`url`).
+**Alternative scartate:** mandare il codice ART1 nel multicast (chiunque nella rete lo leggerebbe: stessa sicurezza di nessun codice, con più codice); usare sempre l'indirizzo pubblico (dentro casa spesso non risponde); fidarsi della rete di casa senza codice di sicurezza (un dispositivo qualsiasi nella rete potrebbe farsi passare per il nuovo).
+**Conseguenze:** chiunque nella rete di casa può agganciarsi per primo a un nuovo in attesa (lo si vede dal nome e dal codice di sicurezza, si annulla e si riapre); Tailscale conta come casa, come per il resto di Armony.
+**Da rivedere se:** Armony si usa in reti condivise (uffici, case con ospiti) dove «rete di casa» non vuol dire fiducia.
+
 ## 2026-10-11 — Controlli dei brani: regole locali, Deezer solo su richiesta, si sistema da solo solo il titolo
 **Contesto:** brani scaricati a metà, durate assurde, titoli con «(Official Video)» o «_256k», tag e numeri di traccia sbagliati restavano invisibili finché qualcuno non li ascoltava.
 **Scelta:** sette controlli in `server/libreria.py` sul DB di Navidrome (durata strana, file troncato da dimensione/bitrate, qualità sotto 128 kbps, tag mancanti, titolo sporco, numero di traccia doppio, durata diversa dall'originale). Il confronto con l'originale chiede a Deezer ed è spento nel controllo manuale (un secondo a brano); è acceso solo per i brani nuovi, che sono pochi. Il controllo automatico parte dal primo avvio: la libreria vecchia la controlla l'amministratore a mano. «Sistema» corregge da solo solo il titolo; il resto passa da «Modifica», «Scegli un'altra versione» o «Va bene così» (ricordato per brano e per controllo).

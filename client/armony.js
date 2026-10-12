@@ -5184,11 +5184,12 @@ async function refreshTrasf() {
     html = `<p class="sub" style="margin-bottom:var(--s4)">Sposta tutto questo server su un altro: utenti e password, playlist, preferiti, ascolti, dispositivi (restano collegati), collegamenti della federazione e, se vuoi, i brani. Il nuovo prende anche l'identità: per gli altri server è lo stesso server, a un indirizzo nuovo. Come funziona: docs/TRASFERIMENTO.md.</p>
       <div class="fedacts">
         <button class="fedtile primary" id="trRicevi"><span class="fedav">${ic('down')}</span><span><b>Ricevi un server</b><small>Questo è il server nuovo, appena installato: crea un codice da usare sul vecchio.</small></span></button>
-        <button class="fedtile" id="trInvia"><span class="fedav">${ic('send')}</span><span><b>Trasferisci questo server</b><small>Questo è il vecchio: incolla il codice del nuovo e scegli cosa portare.</small></span></button></div>`;
+        <button class="fedtile" id="trInvia"><span class="fedav">${ic('send')}</span><span><b>Trasferisci questo server</b><small>Questo è il vecchio: scegli il nuovo nella rete di casa, scrivi il suo indirizzo o incolla il suo codice.</small></span></button></div>`;
   } else if (t.ruolo === 'ricevi') {
     const cur = { aperto: 0, agganciato: t.confermato ? 2 : 1, ricezione: 2, applicazione: 3, applicato: 4 }[t.stage] ?? 0;
     html = `<div class="fedcard${t.stage === 'agganciato' && !t.confermato ? ' ask' : ''}">${steps(S5, cur)}` + ({
       aperto: () => `<p>Usa questo codice sul server vecchio, in Impostazioni → Trasferimento → «Trasferisci questo server». Vale una volta, fino alle ${new Date(t.expires * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}.</p>
+        ${t.casa ? `<p class="fedmeta">Se il vecchio è nella stessa rete, il codice non serve: lì questo server compare nell'elenco, oppure si scrive il suo indirizzo, <b>${esc(t.casa)}</b>.</p>` : ''}
         <div class="code" style="font-size:.78rem;word-break:break-all" id="trCode">${esc(store.get('trCode', ''))}</div><div class="row"><button class="btn primary" id="trCopy">${ic('share')} Copia il codice</button>${annulla}</div>`,
       agganciato: () => t.confermato ? `<p>Confermato. Ora sul server vecchio si sceglie se portare anche i brani e si avvia: questa scheda segue tutto da sola.</p>`
         : `<p><b>${esc(t.peer_name || 'Il server vecchio')}</b> vuole trasferirsi qui. Confronta il codice di sicurezza con quello sul suo schermo: se è uguale, conferma.</p>
@@ -5227,7 +5228,7 @@ async function refreshTrasf() {
   }
   box.innerHTML = html;
   act('trRicevi', async () => { const r = await post('ricevi'); store.set('trCode', r.code); if (r.avviso) toast(r.avviso, 6000); });
-  act('trInvia', async () => { const c = prompt('Il codice del server nuovo (inizia con ART1):'); if (c) await post('aggancia', { code: c.trim() }); });
+  act('trInvia', async () => { if (dlSrv()?.me?.caps?.includes('trasfcasa')) return trSheet(); const c = prompt('Il codice del server nuovo (inizia con ART1):'); if (c) await post('aggancia', { code: c.trim() }); });
   act('trOk', () => post('conferma'));
   act('trNo', async () => { if (confirm('Annullare il trasferimento?')) { await post('annulla'); store.set('trCode', ''); } });
   act('trGo', async () => { if (confirm(`Trasferire questo server su ${t.nome_nuovo || t.url}? Alla fine il nuovo prende il suo posto.`)) await post('avvia', { brani: $('#trBr')?.checked, video: $('#trVi')?.checked }); });
@@ -5236,6 +5237,29 @@ async function refreshTrasf() {
   $('#trCopy') && ($('#trCopy').onclick = async () => { if (await copyText(store.get('trCode', ''))) toast('Codice copiato.'); });
   const busy = ['aperto', 'agganciato', 'ricezione', 'applicazione', 'invio', 'congelato', 'errore'].includes(t.stage) || t.vivo;
   trT = setTimeout(() => box.isConnected && refreshTrasf(), busy ? 2000 : 15000);
+}
+// il vecchio sceglie il nuovo: dall'elenco della rete di casa (multicast, si rilegge ogni 3 secondi), con l'indirizzo
+// scritto a mano o con il codice ART1. Nei primi due casi niente codice: conta il codice di sicurezza confermato sul nuovo
+function trSheet() {
+  const d = $('#dlg'); d.className = 'sheet smart'; let tm = 0;
+  d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">Dov'è il server nuovo?</b><small style="color:var(--muted)">Sul nuovo, prima, apri Impostazioni → Trasferimento → «Ricevi un server».</small></span></div>
+    <div class="smbody"><b>Nella rete di casa</b><div id="trVic" class="fedacts" style="margin:0"><p class="sub" style="margin:0">Cerco…</p></div>
+      <label class="f">Oppure scrivi il suo indirizzo, o incolla il suo codice<input type="text" id="trAddr" placeholder="192.168.1.50:8080 oppure ART1…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <div class="row"><button class="btn primary" id="trAgg">${ic('send')} Collega</button><button class="btn" id="trChiudi">Annulla</button></div></div>`;
+  const go = async (body, b) => { b.disabled = true; try { await dlApi('/api/trasferimento/aggancia', { method: 'POST', body: JSON.stringify(body) }); d.close(); refreshTrasf(); } catch (e) { toast(e.message); } b.disabled = false; };
+  const giro = async () => {
+    const box = $('#trVic'); if (!d.open || !box) return;
+    let r; try { r = await dlApi('/api/trasferimento/vicini'); } catch (e) { box.innerHTML = `<p class="sub" style="margin:0">${esc(e.message)}</p>`; return; }
+    if (!d.open) return;
+    box.innerHTML = r.peers.length ? r.peers.map((p, i) => `<button class="fedtile${p.aperto ? ' primary' : ''}" data-tv="${i}" ${p.aperto ? '' : 'disabled'}><span class="fedav">${ic('wifi')}</span><span><b>${esc(p.name)}</b><small>${esc(p.url)} · ${p.aperto ? 'pronto a ricevere' : 'non aspetta: lì apri «Ricevi un server»'}</small></span></button>`).join('')
+      : `<p class="sub" style="margin:0">${r.multicast ? 'Nessun server Armony trovato nella rete. Se il nuovo è acceso, scrivi qui sotto l\'indirizzo che mostra in «Ricevi un server».' : 'La ricerca nella rete è spenta su questo server (ARMONY_MULTICAST=0): scrivi l\'indirizzo del nuovo.'}</p>`;
+    box.querySelectorAll('[data-tv]').forEach(b => b.onclick = () => go({ addr: r.peers[+b.dataset.tv].url }, b));
+    tm = setTimeout(giro, 3000);
+  };
+  $('#trAgg').onclick = e => { const v = $('#trAddr').value.trim(); if (!v) return toast('Scrivi l\'indirizzo o incolla il codice.'); go(v.startsWith('ART1') ? { code: v } : { addr: v }, e.currentTarget); };
+  $('#trChiudi').onclick = () => d.close();
+  d.addEventListener('close', () => clearTimeout(tm), { once: true });
+  closeOutside(d); d.showModal(); giro();
 }
 /* ================= playlist intelligenti (capacità "intelligenti", server/libreria.py) =================
    Le regole le valuta Navidrome: si aggiornano da sole e le vedono anche le app Subsonic. Qui un costruttore a righe:

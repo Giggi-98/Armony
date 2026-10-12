@@ -46,6 +46,14 @@ di sicurezza** (cinque simboli dall'hash delle due chiavi, come nella federazion
 conferma su tutti e due. Da qui ogni richiesta del vecchio è firmata con la sua chiave usa e getta (metodo, percorso,
 data, destinatario, hash del corpo, come le richieste federate) e il nuovo risponde solo a quella chiave.
 
+**Nella stessa rete di casa** *(0.60)*: il codice non serve. Il vecchio elenca i server Armony trovati col multicast
+(`/api/trasferimento/vicini`, che chiede a ognuno `/trasf/v1/pronto`) e dice quali hanno «Ricevi un server» aperto;
+in alternativa si scrive l'indirizzo che il nuovo mostra (`http://192.168…:porta`). `/trasf/v1/ciao` e `/pronto`
+accettano la richiesta senza segreto solo da indirizzi della rete di casa (o Tailscale), e la chiave usa e getta del
+nuovo arriva nella risposta: a garantire che dall'altra parte ci sia proprio lui resta il codice di sicurezza, che il
+nuovo deve confermare prima dell'avvio. La copia passa dall'indirizzo usato per agganciarsi (`via`); ai server
+collegati e ai dispositivi si annuncia comunque l'indirizzo pubblico del nuovo (`url`, preso dalla sua risposta).
+
 ### 3. Scelte, sul vecchio
 - Copiare i brani? Il nuovo dice quanto spazio ha libero, il vecchio quanto serve.
 - Copiare i video?

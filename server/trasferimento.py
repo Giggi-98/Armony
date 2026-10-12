@@ -4,14 +4,17 @@ Armony - trasferimento di un server a un altro (docs/TRASFERIMENTO.md).
   Sul nuovo, che riceve:
   POST /api/trasferimento/ricevi      un codice ART1 usa e getta (2 ore)
   POST /api/trasferimento/conferma    l'amministratore ha confrontato il codice di sicurezza
-  POST /trasf/v1/ciao                 pubblica, con il segreto del codice: il vecchio si presenta con la sua chiave usa e getta
+  POST /trasf/v1/ciao                 pubblica, con il segreto del codice: il vecchio si presenta con la sua chiave usa e getta.
+                                      Dalla rete di casa anche senza segreto (il codice di sicurezza va confermato comunque)
+  GET  /trasf/v1/pronto               solo dalla rete di casa: se questo server aspetta di ricevere (per l'elenco del vecchio)
   GET  /trasf/v1/stato                \
   GET/POST /trasf/v1/file             |  firmate con la chiave usa e getta del vecchio: conferma, spazio libero, file a
   POST /trasf/v1/manifesto            |  pezzi (si riprende da dove si era fermato), elenco dei file, applicazione
   POST /trasf/v1/applica              |  (la fa il servizio di sistema: deploy/armony-trasferimento.sh) e, senza brani,
   POST /trasf/v1/libreria             /  un invito che aggancia il vecchio come libreria
   Sul vecchio, che invia:
-  POST /api/trasferimento/aggancia    {code}: si presenta al nuovo; risponde il codice di sicurezza
+  GET  /api/trasferimento/vicini      i server Armony della rete di casa (multicast) e quali aspettano di ricevere
+  POST /api/trasferimento/aggancia    {code} oppure {addr}: si presenta al nuovo; risponde il codice di sicurezza
   POST /api/trasferimento/avvia       {brani, video}: fotografia, invio, congelamento, applicazione, passaggio di testimone
   POST /api/trasferimento/brani       trasferito senza brani: li manda adesso
   POST /api/trasferimento/concludi    il vecchio smette di rispondere al posto del nuovo e cancella l'identità
@@ -30,6 +33,7 @@ import json
 import os
 import secrets
 import shutil
+import socket
 import sqlite3
 import threading
 import time
@@ -109,6 +113,17 @@ def libero():
         return 0
 
 
+def ip_casa():
+    """L'indirizzo di questo server nella rete di casa (con la rete host è quello del computer): si mostra sul nuovo, per
+    scriverlo sul vecchio quando l'elenco non lo trova (multicast spento o reti diverse)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as so:
+            so.connect(("10.255.255.255", 1))  # nessun pacchetto parte: serve solo a scegliere la scheda di rete
+            return f"http://{so.getsockname()[0]}:{A.PORT}"
+    except OSError:
+        return None
+
+
 def visto(tipo, chi):
     if chi:
         visti[(tipo, chi)] = time.time()
@@ -175,7 +190,9 @@ def ciao():
     d, j = st(), request.get_json(silent=True) or {}
     if d.get("ruolo") != "ricevi" or d.get("stage") != "aperto" or time.time() > d.get("expires", 0):
         return jsonify(error="Codice scaduto o già usato: creane uno nuovo sul server che riceve"), 403
-    if not secrets.compare_digest(hashlib.sha256(str(j.get("s") or "").encode()).hexdigest(), d["hash"]):
+    if j.get("s") is None and not A.dispositivi.is_local():
+        return jsonify(error="Senza codice solo dalla rete di casa: usa il codice ART1"), 403
+    if j.get("s") is not None and not secrets.compare_digest(hashlib.sha256(str(j.get("s")).encode()).hexdigest(), d["hash"]):
         return jsonify(error="Codice non valido"), 403
     pub = str(j.get("pub") or "")
     try:
@@ -184,7 +201,15 @@ def ciao():
         return jsonify(error="Chiave non valida"), 400
     safety = F.safety(d["pub"], pub)
     st_up(stage="agganciato", peer_pub=pub, peer_name=str(j.get("name") or "Server")[:60], peer_app=str(j.get("app") or "")[:20], safety=safety)
-    return jsonify(safety=safety, name=A.NAME, app=A.VERSION, libero=libero())
+    return jsonify(safety=safety, name=A.NAME, app=A.VERSION, libero=libero(), k=d["pub"], u=d["url"])
+
+
+@bp.get("/trasf/v1/pronto")
+def pronto():
+    if not A.dispositivi.is_local():
+        return jsonify(error="Solo dalla rete di casa"), 403
+    d = st()
+    return jsonify(aperto=d.get("ruolo") == "ricevi" and d.get("stage") == "aperto" and time.time() < d.get("expires", 0), name=A.NAME, app=A.VERSION)
 
 
 def firmata(stages):
@@ -382,7 +407,7 @@ def treq(method, path, params=None, body=None, raw=None, timeout=(10, 120)):
     h = {"X-Trasf-Date": str(date), "X-Trasf-Sig": sig}
     if body is not None:
         h["Content-Type"] = "application/json"
-    return A.http.request(method, d["url"] + path + q, data=data or None, headers=h, timeout=timeout)
+    return A.http.request(method, (d.get("via") or d["url"]) + path + q, data=data or None, headers=h, timeout=timeout)
 
 
 def tjson(method, path, **kw):
@@ -398,27 +423,59 @@ def tjson(method, path, **kw):
 
 @bp.post("/api/trasferimento/aggancia")
 def aggancia():
-    code = str((request.get_json(silent=True) or {}).get("code") or "").strip()
-    try:
-        if not code.startswith("ART1"):
-            raise ValueError
-        inv = json.loads(b64d(code[4:]))
-        url = F.clean_url(inv["u"])
-    except (ValueError, KeyError, TypeError):
-        return jsonify(error="Codice non valido: è quello che mostra «Ricevi un server» sul nuovo (inizia con ART1)"), 400
+    """Con il codice ART1, oppure con l'indirizzo del nuovo nella rete di casa (scelto dall'elenco o scritto a mano):
+    allora niente segreto, la chiave del nuovo arriva nella risposta e a garantire che sia lui resta il codice di
+    sicurezza, che il nuovo deve confermare prima dell'avvio. La copia passa dall'indirizzo usato qui (via); agli altri
+    server si annuncia quello pubblico del nuovo (url)."""
+    j0 = request.get_json(silent=True) or {}
+    code, addr = str(j0.get("code") or "").strip(), str(j0.get("addr") or "").strip()
+    inv = None
+    if code:
+        try:
+            if not code.startswith("ART1"):
+                raise ValueError
+            inv = json.loads(b64d(code[4:]))
+            via = F.clean_url(inv["u"])
+        except (ValueError, KeyError, TypeError):
+            return jsonify(error="Codice non valido: è quello che mostra «Ricevi un server» sul nuovo (inizia con ART1)"), 400
+    else:
+        if "://" not in addr:
+            addr = "http://" + addr
+        u = urllib.parse.urlsplit(addr)
+        if not u.hostname:
+            return jsonify(error="Scrivi l'indirizzo del server nuovo, per esempio 192.168.1.50:8080"), 400
+        via = f"{u.scheme}://{u.hostname}:{u.port or (8080 if u.scheme == 'http' else 443)}"
     priv, pub = chiavi()
     try:
-        r = A.http.post(url + "/trasf/v1/ciao", json={"s": inv["s"], "pub": pub, "name": A.NAME, "app": A.VERSION}, timeout=15)
+        r = A.http.post(via + "/trasf/v1/ciao", json={"s": inv["s"] if inv else None, "pub": pub, "name": A.NAME, "app": A.VERSION}, timeout=15)
         j = r.json()
     except (requests.RequestException, ValueError):
-        return jsonify(error=f"Non riesco a raggiungere {url}: il nuovo server deve essere acceso e raggiungibile da qui"), 502
+        return jsonify(error=f"Non riesco a raggiungere {via}: il nuovo server deve essere acceso e raggiungibile da qui"), 502
     if not r.ok:
         return jsonify(error=j.get("error") or "Il nuovo server ha rifiutato"), r.status_code
-    if F.safety(inv["k"], pub) != j.get("safety"):
+    peer = inv["k"] if inv else str(j.get("k") or "")
+    if F.safety(peer, pub) != j.get("safety"):
         return jsonify(error="Il codice di sicurezza non torna: qualcuno si è messo in mezzo"), 409
-    st_set({"ruolo": "invia", "stage": "agganciato", "url": url, "peer_pub": inv["k"], "my_priv": priv, "my_pub": pub,
+    url = via if inv else F.clean_url(j.get("u") or via)
+    st_set({"ruolo": "invia", "stage": "agganciato", "url": url, "via": via, "peer_pub": peer, "my_priv": priv, "my_pub": pub,
             "safety": j["safety"], "nome_nuovo": j.get("name"), "app_nuovo": j.get("app"), "libero": j.get("libero"), "at": time.time()})
     return jsonify(stato())
+
+
+@bp.get("/api/trasferimento/vicini")
+def vicini():
+    peers = [dict(name=p["name"], url=p["url"]) for p in list(A.lan_peers.values()) if time.time() - p["seen"] < 20]
+
+    def chiedi(p):
+        try:
+            j = A.http.get(p["url"] + "/trasf/v1/pronto", timeout=3).json()
+            p.update(aperto=bool(j.get("aperto")), app=j.get("app"))
+        except (requests.RequestException, ValueError):
+            p.update(aperto=False, app=None)
+    th = [threading.Thread(target=chiedi, args=(p,)) for p in peers]
+    [t.start() for t in th]
+    [t.join() for t in th]
+    return jsonify(multicast=A.MULTICAST, peers=sorted(peers, key=lambda p: (not p["aperto"], p["name"])))
 
 
 def elenco(dest, root):
@@ -534,7 +591,7 @@ def esegui(brani, video, solo_brani=False):
         st_up(stage="applicazione")
         tjson("POST", "/trasf/v1/applica", body={})
         # il nuovo è pronto quando risponde con l'identità di questo server
-        url = st()["url"]
+        url = st().get("via") or st()["url"]
         for _ in range(60):
             time.sleep(5)
             try:
@@ -588,7 +645,7 @@ def verifica():
     except (RuntimeError, requests.RequestException) as e:
         return [{"nome": "Il server nuovo risponde", "ok": False, "blocca": True, "msg": str(e)[:200], "stato": None}]
     rtt = time.time() - t0
-    out.append({"nome": "Il server nuovo risponde", "ok": True, "msg": d.get("url")})
+    out.append({"nome": "Il server nuovo risponde", "ok": True, "msg": d.get("via") or d.get("url")})
     out.append({"nome": "Codice di sicurezza confermato sul nuovo", "ok": bool(s.get("confermato")), "blocca": True,
                 "msg": "" if s.get("confermato") else "Sul nuovo premete «È uguale, conferma»"})
     same = s.get("app") == A.VERSION
@@ -601,7 +658,7 @@ def verifica():
     skew = abs((s.get("ora") or 0) + rtt / 2 - time.time())
     out.append({"nome": "Stessa ora sui due server", "ok": skew < 120, "blocca": True,
                 "msg": f"scarto di {int(skew)} s" + ("" if skew < 120 else ": le firme scadono dopo 5 minuti, sistema l'ora (NTP)")})
-    https = str(d.get("url") or "").startswith("https://")
+    https = str(d.get("via") or d.get("url") or "").startswith("https://")
     out.append({"nome": "Collegamento cifrato (HTTPS)", "ok": https, "blocca": False,
                 "msg": "" if https else "senza HTTPS fallo solo dentro la rete di casa: passano anche le impronte delle password", "stato": s})
     return out
@@ -665,8 +722,10 @@ def annulla():
 
 def stato():
     d = st()
-    out = {k: d.get(k) for k in ("ruolo", "stage", "url", "safety", "confermato", "nome_nuovo", "peer_name", "brani", "video", "errore",
+    out = {k: d.get(k) for k in ("ruolo", "stage", "url", "via", "safety", "confermato", "nome_nuovo", "peer_name", "brani", "video", "errore",
                                  "libero", "expires", "at")}
+    if d.get("ruolo") == "ricevi" and d.get("stage") == "aperto":
+        out["casa"] = ip_casa()
     if d.get("ruolo") == "invia" and d.get("stage") in ("invio", "congelato", "applicazione") or stato_vivo["msg"].startswith("Brani"):
         out["vivo"] = dict(stato_vivo)
     if d.get("ruolo") == "invia" and d.get("stage") in ("agganciato", "errore"):
