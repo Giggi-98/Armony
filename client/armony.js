@@ -4211,13 +4211,13 @@ const Amici = {
 /* ================= notifiche (capacità "notifiche", server/notifiche.py) ================= */
 I.spark = '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z"/>';
 I.bell = '<path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>';
-const NKIND = { import: 'nImport', download: 'nDownload', jam: 'nJam', dispositivi: 'nDev', amici: 'nAmici', sistema: null };
+const NKIND = { import: 'nImport', download: 'nDownload', jam: 'nJam', dispositivi: 'nDev', amici: 'nAmici', sistema: null, attivita: null };
 const Notif = {
   items: [], unread: 0,
   on() { return !!srv()?.me?.caps?.includes('notifiche') && !!srv()?.session; },
   async load() {
     if (!this.on()) { this.paint(); return; }
-    try { const r = await srvApi(srv(), '/api/notifiche'); this.items = r.items; this.unread = r.unread; } catch {}
+    try { const r = await srvApi(srv(), '/api/notifiche'); this.items = r.items; this.unread = r.unread; this.att = r.attivita; } catch {}
     this.paint(); this.views(); this.seen(Math.max(0, ...this.items.map(x => x.id))); this.native();
   },
   // riquadro aperto o pagina delle notifiche: si ridisegnano con lo stato nuovo
@@ -4712,7 +4712,8 @@ function vSettings(id = location.hash.split('/')[2]) {
 
   srv()?.me?.caps?.includes('notifiche') ? ['dev', 'notifiche', 'Notifiche', 'bell', 'notifiche avvisi campanella importazioni download jam dispositivi', `<div class="panel stack">
     <label class="check"><input type="checkbox" id="pNotif" ${P.notifOn ? 'checked' : ''}><span>Avvisi su questo dispositivo<small>Quando ${NATIVE ? 'l\'app è in sottofondo' : 'Armony non è la scheda in primo piano'}, le notifiche arrivano come avvisi del ${NATIVE ? 'telefono' : 'sistema'}. Tutte restano comunque nella campanella.</small></span></label>
-    ${[['nImport', 'Importazioni e album finiti', 'Quanti brani sono arrivati e quanti non si trovano'], ['nDownload', 'Download singoli', 'Scaricati o non riusciti'], ['nJam', 'Jam degli amici', 'Quando qualcuno apre una Jam visibile'], ['nDev', 'Dispositivi da approvare', 'Un tuo dispositivo nuovo aspetta l\'approvazione'], ['nAmici', 'Amici', 'Brani mandati a te, inviti e aggiunte nelle playlist collaborative']].map(([k, l, h]) => `<label class="check"><input type="checkbox" data-pb="${k}" ${P[k] !== false ? 'checked' : ''}><span>${l}<small>${h}</small></span></label>`).join('')}
+    ${[['nImport', '📥 Importazioni e album finiti', 'Quanti brani sono arrivati e quanti non si trovano'], ['nDownload', '⬇️ Download singoli', 'Scaricati o non riusciti'], ['nJam', '🎉 Jam degli amici', 'Quando qualcuno apre una Jam visibile'], ['nDev', '🔐 Dispositivi da approvare', 'Un tuo dispositivo nuovo aspetta l\'approvazione'], ['nAmici', '🤝 Amici', 'Brani mandati a te, inviti e aggiunte nelle playlist collaborative']].map(([k, l, h]) => `<label class="check"><input type="checkbox" data-pb="${k}" ${P[k] !== false ? 'checked' : ''}><span>${l}<small>${h}</small></span></label>`).join('')}
+    ${srv()?.me?.caps?.includes('notattivita') ? `<label class="check"><input type="checkbox" id="nAtt" ${Notif.att !== false ? 'checked' : ''}><span>✨ Amici in linea e cosa ascoltano<small>👋 chi torna in linea, 🎧 chi comincia ad ascoltare, 📀 le playlist condivise. Pochi avvisi: al massimo uno ogni tre ore per amico. Vale per il tuo utente su tutti i dispositivi.</small></span></label>` : ''}
     <p class="small" style="color:var(--muted);margin:0">${NATIVE ? 'Con l\'app chiusa del tutto gli avvisi non arrivano: li ritrovi nella campanella quando la riapri.' : 'Con il browser chiuso gli avvisi non arrivano: li ritrovi nella campanella.'}</p></div>`] : null,
 
   ['dev', 'ascolto', 'Ascolto', 'headphones', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
@@ -4810,6 +4811,10 @@ function vSettings(id = location.hash.split('/')[2]) {
   if ($('#pNotif')) $('#pNotif').onchange = async e => {
     if (e.target.checked && !(await Notif.permission())) { e.target.checked = false; toast(NATIVE ? 'Consenti le notifiche ad Armony nelle impostazioni del telefono.' : 'Il browser non ha consentito le notifiche: abilitale dal lucchetto accanto all\'indirizzo.', 7000); return; }
     P.notifOn = e.target.checked; savePrefs(); Notif.native(); toast(P.notifOn ? 'Avvisi attivi su questo dispositivo.' : 'Avvisi spenti: le notifiche restano nella campanella.');
+  };
+  if ($('#nAtt')) $('#nAtt').onchange = async e => {
+    try { Notif.att = (await srvApi(srv(), '/api/notifiche/attivita', { method: 'PUT', body: JSON.stringify({ on: e.target.checked }) })).attivita; toast(Notif.att ? '✨ Ti avviso quando gli amici sono in linea o ascoltano.' : 'Niente più avvisi sugli amici.'); }
+    catch { e.target.checked = Notif.att !== false; toast('Non riesco a salvare: riprova.'); }
   };
   if ($('#pShare')) $('#pShare').onchange = async e => {
     try { Presence.share = (await srvApi(srv(), '/api/live/privacy', { method: 'PUT', body: JSON.stringify({ share: e.target.checked }) })).share; toast(Presence.share ? 'Gli altri vedono cosa ascolti.' : 'Non compari più agli altri.'); }
@@ -6166,10 +6171,21 @@ const AppUpdate = {
       return { current: a.version, latest: j.tag_name, url: apk?.browser_download_url, shaUrl: sha?.browser_download_url, notes: this.notes(j.body), available: newer && !!apk };
     } catch { return null; }
   },
-  // le note generate da GitHub, ridotte a poche righe leggibili: senza titoli, autori e link
+  // le note della release (docs/rilasci): le righe «- …» e i titoletti «### …», al massimo 8 righe; senza autori e link.
+  // Ogni voce è { h: titoletto } o { t: riga }; grassetto e `codice` li disegna noteHtml
   notes(body) {
-    return String(body || '').split('\n').map(l => l.trim()).filter(l => /^[-*] /.test(l))
-      .map(l => l.replace(/^[-*] /, '').replace(/ by @\S+ in \S+$/, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')).slice(0, 5);
+    const out = [];
+    for (const l of String(body || '').split('\n').map(l => l.trim())) {
+      if (/^#{3,} /.test(l)) out.push({ h: l.replace(/^#+ /, '') });
+      else if (/^[-*] /.test(l)) out.push({ t: l.replace(/^[-*] /, '').replace(/ by @\S+ in \S+$/, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') });
+      if (out.filter(x => x.t).length >= 8) break;
+    }
+    while (out.length && out[out.length - 1].h) out.pop();
+    return out;
+  },
+  noteHtml(n) {
+    const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+    return n.h ? `<li class="nh">${md(n.h)}</li>` : `<li>${md(n.t)}</li>`;
   },
   // al massimo un controllo all'ora (all'avvio e tornando nell'app): con ogni 6 ore un'app rimasta aperta in
   // sottofondo vedeva la versione nuova solo mezza giornata dopo. "Più tardi" vale per quella versione fino al prossimo avvio
@@ -6194,7 +6210,7 @@ const AppUpdate = {
     const btns = (main, mainLabel) => `<div class="row">${main ? `<button class="btn primary" data-up="${main}">${mainLabel}</button>` : ''}<button class="btn" data-up="dopo">Più tardi</button></div>`;
     const u = this.u || {};
     box.innerHTML = {
-      offerta: `${u.notes?.length ? `<ul class="notes">${u.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '<p class="sub">Correzioni e miglioramenti.</p>'}
+      offerta: `${u.notes?.length ? `<ul class="notes">${u.notes.map(n => this.noteHtml(n)).join('')}</ul>` : '<p class="sub">Correzioni e miglioramenti.</p>'}
         <p class="small" style="color:var(--muted);margin:0">Versione installata ${esc(u.current || '')}. L'aggiornamento si installa sopra, senza perdere niente.</p>${btns('vai', 'Aggiorna ora')}`,
       scarico: `<p style="margin:0">Scarico l'aggiornamento${x.total > 0 ? ` · ${Math.round(x.received / x.total * 100)}%` : '…'}</p>
         <div class="bar"><i style="width:${x.total > 0 ? Math.round(x.received / x.total * 100) : 4}%"></i></div>`,

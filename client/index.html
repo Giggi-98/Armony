@@ -377,7 +377,9 @@ dialog.smart .smbody{display:flex;flex-direction:column;gap:var(--s3);padding:0 
 .bar{height:6px;background:var(--surface2);border-radius:99px;overflow:hidden;margin-top:var(--s2)}
 /* foglio di aggiornamento dell'app: stesso rientro del titolo del foglio */
 #aupd{padding:6px 10px 6px}
-.notes{margin:0;padding-left:20px}.notes li{margin:3px 0}
+.notes{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:var(--s2)}.notes li{line-height:1.45}.notes li b{color:var(--ink);font-weight:700}
+.notes li.nh{margin-top:var(--s2);font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.notes code{font-size:.85em;padding:1px 5px;border-radius:var(--r-s);background:var(--surface2)}
 .bar i{display:block;height:100%;background:var(--accent);transition:width .3s}
 .tag{display:inline-block;font-size:.76rem;font-weight:600;padding:3px 10px;border-radius:99px;background:var(--surface2);color:var(--muted);white-space:nowrap}
 .tag.ok{background:color-mix(in srgb,var(--sage) 22%,transparent);color:var(--sage)}

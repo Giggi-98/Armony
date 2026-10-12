@@ -74,7 +74,8 @@ Armony - server di supporto.
                         server (webradio.py; capacità "webradio")
   /api/notifiche        notifiche dell'utente (notifiche.py): elenco, non lette, segnate come lette, gettone e nuove
                         per l'app Android chiusa (/api/notifiche/nuove è pubblica: vale il gettone); arrivano anche sul
-                        canale /api/live ({"type": "notifica"}). Capacità "notifiche"
+                        canale /api/live ({"type": "notifica"}). Capacità "notifiche"; /api/notifiche/attivita accende
+                        o spegne gli avvisi sugli amici (in linea, cosa ascoltano, playlist condivise): "notattivita"
   /api/playlist/ordina  nuovo ordine di una playlist, riscritta in modo sicuro (importa.py, capacità "plordina")
   /api/playlist/togli   toglie un brano da una playlist per id, non per posizione (importa.py, capacità "pltogli")
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
@@ -162,7 +163,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento", "intelligenti", "salute", "trasfcasa"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento", "intelligenti", "salute", "trasfcasa", "notattivita"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
 RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/intelligente", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/trasferimento", "admin"), ("/api/salute", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
@@ -1035,6 +1036,7 @@ def live_stream():
     # hb=1: il client manda battiti (/api/live/beat) e riceve {"type":"ping"} al posto del commento
     hb = request.args.get("hb") == "1"
     cid, q = uuid.uuid4().hex, queue.Queue(maxsize=200)
+    primo = not live_connesso(u)  # nessun dispositivo di questo utente era collegato: per l'avviso «è in linea»
     me = {"device": dev, "name": name, "q": q, "hb": hb, "seen": time.time(),
           "dev": g.who.get("dev"), "admin": g.who["admin"], "keyed": g.who.get("keyed", True), "net": dispositivi.net(), "t0": time.time()}
     with llock:
@@ -1072,6 +1074,8 @@ def live_stream():
                         "share": pres_who(u)[0], "now": time.time(), "radio": radio.all_summaries()})
     if not old or hb:  # dopo un fantasma "join" dice agli altri di dimenticare lo stato vecchio
         live_put(u, {"type": "join", "device": dev, "name": name}, skip=dev)
+    if primo:
+        notifiche.collegato(u, name)
 
     def gen():
         try:
@@ -1096,6 +1100,8 @@ def live_stream():
                 live_put(u, {"type": "gone", "device": dev})
                 pres_gone(u, dev)
                 radio.device_gone(u, dev)
+            if not live_connesso(u):
+                notifiche.scollegato(u)
 
     return Response(stream_with_context(gen()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1245,6 +1251,16 @@ def pres_put(msg):
         live_put(u, msg)
 
 
+def live_connesso(u):
+    with llock:
+        return any(not c.get("stop") for c in lconns.get(u, {}).values())
+
+
+def live_suona(u):
+    with llock:
+        return any(s.get("playing") for s in lstates.get(u, {}).values())
+
+
 def pres_update(u, st):
     t = st.get("track") if isinstance(st.get("track"), dict) else {}
     tid, playing, now = t.get("id"), bool(st.get("playing")), time.time()
@@ -1255,6 +1271,9 @@ def pres_update(u, st):
         if abs(last[2] + ((now - last[3]) * rate if playing else 0) - pos) < PRES_JUMP:
             return  # stesso brano, stesso stato, nessun salto: gli altri stimano l'avanzamento da soli
     psent[(u, st["device"])] = (tid, playing, pos, now)
+    if tid and playing and (not last or last[0] != tid or not last[1]):  # comincia o riprende: forse un avviso agli amici
+        rd = st.get("radio") if isinstance(st.get("radio"), dict) else None
+        notifiche.ascolta(u, t, str(rd.get("name") or "")[:80] if rd else None)
     if tid and pres_who(u)[0]:
         pres_put({"type": "presence", "entry": pres_entry(u, st, now)})
 
@@ -1291,6 +1310,9 @@ def attivita(u, kind, text, link=None, merge=None, many=None, inc=1, window=600)
     # salvate: dopo un riavvio (un aggiornamento) il diario degli amici non riparte vuoto
     db.run("INSERT INTO settings (key, value) VALUES ('attivita', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", keep)
     pres_put({"type": "activity", "item": out})
+    pid = link.get("playlist") if isinstance(link, dict) else None
+    if kind == "playlist" and pid and text.startswith(("ha creato", "ha condiviso")):
+        notifiche.agli_amici(u, "pl:" + pid, 86400, "📀 {nome} " + text, "", f"#/playlist/{pid}")
 
 
 def carica_attivita():
