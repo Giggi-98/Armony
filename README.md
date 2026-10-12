@@ -23,6 +23,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 **Più dispositivi, una sola musica**
 - Avvii sul telefono e il PC diventa il telecomando, o viceversa; "Dove suona" sposta la musica da un dispositivo all'altro dallo stesso punto. Se un'app si chiude male, si riaggancia da sola.
 - Riconosce le cuffie Bluetooth (col nome) e mette in pausa quando le stacchi.
+- **TV e casse di casa**: smart TV, casse DLNA, Chromecast e Android TV compaiono in «Dove suona»; con il Bluetooth del server anche casse Bluetooth e Alexa.
 
 **Insieme agli amici**
 - **Jam**: ascoltate la stessa musica nello stesso momento, ognuno dal suo telefono; proposte, voti, reazioni. Cifrata da un capo all'altro.
@@ -30,6 +31,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - **Jam Radio**: stazioni che girano all'infinito sul server; ti sintonizzi e senti lo stesso punto degli altri, tipo Discord. Anche quelle dei server collegati.
 - Gli amici si creano un account da soli con un invito, oppure li crei tu in un attimo: mandi un link o un QR e al primo ingresso scelgono la loro password. Per ognuno decidi cosa può fare (playlist proprie, vedere quelle degli altri, scaricare, caricare, radio…).
 
+- **Bot di Telegram e Discord**: cerca, scarica e comanda la musica da una chat, notifiche lì, canali che raccontano cosa ascolta il gruppo, e musica nel canale vocale di Discord.
 - **Playlist collaborative**, «Manda a un amico», il mix di due amici con la vostra affinità.
 
 **La libreria**
