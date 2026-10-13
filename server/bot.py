@@ -32,6 +32,7 @@ import io
 import json
 import os
 import queue
+import random
 import re
 import secrets
 import threading
@@ -64,6 +65,7 @@ AIUTO = """🎵 Armony, comandi:
 /amici — chi ascolta cosa adesso
 /scarica link — scarica un brano o una playlist (YouTube, SoundCloud…); su Telegram basta incollare il link
 /settimana — i tuoi ascolti degli ultimi 7 giorni (arriva anche da solo il lunedì)
+/mix — il tuo mix del giorno, sul dispositivo che suona
 /pausa · /avanti · /indietro — comandi al dispositivo che suona
 /notifiche si|no — le notifiche di Armony anche qui
 /scollega — questa chat non è più collegata al tuo utente"""
@@ -406,6 +408,67 @@ def c_settimana(u, _):
     return settimana(u)
 
 
+def brano_wire(x):
+    """Un brano di Navidrome nella forma che i client si passano nel canale dal vivo (jam.js, wire)."""
+    base = A.public_url() or A.federazione.my_url() or "locale"
+    return {"id": x["id"], "title": x.get("title") or "Senza titolo", "artist": x.get("displayArtist") or x.get("artist") or "", "album": x.get("album") or "",
+            "albumId": x.get("albumId"), "artistId": x.get("artistId"), "duration": x.get("duration") or 0, "coverArt": x.get("coverArt"),
+            "genre": x.get("genre"), "serverUrl": base, "pub": A.public_url() or None}
+
+
+def mix_del_giorno(u):
+    """Come il mix del giorno dell'app: l'artista più ascoltato del mese, i simili (Navidrome) e i suoi brani,
+    mescolati con un seme del giorno (oggi lo stesso mix, domani un altro). Torna (nome, brani)."""
+    da = time.time() - 30 * 86400
+    c = A.ascolti.nd()
+    try:
+        sc = c.execute("SELECT typeof(submission_time) FROM scrobbles LIMIT 1").fetchone()
+        arg = da if not sc or sc[0] in ("integer", "real") else time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(da))
+        top = c.execute("SELECT m.artist_id, m.artist, count(*) k FROM scrobbles s JOIN user us ON us.id = s.user_id JOIN media_file m ON m.id = s.media_file_id "
+                        "WHERE us.user_name = ? AND s.submission_time >= ? AND m.artist_id != '' GROUP BY m.artist_id ORDER BY k DESC LIMIT 1", (u, arg)).fetchone()
+    finally:
+        c.close()
+    caso = random.Random(time.strftime("%Y-%m-%d") + (top[0] if top else u))
+    if not top:
+        return "a sorpresa", [brano_wire(x) for x in A.federazione.nd_get("getRandomSongs", size=40).get("randomSongs", {}).get("song") or []]
+    visti, out = set(), []
+
+    def metti(lista, quanti):
+        lista = list(lista)
+        caso.shuffle(lista)
+        for x in lista:
+            if quanti <= 0:
+                break
+            if x.get("id") and x["id"] not in visti:
+                visti.add(x["id"])
+                out.append(brano_wire(x))
+                quanti -= 1
+    metti(A.federazione.nd_get("getSimilarSongs2", id=top[0], count=60).get("similarSongs2", {}).get("song") or [], 40)
+    albi = A.federazione.nd_get("getArtist", id=top[0]).get("artist", {}).get("album") or []
+    caso.shuffle(albi)
+    metti([x for a in albi[:8] for x in A.federazione.nd_get("getAlbum", id=a["id"]).get("album", {}).get("song") or []], 14)
+    # senza Last.fm i simili non ci sono: come nell'app, lo stesso genere, poi brani a caso
+    generi = [b["genre"] for b in out if b.get("genre")]
+    if len(out) < 30 and generi:
+        metti(A.federazione.nd_get("getSongsByGenre", genre=max(set(generi), key=generi.count), count=100).get("songsByGenre", {}).get("song") or [], 30 - len(out))
+    if len(out) < 30:
+        metti(A.federazione.nd_get("getRandomSongs", size=60).get("randomSongs", {}).get("song") or [], 30 - len(out))
+    caso.shuffle(out)
+    return top[1], out
+
+
+def c_mix(u, _):
+    nome, brani = mix_del_giorno(u)
+    if not brani:
+        return "🎂 Ancora niente da mescolare: la libreria è vuota."
+    st = suona(u)
+    if st:
+        A.manda_cmd(u, st["device"], "transfer", {"queue": brani, "index": 0, "position": 0, "shuffle": False, "repeat": "off"})
+        return f"🎂 Mix di {nome}: {len(brani)} brani, partono su {st.get('name') or 'il tuo dispositivo'}. Il primo: «{brani[0]['title']}»."
+    return f"🎂 Mix di {nome}, {len(brani)} brani (apri Armony e rimanda /mix per farlo partire):\n" + "\n".join(
+        f"{i}. «{b['title']}» · {b['artist']}" for i, b in enumerate(brani[:10], 1)) + (f"\n…e altri {len(brani) - 10}" if len(brani) > 10 else "")
+
+
 def c_cmd(nome, verbo):
     def f(u, _):
         st = suona(u)
@@ -416,7 +479,7 @@ def c_cmd(nome, verbo):
     return f
 
 
-COMANDI = {"cerca": c_cerca, "ora": c_ora, "amici": c_amici, "scarica": c_scarica, "brano": c_brano, "settimana": c_settimana,
+COMANDI = {"cerca": c_cerca, "ora": c_ora, "amici": c_amici, "scarica": c_scarica, "brano": c_brano, "settimana": c_settimana, "mix": c_mix,
            "pausa": c_cmd("pause", "⏸️ In pausa"), "avanti": c_cmd("next", "⏭️ Avanti"), "indietro": c_cmd("prev", "⏮️ Indietro"),
            "play": c_cmd("play", "▶️ Riparte")}
 
@@ -540,7 +603,7 @@ def tg_giro():
                 info["telegram"]["nome"] = tg("getMe")["username"]
                 tg("setMyCommands", commands=[{"command": c, "description": d} for c, d in (
                     ("cerca", "Cerca brani, album e artisti"), ("brano", "Il file audio di un brano"), ("ora", "Cosa stai ascoltando"),
-                    ("amici", "Chi ascolta cosa"), ("settimana", "I tuoi ascolti della settimana"),
+                    ("amici", "Chi ascolta cosa"), ("settimana", "I tuoi ascolti della settimana"), ("mix", "Il tuo mix del giorno, sul dispositivo che suona"),
                     ("scarica", "Scarica da un link"), ("pausa", "Pausa"), ("avanti", "Brano successivo"), ("indietro", "Brano precedente"),
                     ("notifiche", "si/no: le notifiche anche qui"), ("collega", "Collega il tuo utente con il codice"),
                     ("scollega", "Scollega questa chat"), ("aiuto", "Tutti i comandi"))])
@@ -612,7 +675,8 @@ def dc_client():
         async def f(inter, testo: str):
             await esegui(inter, f"/{nome} {testo}")
 
-    for n, d in (("ora", "Cosa stai ascoltando"), ("amici", "Chi ascolta cosa"), ("settimana", "I tuoi ascolti della settimana"), ("pausa", "Pausa"), ("avanti", "Brano successivo"),
+    for n, d in (("ora", "Cosa stai ascoltando"), ("amici", "Chi ascolta cosa"), ("settimana", "I tuoi ascolti della settimana"),
+                 ("mix", "Il tuo mix del giorno, sul dispositivo che suona"), ("pausa", "Pausa"), ("avanti", "Brano successivo"),
                  ("indietro", "Brano precedente"), ("scollega", "Scollega il tuo account Discord da Armony"), ("aiuto", "Tutti i comandi")):
         semplice(n, d)
     for n, d, c in (("cerca", "Cerca brani, album e artisti", "cosa cercare"), ("brano", "Il file audio di un brano", "quale brano"), ("scarica", "Scarica da un link", "il link"),
@@ -643,14 +707,16 @@ def dc_client():
 # ------------------------------------------------------------------ Discord: musica nel canale vocale
 # Il bot entra nel canale vocale di chi lo chiama e suona dalla libreria (Navidrome, letto in locale dal server, Opus a
 # 128 kbps con ffmpeg). Una coda per server Discord. Serve aver collegato il proprio utente (/collega): si cerca e si
-# suona con i suoi permessi di ascolto, come dall'app.
+# suona con i suoi permessi di ascolto, come dall'app. Con /segui il bot non ha una coda sua: ogni 2 secondi guarda lo
+# stato del dispositivo che suona per quell'utente (canale dal vivo) e suona lo stesso brano dallo stesso punto, come un
+# ospite della Jam ma senza la Jam (che è cifrata: il server non ne vede i brani).
 def flusso_nd(sid):
     return f"{A.NAVIDROME_URL}/rest/stream?" + urllib.parse.urlencode({**A.federazione.nd_params(), "id": sid, "format": "raw"})
 
 
-def sorgente(discord, t):
-    return discord.FFmpegOpusAudio(flusso_nd(t["id"]), bitrate=128, before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                                   options="-vn")
+def sorgente(discord, t, da=0):
+    return discord.FFmpegOpusAudio(flusso_nd(t["id"]), bitrate=128, options="-vn",
+                                   before_options=(f"-ss {da:.1f} " if da > 1 else "") + "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5")
 
 
 def cerca_brani(cosa, testo):
@@ -708,12 +774,61 @@ def voce(tree, client, discord, app_commands):
             elif vc.channel != inter.user.voice.channel:
                 await vc.move_to(inter.user.voice.channel)
             g_ = gilde.setdefault(inter.guild.id, {"coda": [], "ora": None})
+            if g_.pop("segue", None):  # si smette di seguire: da qui suona la coda del canale
+                vc.stop()
             g_["coda"] += brani
             g_["testo"] = inter.channel
             if not vc.is_playing() and not vc.is_paused():
                 await prossimo(inter.guild.id)
             primo = brani[0]
             await inter.followup.send(f"➕ In coda: «{primo.get('title')}»" + (f" e altri {len(brani) - 1}" if len(brani) > 1 else ""))
+
+    async def segui_giro(gid, u, testo):
+        """Ogni 2 secondi: stesso brano e stesso punto dell'utente (scarto oltre 6 secondi = si riparte da lì)."""
+        loop, ora = asyncio.get_running_loop(), {"id": None, "p0": 0.0, "t0": 0.0, "ferma": None}
+        while (gilde.get(gid) or {}).get("segue") == u:
+            vc = discord.utils.get(client.voice_clients, guild=client.get_guild(gid))
+            if not vc or not vc.is_connected():
+                break
+            st = await loop.run_in_executor(None, suona, u) or {}
+            t = st.get("track") if isinstance(st.get("track"), dict) else None
+            if not t or not st.get("playing") or t.get("fed") or t.get("web"):
+                if vc.is_playing():
+                    vc.pause()
+                    ora["ferma"] = time.time()
+            else:
+                pos = float(st.get("position") or 0) + max(0.0, time.time() - float(st.get("at") or time.time()))
+                mio = ora["p0"] + ((ora["ferma"] or time.time()) - ora["t0"])
+                if t["id"] != ora["id"] or abs(mio - pos) > 6:
+                    if vc.is_playing() or vc.is_paused():
+                        vc.stop()
+                    vc.play(sorgente(discord, t, pos))
+                    if t["id"] != ora["id"] and testo:
+                        await testo.send(f"🎧 Con {u}: «{t.get('title')}» · {t.get('artist') or ''}")
+                    ora.update(id=t["id"], p0=pos, t0=time.time(), ferma=None)
+                elif vc.is_paused():
+                    ora["t0"] += time.time() - ora["ferma"]
+                    ora["ferma"] = None
+                    vc.resume()
+            await asyncio.sleep(2)
+
+    @tree.command(name="segui", description="Il bot suona nel canale vocale quello che stai ascoltando tu, dallo stesso punto")
+    async def segui(inter):
+        u = await collegato(inter)
+        if not u:
+            return
+        if inter.guild is None or not getattr(inter.user, "voice", None) or not inter.user.voice.channel:
+            return await inter.response.send_message("🎧 Entra prima in un canale vocale di questo server.", ephemeral=True)
+        vc = inter.guild.voice_client
+        if not vc:
+            vc = await inter.user.voice.channel.connect()
+        elif vc.channel != inter.user.voice.channel:
+            await vc.move_to(inter.user.voice.channel)
+        if vc.is_playing() or vc.is_paused():
+            vc.stop()
+        gilde[inter.guild.id] = {"coda": [], "ora": None, "segue": u}  # la coda del canale lascia il posto
+        asyncio.get_running_loop().create_task(segui_giro(inter.guild.id, u, inter.channel))
+        await inter.response.send_message(f"🎧 Ascoltate con {u}: quello che suona sui suoi dispositivi suona qui. /esci per smettere.")
 
     suona_cmd("suona", "Suona un brano nel tuo canale vocale", "brano")
     suona_cmd("album", "Suona un album intero nel tuo canale vocale", "album")
@@ -730,6 +845,8 @@ def voce(tree, client, discord, app_commands):
     @tree.command(name="salta", description="Il brano successivo nel canale vocale (con più persone, a voti)")
     async def salta(inter):
         vc = inter.guild.voice_client if inter.guild else None
+        if (gilde.get(inter.guild_id) or {}).get("segue"):
+            return await inter.response.send_message("🎧 Qui si segue un utente: il brano lo cambia lui dal suo dispositivo.", ephemeral=True)
         if not vc or not vc.is_playing():
             return await inter.response.send_message("🔇 Niente da saltare.", ephemeral=True)
         # con più di due persone nel canale si salta a maggioranza: uno solo non cambia la musica a tutti

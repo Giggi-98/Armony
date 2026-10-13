@@ -31,9 +31,9 @@ PC): ogni cassa è un dispositivo a sé, niente uscita combinata (vedi DECISIONS
 ## Cosa possiamo fare con i bot (idee, da scegliere)
 
 Fatte (dopo la 0.63): 🎵 `/brano`, 🔗 link incollato, 📊 riepilogo della settimana (`/settimana` e il lunedì), 🆕 canale
-«Album nuovi in libreria», 🗳️ voto per saltare su Discord. Restano: 🔍 modalità in linea (va accesa a mano in
+«Album nuovi in libreria», 🗳️ voto per saltare su Discord; dopo la 0.64 🎧 «ascolta con me» (`/segui`) e 🎂 `/mix` (il mix del giorno calcolato dal server, come nell'app). Restano: 🔍 modalità in linea (va accesa a mano in
 @BotFather, e i brani dovrebbero essere raggiungibili da Telegram), 🎉 `/jam` (vedi DECISIONS.md: il segreto della Jam
-non passa dal server), 🎧 «ascolta con me» su Discord, 🎂 mix del giorno (lo calcola il client).
+non passa dal server).
 
 - 🎵 **Brano in chat**: `/brano bohemian` e il bot manda il file audio, si ascolta dentro Telegram.
 - 🔗 **Incolla un link e basta**: mandi un link di YouTube al bot e lui lo scarica, senza `/scarica`.
