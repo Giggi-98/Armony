@@ -15,8 +15,12 @@ Telegram: il server chiede i messaggi a Telegram (getUpdates, attesa lunga) in u
 porte da aprire. Il codice arriva anche col link https://t.me/<bot>?start=<codice>. Discord: discord.py in un thread col
 suo loop, comandi «slash», notifiche in messaggio privato. I comandi sono gli stessi sui due (comando()).
 
+In più: un link incollato in privato su Telegram si scarica (come /scarica); /brano manda il file audio nella chat;
+/settimana e, ogni lunedì mattina, il riepilogo degli ascolti della settimana alle chat con le notifiche accese.
+
 Un CANALE è un gruppo o un canale Telegram, o un canale testuale Discord, dove il bot racconta cosa fanno gli utenti
-scelti (ascolti, rientri, playlist, download, Jam, radio: i tipi scelti). Si aggancia scrivendo lì /canale <codice>.
+scelti (ascolti, rientri, playlist, download, Jam, radio: i tipi scelti), e se vuole gli album nuovi in libreria (di
+tutti, non degli utenti scelti). Si aggancia scrivendo lì /canale <codice>.
 Vale «Mostra agli altri cosa ascolto»: chi l'ha spento non compare.
 
 ─── PERCHÉ un codice e non la password ───
@@ -24,6 +28,7 @@ Il bot vede solo un numero di chat: niente password che passano da Telegram o Di
 dentro Armony, vale una volta e 10 minuti; scollegare dalla pagina o col comando toglie subito l'accesso.
 """
 import asyncio
+import io
 import json
 import os
 import queue
@@ -46,7 +51,7 @@ ENV = {"telegram": "TELEGRAM_BOT_TOKEN", "discord": "DISCORD_BOT_TOKEN"}
 RETI = tuple(ENV)
 CODICE_S = 600
 TIPI = {"ascolto": "🎧 Cosa ascoltano", "linea": "👋 Chi torna in linea", "playlist": "📀 Playlist create o condivise",
-        "download": "⬇️ Download e caricamenti", "jam": "🎉 Jam", "radio": "📻 Radio"}
+        "download": "⬇️ Download e caricamenti", "jam": "🎉 Jam", "radio": "📻 Radio", "novita": "🆕 Album nuovi in libreria (di tutti)"}
 codici = {}               # codice -> (utente, rete, scadenza) per le chat; ("#canale", id, scadenza) per i canali
 info = {"telegram": {}, "discord": {}}  # nome del bot, link, ultimo errore: dopo il primo contatto
 uscita = queue.Queue(maxsize=500)       # messaggi da mandare: (rete, chat, testo); chat "c:<id>" = canale Discord
@@ -54,9 +59,11 @@ dc = {"client": None, "loop": None, "riavvia": False}
 
 AIUTO = """🎵 Armony, comandi:
 /cerca testo — brani, album e artisti
+/brano testo — il file audio, da ascoltare qui
 /ora — cosa stai ascoltando
 /amici — chi ascolta cosa adesso
-/scarica link — scarica un brano o una playlist (YouTube, SoundCloud…)
+/scarica link — scarica un brano o una playlist (YouTube, SoundCloud…); su Telegram basta incollare il link
+/settimana — i tuoi ascolti degli ultimi 7 giorni (arriva anche da solo il lunedì)
 /pausa · /avanti · /indietro — comandi al dispositivo che suona
 /notifiche si|no — le notifiche di Armony anche qui
 /scollega — questa chat non è più collegata al tuo utente"""
@@ -283,6 +290,8 @@ def url(link=""):
 def comando(rete, chat, nome, testo):
     """Un messaggio arrivato al bot; risponde con il testo da mandare indietro (o None)."""
     testo = (testo or "").strip()
+    if re.match(r"^https?://\S+$", testo):
+        testo = "/scarica " + testo  # un link incollato e basta
     if not testo.startswith("/"):
         return None
     cmd, _, arg = testo[1:].partition(" ")
@@ -353,6 +362,50 @@ def c_scarica(u, link):
     return f"⬇️ In coda: ti avviso quando è pronto. ({j['id']})"
 
 
+def c_brano(u, q):
+    """Il file audio del primo brano trovato: torna un dizionario, che il postino manda come file e non come testo."""
+    if not q:
+        return "Scrivi quale brano: /brano bohemian rhapsody"
+    s_ = (A.federazione.nd_get("search3", query=q, songCount=1, albumCount=0, artistCount=0).get("searchResult3") or {}).get("song") or []
+    return {"audio": s_[0]} if s_ else f"Niente per «{q}». Con /scarica e un link lo prendi da YouTube."
+
+
+def audio(t, kbps):
+    """mp3 del brano da Navidrome: i bot accettano file fino a 50 MB (Telegram) e 10 MB (Discord)."""
+    r = A.http.get(f"{A.NAVIDROME_URL}/rest/stream", params={**A.federazione.nd_params(), "id": t["id"], "format": "mp3", "maxBitRate": kbps}, timeout=120)
+    r.raise_for_status()
+    return r.content
+
+
+def nome_file(t):
+    return re.sub(r'[\\/:*?"<>|]+', " ", f"{t.get('artist') or ''} - {t.get('title') or 'brano'}").strip(" -")[:120] + ".mp3"
+
+
+def settimana(u):
+    """Gli ascolti di un utente negli ultimi 7 giorni, dal DB di Navidrome (come le statistiche)."""
+    da = time.time() - 7 * 86400
+    c = A.ascolti.nd()
+    try:
+        sc = c.execute("SELECT typeof(submission_time) FROM scrobbles LIMIT 1").fetchone()
+        arg = da if not sc or sc[0] in ("integer", "real") else time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(da))
+        base = "FROM scrobbles s JOIN user us ON us.id = s.user_id JOIN media_file m ON m.id = s.media_file_id WHERE us.user_name = ? AND s.submission_time >= ?"
+        n, mins = c.execute(f"SELECT count(*), coalesce(sum(m.duration), 0) / 60 {base}", (u, arg)).fetchone()
+        brani = c.execute(f"SELECT m.title, m.artist, count(*) k {base} GROUP BY m.id ORDER BY k DESC LIMIT 3", (u, arg)).fetchall()
+        artisti = c.execute(f"SELECT m.artist, count(*) k {base} GROUP BY m.artist ORDER BY k DESC LIMIT 3", (u, arg)).fetchall()
+    finally:
+        c.close()
+    if not n:
+        return "📊 Questa settimana niente ascolti. La musica ti aspetta! 🎶"
+    medaglie = ("🥇", "🥈", "🥉")
+    return "\n".join([f"📊 La tua settimana: {n} ascolti, {round(mins)} minuti di musica", "", "🎵 Brani:"]
+                     + [f"{medaglie[i]} «{t}» · {a or ''} ({k}×)" for i, (t, a, k) in enumerate(brani)]
+                     + ["", "🎤 Artisti:"] + [f"{medaglie[i]} {a} ({k}×)" for i, (a, k) in enumerate(artisti) if a])
+
+
+def c_settimana(u, _):
+    return settimana(u)
+
+
 def c_cmd(nome, verbo):
     def f(u, _):
         st = suona(u)
@@ -363,7 +416,7 @@ def c_cmd(nome, verbo):
     return f
 
 
-COMANDI = {"cerca": c_cerca, "ora": c_ora, "amici": c_amici, "scarica": c_scarica,
+COMANDI = {"cerca": c_cerca, "ora": c_ora, "amici": c_amici, "scarica": c_scarica, "brano": c_brano, "settimana": c_settimana,
            "pausa": c_cmd("pause", "⏸️ In pausa"), "avanti": c_cmd("next", "⏭️ Avanti"), "indietro": c_cmd("prev", "⏮️ Indietro"),
            "play": c_cmd("play", "▶️ Riparte")}
 
@@ -400,7 +453,7 @@ def inoltra(user, titolo, corpo="", link=None):
 def feed(attore, tipo, testo, link=None):
     """Un'attività di un utente ai canali che lo seguono per quel tipo (una volta per canale)."""
     for r in db.all_("SELECT rete, chat, utenti, tipi FROM bot_canali WHERE chat IS NOT NULL"):
-        if attore in json.loads(r["utenti"] or "[]") and tipo in json.loads(r["tipi"] or "[]"):
+        if tipo in json.loads(r["tipi"] or "[]") and (tipo == "novita" or attore in json.loads(r["utenti"] or "[]")):
             manda(r["rete"], r["chat"], testo + (f"\n{url(link)}" if link and url() else ""))
 
 
@@ -408,7 +461,11 @@ def postino():
     while True:
         rete, chat, testo = uscita.get()
         try:
-            if rete == "telegram" and token("telegram"):
+            if rete == "telegram" and token("telegram") and isinstance(testo, dict):
+                t = testo["audio"]
+                tg_file("sendAudio", {"chat_id": chat, "title": t.get("title") or "", "performer": t.get("artist") or "", "duration": int(t.get("duration") or 0)},
+                        {"audio": (nome_file(t), audio(t, 192), "audio/mpeg")})
+            elif rete == "telegram" and token("telegram"):
                 tg("sendMessage", chat_id=chat, text=testo[:4000], disable_web_page_preview=True)
             elif rete == "discord" and dc["loop"]:
                 asyncio.run_coroutine_threadsafe(dc_manda(chat, testo), dc["loop"]).result(20)
@@ -416,9 +473,53 @@ def postino():
             A.diagnosi.log("avviso", "bot", f"messaggio a {rete} non mandato: {e}"[:300])
 
 
+def novita():
+    """Ogni 10 minuti gli album arrivati in libreria (getAlbumList2 «newest», per data di aggiunta) ai canali «novita».
+    Il segno è la data dell'ultimo album visto: al primo giro si segna e basta, per non annunciare tutta la libreria."""
+    while True:
+        time.sleep(600)
+        try:
+            albi = A.federazione.nd_get("getAlbumList2", type="newest", size=50).get("albumList2", {}).get("album") or []
+            visto = (db.one("SELECT value FROM settings WHERE key = 'bot_novita'") or {"value": ""})["value"]
+            nuovi = sorted((a for a in albi if (a.get("created") or "") > visto), key=lambda a: a.get("created") or "")
+            if albi and visto:
+                for a in nuovi[:5]:
+                    feed(None, "novita", f"🆕 Nuovo in libreria: «{a.get('name')}» · {a.get('artist') or ''}", "#/album/" + a["id"])
+                if len(nuovi) > 5:
+                    feed(None, "novita", f"🆕 …e altri {len(nuovi) - 5} album nuovi in libreria")
+            if albi:
+                db.run("INSERT INTO settings (key, value) VALUES ('bot_novita', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                       max([visto] + [a.get("created") or "" for a in albi]))
+        except Exception as e:  # noqa: BLE001 - Navidrome che non risponde: si riprova al giro dopo
+            A.diagnosi.log("avviso", "bot", f"album nuovi: {e}"[:300])
+
+
+def riepilogo():
+    """Il lunedì dalle 9 il riepilogo della settimana a ogni chat con le notifiche accese, una volta per settimana."""
+    while True:
+        time.sleep(300)
+        ora = time.localtime()
+        sett = time.strftime("%G-%V", ora)
+        if ora.tm_wday != 0 or ora.tm_hour < 9 or (db.one("SELECT value FROM settings WHERE key = 'bot_riepilogo'") or {"value": ""})["value"] == sett:
+            continue
+        db.run("INSERT INTO settings (key, value) VALUES ('bot_riepilogo', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", sett)
+        for r in db.all_("SELECT rete, chat, user FROM bot_chat WHERE notifiche = 1"):
+            try:
+                manda(r["rete"], r["chat"], settimana(r["user"]))
+            except Exception as e:  # noqa: BLE001
+                A.diagnosi.log("avviso", "bot", f"riepilogo di {r['user']}: {e}"[:300])
+
+
 # ------------------------------------------------------------------ Telegram: getUpdates con attesa lunga, niente librerie
 def tg(method, timeout=40, **params):
     r = requests.post(f"{TG_API}/bot{token('telegram')}/{method}", json=params, timeout=timeout).json()
+    if not r.get("ok"):
+        raise RuntimeError(r.get("description") or "Telegram ha rifiutato")
+    return r["result"]
+
+
+def tg_file(method, dati, files):
+    r = requests.post(f"{TG_API}/bot{token('telegram')}/{method}", data=dati, files=files, timeout=120).json()
     if not r.get("ok"):
         raise RuntimeError(r.get("description") or "Telegram ha rifiutato")
     return r["result"]
@@ -438,7 +539,8 @@ def tg_giro():
             if not info["telegram"].get("nome"):
                 info["telegram"]["nome"] = tg("getMe")["username"]
                 tg("setMyCommands", commands=[{"command": c, "description": d} for c, d in (
-                    ("cerca", "Cerca brani, album e artisti"), ("ora", "Cosa stai ascoltando"), ("amici", "Chi ascolta cosa"),
+                    ("cerca", "Cerca brani, album e artisti"), ("brano", "Il file audio di un brano"), ("ora", "Cosa stai ascoltando"),
+                    ("amici", "Chi ascolta cosa"), ("settimana", "I tuoi ascolti della settimana"),
                     ("scarica", "Scarica da un link"), ("pausa", "Pausa"), ("avanti", "Brano successivo"), ("indietro", "Brano precedente"),
                     ("notifiche", "si/no: le notifiche anche qui"), ("collega", "Collega il tuo utente con il codice"),
                     ("scollega", "Scollega questa chat"), ("aiuto", "Tutti i comandi"))])
@@ -485,7 +587,18 @@ def dc_client():
     dc["client"] = client
 
     async def esegui(inter, testo):
-        out = await asyncio.get_running_loop().run_in_executor(None, rispondi, "discord", str(inter.user.id), inter.user.name, testo)
+        loop = asyncio.get_running_loop()
+        if testo.startswith("/brano"):
+            await inter.response.defer(thinking=True)  # scaricare il brano può superare i 3 secondi di Discord
+        out = await loop.run_in_executor(None, rispondi, "discord", str(inter.user.id), inter.user.name, testo)
+        if isinstance(out, dict):
+            t = out["audio"]
+            dati = await loop.run_in_executor(None, audio, t, 128)
+            if len(dati) > 10 * 1024 * 1024:
+                return await inter.followup.send(f"📦 «{t.get('title')}» è troppo lungo per Discord (più di 10 MB).")
+            return await inter.followup.send(f"🎵 «{t.get('title')}» · {t.get('artist') or ''}", file=discord.File(io.BytesIO(dati), filename=nome_file(t)))
+        if inter.response.is_done():
+            return await inter.followup.send(out or "…")
         await inter.response.send_message(out or "…", ephemeral=True)
 
     def semplice(nome, descr):
@@ -499,10 +612,10 @@ def dc_client():
         async def f(inter, testo: str):
             await esegui(inter, f"/{nome} {testo}")
 
-    for n, d in (("ora", "Cosa stai ascoltando"), ("amici", "Chi ascolta cosa"), ("pausa", "Pausa"), ("avanti", "Brano successivo"),
+    for n, d in (("ora", "Cosa stai ascoltando"), ("amici", "Chi ascolta cosa"), ("settimana", "I tuoi ascolti della settimana"), ("pausa", "Pausa"), ("avanti", "Brano successivo"),
                  ("indietro", "Brano precedente"), ("scollega", "Scollega il tuo account Discord da Armony"), ("aiuto", "Tutti i comandi")):
         semplice(n, d)
-    for n, d, c in (("cerca", "Cerca brani, album e artisti", "cosa cercare"), ("scarica", "Scarica da un link", "il link"),
+    for n, d, c in (("cerca", "Cerca brani, album e artisti", "cosa cercare"), ("brano", "Il file audio di un brano", "quale brano"), ("scarica", "Scarica da un link", "il link"),
                     ("collega", "Collega il tuo utente Armony", "il codice di Impostazioni → Bot"), ("notifiche", "Le notifiche di Armony in privato", "si oppure no")):
         con_testo(n, d, c)
 
@@ -571,6 +684,7 @@ def voce(tree, client, discord, app_commands):
             g_["ora"] = None
             return
         t = g_["ora"] = g_["coda"].pop(0)
+        g_["voti"] = set()
         loop = asyncio.get_running_loop()
         vc.play(sorgente(discord, t), after=lambda e: asyncio.run_coroutine_threadsafe(prossimo(gid), loop))
         if g_.get("testo"):
@@ -613,11 +727,19 @@ def voce(tree, client, discord, app_commands):
         righe = [f"▶️ «{g_['ora'].get('title')}» · {g_['ora'].get('artist') or ''}"] + [f"{i}. «{t.get('title')}»" for i, t in enumerate(g_["coda"][:10], 1)]
         await inter.response.send_message("\n".join(righe) + (f"\n…e altri {len(g_['coda']) - 10}" if len(g_["coda"]) > 10 else ""), ephemeral=True)
 
-    @tree.command(name="salta", description="Il brano successivo nel canale vocale")
+    @tree.command(name="salta", description="Il brano successivo nel canale vocale (con più persone, a voti)")
     async def salta(inter):
         vc = inter.guild.voice_client if inter.guild else None
         if not vc or not vc.is_playing():
             return await inter.response.send_message("🔇 Niente da saltare.", ephemeral=True)
+        # con più di due persone nel canale si salta a maggioranza: uno solo non cambia la musica a tutti
+        persone = {m.id for m in vc.channel.members if not m.bot} | {inter.user.id}
+        voti = gilde.setdefault(inter.guild_id, {"coda": [], "ora": None}).setdefault("voti", set())
+        voti.add(inter.user.id)
+        voti &= persone
+        serve = len(persone) // 2 + 1 if len(persone) > 2 else 1
+        if len(voti) < serve:
+            return await inter.response.send_message(f"🗳️ Voto per saltare: {len(voti)} su {serve}.")
         vc.stop()  # «after» fa partire il successivo
         await inter.response.send_message("⏭️ Saltato.")
 
@@ -665,5 +787,5 @@ def init(flask_app, host):
 
 
 def start():
-    for f in (postino, tg_giro, dc_avvia):
+    for f in (postino, tg_giro, dc_avvia, novita, riepilogo):
         threading.Thread(target=f, daemon=True).start()

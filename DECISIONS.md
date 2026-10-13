@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-13 — Niente /jam dal bot
+**Contesto:** fra le idee per i bot c'era «/jam apre una Jam e manda il link nel gruppo».
+**Scelta:** non fatto. Il link di una Jam porta il segreto della stanza nel frammento `#`, creato dal client e mai visto dal server (CLAUDE.md, sicurezza della Jam): un bot che la apre dovrebbe generarlo sul server, e il server conoscerebbe la chiave.
+**Alternative scartate:** segreto creato dal server solo per le Jam del bot (la cifratura da un capo all'altro diventerebbe una promessa a metà); link senza segreto (la Jam non sarebbe più cifrata).
+**Conseguenze:** la Jam si apre dall'app e il link si incolla a mano nel gruppo.
+**Da rivedere se:** la Jam smette di essere cifrata da un capo all'altro, o il bot diventa un client vero con le sue chiavi (es. un'app che apre la Jam dal telefono e manda il link al bot).
+
 ## 2026-10-12 — Casse Bluetooth: BlueZ e PipeWire sull'host, il container li usa con un utente ristretto
 **Contesto:** il server deve suonare su casse Bluetooth (anche le Alexa) scelte da «Dove suona». Armony gira in un container; il Bluetooth e l'audio sono dell'host.
 **Scelta:** `deploy/bluetooth.sh` prepara l'host una volta: BlueZ, PipeWire nella sessione dell'utente con linger (WirePlumber senza controllo del «posto» davanti allo schermo), un utente di sistema `armony-bt` a cui una policy D-Bus permette di parlare con `org.bluez`. Il container monta `/run/dbus` e la cartella `pulse` di PipeWire in sola lettura; `bluetoothctl` gira come `armony-bt` (mai come root), ffmpeg suona il brano sull'uscita della cassa col protocollo PulseAudio. Ogni cassa è un dispositivo virtuale di casa.py con un suo driver (pausa e salto rifanno partire ffmpeg dal punto giusto). Senza lo script i due montaggi sono `/dev/null` e la capacità "bluetooth" non c'è.

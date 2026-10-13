@@ -39,9 +39,11 @@ musica/ video/ data/ dati dell'utente (root, montati nei container): non toccarl
   deve contenere lo stesso numero (senza `v`), altrimenti l'updater rifiuta.
   `deploy/pre-commit` blocca `.env` e le cartelle dati: in un clone nuovo si
   attiva con `git config core.hooksPath deploy`. Push via SSH (`pushurl`).
-- **È in produzione su questa macchina** (`armony-app`, `armony-navidrome`
-  girano adesso, accanto ad altri container non nostri). Non fermare, ricreare
-  o fare `down` senza chiedere. `data/navidrome/navidrome.db` è il DB vivo.
+- **Questa macchina è il server di sviluppo** («Sviluppo»): dal 2026-10-12 la
+  produzione è sul mini PC di casa (`https://armony-net.ddns.net`), che si
+  aggiorna dai tag come tutti gli altri. Qui `armony-app` si può ricreare, ma
+  accanto girano altri container non nostri: niente `down` o pulizie generali
+  senza chiedere. `data/navidrome/navidrome.db` è il DB di sviluppo.
 - **Il client è montato in sola lettura** nel container: una modifica a
   `client/` è live al ricaricamento della pagina. Una modifica a `server/`
   richiede `docker compose up -d --build armony` (il contesto di build è la
