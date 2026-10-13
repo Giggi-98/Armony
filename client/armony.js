@@ -104,6 +104,7 @@ const I = {
   chev: '<path d="M6 9l6 6 6-6"/>',
   grip: '<circle cx="9" cy="6" r="1.2" fill="currentColor"/><circle cx="15" cy="6" r="1.2" fill="currentColor"/><circle cx="9" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="12" r="1.2" fill="currentColor"/><circle cx="9" cy="18" r="1.2" fill="currentColor"/><circle cx="15" cy="18" r="1.2" fill="currentColor"/>',
   grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  vol: '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>',
   speaker: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="14" r="4"/><path d="M12 6h.01"/>',
   phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
   laptop: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/>',
@@ -4716,6 +4717,9 @@ function vSettings(id = location.hash.split('/')[2]) {
     ${srv()?.me?.caps?.includes('notattivita') ? `<label class="check"><input type="checkbox" id="nAtt" ${Notif.att !== false ? 'checked' : ''}><span>✨ Amici in linea e cosa ascoltano<small>👋 chi torna in linea, 🎧 chi comincia ad ascoltare, 📀 le playlist condivise. Pochi avvisi: al massimo uno ogni tre ore per amico. Vale per il tuo utente su tutti i dispositivi.</small></span></label>` : ''}
     <p class="small" style="color:var(--muted);margin:0">${NATIVE ? 'Con l\'app chiusa del tutto gli avvisi non arrivano: li ritrovi nella campanella quando la riapri.' : 'Con il browser chiuso gli avvisi non arrivano: li ritrovi nella campanella.'}</p></div>`] : null,
 
+  srv()?.me?.caps?.includes('sveglia') && srv()?.session ? ['dev', 'sveglia', 'Sveglia', 'clock', 'sveglia mattina ora tv cassa mix playlist volume', '<div id="svBox"><p class="sub">Caricamento…</p></div>'] : null,
+  srv()?.me?.caps?.includes('snapcast') && srv()?.session ? ['dev', 'tuttacasa', 'Tutta la casa', 'speaker', 'snapcast stanze multiroom sincrono casse tutta la casa volume', '<div id="tcBox"><p class="sub">Caricamento…</p></div>'] : null,
+  srv()?.me?.caps?.includes('homeassistant') && srv()?.session ? ['dev', 'homeassistant', 'Home Assistant', 'home', 'home assistant domotica automazioni casa yaml', '<div id="haBox"><p class="sub">Caricamento…</p></div>'] : null,
   srv()?.me?.caps?.includes('bot') ? ['dev', 'bot', 'Bot Telegram e Discord', 'send', 'bot telegram discord chat comandi notifiche collega', '<div id="botBox"><p class="sub">Caricamento…</p></div>'] : null,
   ['dev', 'ascolto', 'Ascolto', 'headphones', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
     <div class="grid2">
@@ -4834,7 +4838,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   $('#cacheMB').onchange = e => { P.cacheMB = +e.target.value; savePrefs(); if (!P.cacheMB) ACache.clear().then(() => { $('#cacheUse').textContent = '0 MB usati'; }); else ACache.trim(); };
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint(); refreshBot(); refreshBt();
+  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint(); refreshBot(); refreshBt(); refreshSveglia(); refreshHa(); refreshStanze();
   $('#pubSave')?.addEventListener('click', async () => {
     try {
       const r = await dlApi('/api/indirizzo', { method: 'PUT', body: JSON.stringify({ url: $('#pubUrl').value.trim() }) });
@@ -5276,7 +5280,7 @@ async function botCanali(rb) {
   const box = $('#botCanali'); if (!box) return;
   let r; try { r = await srvApi(srv(), '/api/bot/canali'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
   const emo = { telegram: '✈️', discord: '🎮' };
-  box.innerHTML = `${r.canali.map(c => `<div class="panel stack"><div class="row between" style="flex-wrap:nowrap"><span class="grow" style="min-width:0"><b>${emo[c.rete]} ${esc(c.nome)}</b><small style="display:block;color:var(--muted)">${c.agganciato ? '✅ ' + esc(c.dove || 'agganciato') : '⏳ da agganciare'} · ${c.utenti.length ? esc(c.utenti.join(', ')) : 'nessun utente'}</small></span>
+  box.innerHTML = `${r.canali.map(c => `<div class="panel stack"><div class="row between" style="flex-wrap:nowrap"><span class="grow" style="min-width:0"><b>${emo[c.rete]} ${esc(c.nome)}</b><small style="display:block;color:var(--muted)">${c.agganciato ? '✅ ' + esc(c.dove || 'agganciato') : '⏳ da agganciare'} · ${c.utenti.includes('*') ? '👥 tutti' : c.utenti.length ? esc(c.utenti.join(', ')) : 'nessun utente'}</small></span>
       <button class="icon-btn" data-cn="${c.id}" aria-label="Modifica">${ic('pen')}</button></div>
       <div class="chips">${c.tipi.map(t => `<span class="tag">${esc(r.tipi[t] || t)}</span>`).join('') || '<small class="sub">nessun tipo scelto</small>'}</div>
       <div class="row">${c.agganciato ? `<button class="btn sm" data-cp="${c.id}">Prova</button>` : ''}<button class="btn sm" data-cc="${c.id}">${c.agganciato ? 'Aggancia altrove' : 'Aggancia'}</button><button class="btn sm danger" data-cx="${c.id}">${ic('trash')} Elimina</button></div></div>`).join('')}
@@ -5297,7 +5301,7 @@ function canaleSheet(r, rb, c) {
       <label class="f">Nome<input type="text" id="cnNome" value="${esc(c?.nome || '')}" placeholder="Es. Famiglia, Amici del calcetto" maxlength="60"></label>
       ${c ? '' : `<div class="seg" role="radiogroup" aria-label="Dove">${reti.map((k, i) => `<label><input type="radio" name="cnRete" value="${k}" ${i ? '' : 'checked'}><span>${k === 'telegram' ? '✈️ Telegram' : '🎮 Discord'}</span></label>`).join('')}</div>`}
       <b>Utenti da seguire</b>
-      <div class="stack" style="gap:0">${r.utenti.map(u => `<label class="check"><input type="checkbox" data-cu="${esc(u)}" ${c?.utenti.includes(u) ? 'checked' : ''}><span>${esc(u)}</span></label>`).join('') || '<p class="sub">Nessun utente ha ancora usato Armony.</p>'}</div>
+      <div class="stack" style="gap:0"><label class="check"><input type="checkbox" data-cu="*" ${c?.utenti.includes('*') ? 'checked' : ''}><span>👥 Tutti<small>Anche chi si iscrive dopo</small></span></label>${r.utenti.map(u => `<label class="check"><input type="checkbox" data-cu="${esc(u)}" ${c?.utenti.includes(u) ? 'checked' : ''}><span>${esc(u)}</span></label>`).join('') || '<p class="sub">Nessun utente ha ancora usato Armony.</p>'}</div>
       <b>Cosa raccontare</b>
       <div class="stack" style="gap:0">${Object.entries(r.tipi).map(([k, l]) => `<label class="check"><input type="checkbox" data-ct="${k}" ${!c || c.tipi.includes(k) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>
       <div class="row"><button class="btn primary" id="cnOk">${c ? 'Salva' : 'Crea e aggancia'}</button><button class="btn" id="cnNo">Annulla</button></div></div>`;
@@ -5377,6 +5381,87 @@ async function refreshBot(attesa) {
   });
   if (attesa && attesa.scade * 1000 > Date.now()) botT = setTimeout(() => box.isConnected && refreshBot(attesa), 3000);
 }
+/* ================= Tutta la casa (capacità "snapcast", server/casa.py): le stanze di Snapcast ================= */
+async function refreshStanze() {
+  const box = $('#tcBox'); if (!box) return;
+  let r; try { r = await srvApi(srv(), '/api/casa/stanze'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  if (!box.isConnected) return;
+  const host = r.host || '';
+  box.innerHTML = `<p class="sub">🔗 La stessa musica in sincrono in ogni stanza. In «Dove suona» scegli <b>🔗 Tutta la casa</b>: suona in tutte le stanze collegate, ognuna col suo volume.</p>
+    <div class="panel stack">${r.stanze.map(x => `<div class="stanza"><div class="row between" style="flex-wrap:nowrap"><span class="grow" style="min-width:0"><b>${x.collegata ? '🟢' : '⚪'} ${esc(x.nome)}</b><small style="display:block;color:var(--muted)">${x.collegata ? (x.muto ? 'muta' : 'collegata') : 'spenta'}</small></span>
+      <button class="icon-btn" data-stn="${esc(x.id)}" aria-label="Rinomina ${esc(x.nome)}">${ic('pen')}</button><label class="check svon"><input type="checkbox" data-stm="${esc(x.id)}" ${x.muto ? '' : 'checked'} aria-label="Suona in ${esc(x.nome)}"><span></span></label></div>
+      <label class="livevol" style="padding:0">${ic('vol')}<input type="range" min="0" max="100" value="${Math.round(x.volume * 100)}" data-stv="${esc(x.id)}" aria-label="Volume di ${esc(x.nome)}"></label></div>`).join('') || '<p class="sub" style="margin:0">Nessuna stanza ancora.</p>'}</div>
+    <h3 class="fedh">➕ Aggiungi una stanza</h3>
+    <div class="panel stack"><p class="sub" style="margin:0">📱 <b>Android</b>: l'app <b>Snapcast</b> (Play Store o F-Droid), server <code>${esc(host || 'indirizzo di Armony')}</code>.<br>
+      🍓 <b>Un Raspberry o un PC con le casse</b>: <code>sudo apt install snapclient</code>, poi in <code>/etc/default/snapclient</code> metti <code>SNAPCLIENT_OPTS="--host ${esc(host || 'indirizzo-di-armony')}"</code>.<br>
+      🔊 <b>Le casse Bluetooth del server</b>: in Casse Bluetooth, «In tutta la casa».</p></div>`;
+  const put = (id, b) => srvApi(srv(), '/api/casa/stanze/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(b) }).catch(e => toast(e.message));
+  box.querySelectorAll('[data-stv]').forEach(i => { rangeFill(i); let t; i.oninput = () => { rangeFill(i); clearTimeout(t); t = setTimeout(() => put(i.dataset.stv, { volume: i.value / 100 }), 150); }; });
+  box.querySelectorAll('[data-stm]').forEach(i => i.onchange = () => put(i.dataset.stm, { muto: !i.checked }).then(() => refreshStanze()));
+  box.querySelectorAll('[data-stn]').forEach(b => b.onclick = async () => { const n = prompt('Nome della stanza:', r.stanze.find(x => x.id === b.dataset.stn)?.nome || ''); if (n?.trim()) { await put(b.dataset.stn, { nome: n.trim() }); refreshStanze(); } });
+}
+/* ================= Home Assistant (capacità "homeassistant", server/homeassistant.py) =================
+   Un gettone per Home Assistant e il YAML pronto: il gettone si vede solo appena creato (il server ne tiene l'impronta). */
+async function refreshHa(nuovo) {
+  const box = $('#haBox'); if (!box) return;
+  let r = nuovo; if (!r) { try { r = await srvApi(srv(), '/api/homeassistant'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; } }
+  if (!box.isConnected) return;
+  box.innerHTML = `<p class="sub">🏠 Home Assistant vede cosa suona e comanda la tua musica: play, pausa, volume, il mix del giorno o una playlist su una TV, una cassa o un tuo dispositivo. Per automazioni come «quando rientro parte la musica in salotto». Funziona dalla rete di casa.</p>
+    ${r.yaml ? `<div class="panel stack botcode"><b>✅ Copia questo in <code>configuration.yaml</code> di Home Assistant</b><p class="sub" style="margin:0">Contiene il gettone: si vede solo adesso. Se lo perdi, ne crei uno nuovo.</p>
+      <pre class="hayaml">${esc(r.yaml)}</pre><div class="row"><button class="btn primary" id="haCopia">${ic('check')} Copia</button></div></div>`
+    : `<div class="panel stack"><b>${r.attivo ? '🟢 Collegato' : 'Non collegato'}</b><p class="sub" style="margin:0">${r.attivo ? 'Home Assistant ha il suo gettone. Uno nuovo sostituisce il vecchio (e serve rifare la configurazione).' : 'Crea il gettone: Armony ti dà la configurazione da incollare.'}</p>
+      <div class="row"><button class="btn ${r.attivo ? '' : 'primary'}" id="haNuovo">${r.attivo ? 'Gettone nuovo' : '🏠 Collega Home Assistant'}</button>${r.attivo ? '<button class="btn danger" id="haVia">Scollega</button>' : ''}</div></div>`}`;
+  $('#haCopia')?.addEventListener('click', async () => { if (await copyText(r.yaml)) toast('📋 Copiato.'); });
+  $('#haNuovo')?.addEventListener('click', async () => { if (r.attivo && !confirm('Il gettone di adesso smette di valere. Continuare?')) return; try { refreshHa(await srvApi(srv(), '/api/homeassistant', { method: 'POST' })); } catch (e) { toast(e.message); } });
+  $('#haVia')?.addEventListener('click', async () => { if (confirm('Home Assistant non potrà più comandare la tua musica.')) { await srvApi(srv(), '/api/homeassistant', { method: 'DELETE' }).catch(e => toast(e.message)); refreshHa(); } });
+}
+/* ================= sveglia (capacità "sveglia", server/sveglia.py) =================
+   Le sveglie stanno sul server, che all'ora giusta manda la coda al dispositivo scelto: anche a telefono spento. */
+const GIORNI = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
+const svGiorni = g => !g.length ? 'Una volta' : g.length === 7 ? 'Ogni giorno' : g.join() === '0,1,2,3,4' ? 'Dal lunedì al venerdì' : g.join() === '5,6' ? 'Nel weekend' : g.map(d => ['lun', 'mar', 'mer', 'gio', 'ven', 'sab', 'dom'][d]).join(' · ');
+async function refreshSveglia() {
+  const box = $('#svBox'); if (!box) return;
+  let r; try { r = await srvApi(srv(), '/api/sveglia'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  if (!box.isConnected) return;
+  const salva = async l => { try { r = await srvApi(srv(), '/api/sveglia', { method: 'PUT', body: JSON.stringify({ sveglie: l }) }); refreshSveglia(); } catch (e) { toast(e.message); refreshSveglia(); } };
+  box.innerHTML = `<p class="sub">⏰ All'ora che scegli il server fa partire il tuo mix del giorno o una playlist sulla TV, su una cassa o su un tuo dispositivo, con il volume che sale piano in 5 minuti. Sulla TV o su una cassa suona anche a telefono spento.</p>
+    ${r.sveglie.map(x => `<div class="panel stack"><div class="row between" style="flex-wrap:nowrap"><span class="grow" style="min-width:0"><b class="svora">${esc(x.ora)}</b>
+      <small style="display:block;color:var(--muted)">${esc(svGiorni(x.giorni))} · ${x.cosa === 'playlist' ? '📀 ' + esc(x.nome_playlist || 'playlist') : '🎂 Mix del giorno'} · ${esc(x.nome_dispositivo || '?')}</small></span>
+      <label class="check svon"><input type="checkbox" data-sva="${esc(x.id)}" ${x.attiva ? 'checked' : ''} aria-label="Sveglia attiva"><span></span></label></div>
+      <div class="row"><button class="btn sm" data-svp="${esc(x.id)}">▶️ Prova</button><button class="btn sm" data-sve="${esc(x.id)}">${ic('pen')} Modifica</button><button class="btn sm danger" data-svx="${esc(x.id)}">${ic('trash')}</button></div></div>`).join('')}
+    <button class="btn" id="svNew">${ic('plus')} Nuova sveglia</button>`;
+  $('#svNew').onclick = () => svegliaSheet(r.sveglie, null, salva);
+  box.querySelectorAll('[data-sve]').forEach(b => b.onclick = () => svegliaSheet(r.sveglie, r.sveglie.find(x => x.id === b.dataset.sve), salva));
+  box.querySelectorAll('[data-sva]').forEach(i => i.onchange = () => salva(r.sveglie.map(x => x.id === i.dataset.sva ? { ...x, attiva: i.checked } : x)));
+  box.querySelectorAll('[data-svx]').forEach(b => b.onclick = () => confirm('Togliere questa sveglia?') && salva(r.sveglie.filter(x => x.id !== b.dataset.svx)));
+  box.querySelectorAll('[data-svp]').forEach(b => b.onclick = () => srvApi(srv(), `/api/sveglia/${b.dataset.svp}/prova`, { method: 'POST' }).then(() => toast('⏰ Parte adesso.')).catch(e => toast(e.message)));
+}
+async function svegliaSheet(tutte, x, salva) {
+  await Live.ready?.();
+  const devs = [[S.device, Live.name() + ' · questo'], ...[...Live.devices]];
+  const pls = arr((await api('getPlaylists').catch(() => null))?.playlists?.playlist);
+  x = x || { ora: '07:30', giorni: [0, 1, 2, 3, 4], cosa: 'mix', volume: .5, attiva: true, dispositivo: devs.find(([id]) => id.startsWith('casa'))?.[0] || S.device };
+  const d = $('#dlg'); d.className = 'sheet smart';
+  d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">${x.id ? 'Modifica la sveglia' : 'Nuova sveglia'}</b><small style="color:var(--muted)">Il volume parte basso e sale in 5 minuti.</small></span></div>
+    <div class="smbody">
+      <input type="time" id="svOra" class="svora" value="${esc(x.ora)}" aria-label="Ora">
+      <div class="svgiorni" role="group" aria-label="Giorni">${GIORNI.map((l, i) => `<label><input type="checkbox" data-svg="${i}" ${x.giorni.includes(i) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      <small class="sub" style="margin:0">Nessun giorno scelto: suona una volta sola.</small>
+      <label class="f">Dove suona<select id="svDev">${devs.map(([id, n]) => `<option value="${esc(id)}" ${id === x.dispositivo ? 'selected' : ''}>${esc(n)}</option>`).join('')}${x.dispositivo && !devs.some(([id]) => id === x.dispositivo) ? `<option value="${esc(x.dispositivo)}" selected>${esc(x.nome_dispositivo || x.dispositivo)} (spento ora)</option>` : ''}</select></label>
+      <label class="f">Cosa suona<select id="svCosa"><option value="mix">🎂 Il mix del giorno</option>${pls.map(p => `<option value="${esc(p.id)}" ${x.cosa === 'playlist' && x.playlist === p.id ? 'selected' : ''}>📀 ${esc(p.name)}</option>`).join('')}</select></label>
+      <label class="f">Volume finale<input type="range" id="svVol" min="10" max="100" value="${Math.round(x.volume * 100)}"></label>
+      <div class="row"><button class="btn primary" id="svOk">${ic('check')} Salva</button><button class="btn" id="svNo">Annulla</button></div></div>`;
+  rangeFill($('#svVol')); $('#svVol').oninput = e => rangeFill(e.target);
+  $('#svNo').onclick = () => d.close();
+  $('#svOk').onclick = () => {
+    const dev = $('#svDev'), cosa = $('#svCosa');
+    const n = { ...x, ora: $('#svOra').value, giorni: [...d.querySelectorAll('[data-svg]:checked')].map(i => +i.dataset.svg), fuso: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      dispositivo: dev.value, nome_dispositivo: dev.selectedOptions[0].textContent.replace(' · questo', '').replace(' (spento ora)', ''), volume: $('#svVol').value / 100, attiva: true,
+      cosa: cosa.value === 'mix' ? 'mix' : 'playlist', playlist: cosa.value === 'mix' ? '' : cosa.value, nome_playlist: cosa.value === 'mix' ? '' : cosa.selectedOptions[0].textContent.replace('📀 ', '') };
+    d.close(); salva(x.id ? tutte.map(y => y.id === x.id ? n : y) : [...tutte, n]);
+  };
+  closeOutside(d); d.showModal();
+}
 /* ================= casse Bluetooth del server (casa.py, dopo deploy/bluetooth.sh sull'host) =================
    Abbinate una volta da qui, poi stanno in «Dove suona» come le TV: sceglierle le collega. */
 async function refreshBt(lista) {
@@ -5386,6 +5471,7 @@ async function refreshBt(lista) {
   const ab = r.dispositivi.filter(d => d.abbinato), altre = r.dispositivi.filter(d => !d.abbinato);
   const riga = d => `<div class="row between" style="flex-wrap:nowrap;gap:var(--s3)"><span class="grow" style="min-width:0"><b>${d.cassa ? '🔊' : '📱'} ${esc(d.nome)}</b>
       <small style="display:block;color:var(--muted)">${d.abbinato ? (d.collegato ? (d.cassa ? '🟢 collegata' : '🟢 collegato') : d.cassa ? 'abbinata, non collegata' : 'abbinato, non collegato') : d.cassa ? 'cassa trovata' : 'dispositivo trovato'} · ${esc(d.mac)}</small></span>
+      ${d.abbinato && d.cassa && r.snapcast ? `<button class="btn sm ${d.tuttacasa ? 'primary' : ''}" data-bta="tuttacasa_${d.tuttacasa ? 'no' : 'si'}|${esc(d.mac)}" aria-pressed="${d.tuttacasa}" title="In tutta la casa (Snapcast)">🔗</button>` : ''}
       ${d.abbinato ? `${d.collegato ? `<button class="btn sm" data-bta="scollega|${esc(d.mac)}">Scollega</button>` : `<button class="btn sm" data-bta="collega|${esc(d.mac)}">Collega</button>`}<button class="btn sm" data-bta="dimentica|${esc(d.mac)}" aria-label="Dimentica ${esc(d.nome)}">${ic('close')}</button>`
         : `<button class="btn sm primary" data-bta="abbina|${esc(d.mac)}">Abbina</button>`}</div>`;
   box.innerHTML = `<p class="sub">🔊 Casse collegate al server con il Bluetooth, anche le Alexa. Una cassa abbinata compare in «Dove suona» di chi è in casa: sceglierla la collega e la musica esce da lì.</p>
@@ -5398,8 +5484,8 @@ async function refreshBt(lista) {
   box.querySelectorAll('[data-bta]').forEach(b => b.onclick = async () => {
     const [azione, mac] = b.dataset.bta.split('|');
     if (azione === 'dimentica' && !confirm('Dimenticare questa cassa? Per usarla di nuovo andrà abbinata.')) return;
-    b.disabled = true; if (azione !== 'dimentica') b.textContent = { abbina: 'Abbino…', collega: 'Collego…', scollega: 'Scollego…' }[azione];
-    try { await srvApi(srv(), '/api/casa/bluetooth/' + mac, { method: 'POST', body: JSON.stringify({ azione }) }); toast({ abbina: '✅ Abbinata: ora è in «Dove suona».', collega: '🟢 Collegata.', scollega: 'Scollegata.', dimentica: 'Dimenticata.' }[azione]); }
+    b.disabled = true; if (azione !== 'dimentica') b.textContent = { abbina: 'Abbino…', collega: 'Collego…', scollega: 'Scollego…' }[azione] || b.textContent;
+    try { await srvApi(srv(), '/api/casa/bluetooth/' + mac, { method: 'POST', body: JSON.stringify({ azione }) }); toast({ abbina: '✅ Abbinata: ora è in «Dove suona».', collega: '🟢 Collegata.', scollega: 'Scollegata.', dimentica: 'Dimenticata.', tuttacasa_si: '🔗 Ora suona anche con «Tutta la casa».', tuttacasa_no: 'Fuori da «Tutta la casa».' }[azione]); }
     catch (e) { toast(e.message); }
     refreshBt();
   });
@@ -6644,6 +6730,7 @@ const Live = {
       return;
     }
     if (m.cmd === 'handoff') { if (v?.to && v.to !== S.device) this.give(v.to); return; }
+    if (m.cmd === 'volume' && typeof v === 'number') { P.volume = Math.max(0, Math.min(1, v)); savePrefs(); Engine.applyVolume(); const r = $('#vol'); if (r) { r.value = P.volume * 100; rangeFill(r); } this.sent = null; this.publish(); return; }
     if ((m.cmd === 'enqueue' || m.cmd === 'playnext') && Array.isArray(v?.tracks) && !this.remote()) { Q.local(v.tracks.map(w => this.loc(w)).filter(Boolean), m.cmd === 'playnext'); return; }
     if (Radio.st) return ({ play: () => Radio.resume(), pause: () => Radio.pause(), toggle: ctlToggle })[m.cmd]?.();  // radio: solo play e pausa
     if (this.remote() || !S.queue[S.index]) return;  // i comandi valgono solo per chi suona
@@ -6720,7 +6807,7 @@ const Live = {
     const t = Radio.st ? Radio.track : S.queue[S.index]; if (!t) return;
     if (this.remote() && !this.sent?.playing) return;  // telecomando: niente da dire, salvo la pausa appena fatta
     const rd = Radio.st, up = rd ? Radio.next() : S.queue.slice(S.index + 1, S.index + 51);  // i prossimi 50: oltre, il telecomando vede quanti sono
-    const now = { device: S.device, name: this.name(), solo: !!P.solo, playing: !Engine.el.paused, position: rd ? Radio.pos() : Engine.time(), duration: playDur(), rate: rd ? 1 : P.speed, shuffle: S.shuffle, repeat: S.repeat, track: wire(t),
+    const now = { device: S.device, name: this.name(), solo: !!P.solo, volume: Math.round(P.volume * 100) / 100, playing: !Engine.el.paused, position: rd ? Radio.pos() : Engine.time(), duration: playDur(), rate: rd ? 1 : P.speed, shuffle: S.shuffle, repeat: S.repeat, track: wire(t),
       next: up.map(wire), left: rd ? up.length : Math.max(0, S.queue.length - S.index - 1), radio: rd ? { id: rd.id, name: rd.name, r: Radio.path(rd) } : null };
     now.sig = up.map(x => x.id).join() + '|' + now.left;  // solo per accorgersi che la coda è cambiata
     // da quando suona, in ora del server: se due dispositivi partono quasi insieme cede solo chi è partito dopo
@@ -6757,6 +6844,7 @@ const Live = {
       <span class="grow"><b>${esc(name)}${id === S.device ? ' · questo' : ''}</b><small>${id === S.device && Phone.out ? `<b class="hp">${esc(Phone.label())}</b> · ` : ''}${st?.track ? `${st.playing ? 'Suona' : 'In pausa'}: ${esc(st.track.title)}` : 'Pronto'}${st?.solo ? ' · per conto suo' : ''}</small></span>${cur ? ic('check') : ''}</button>`;
     d.innerHTML = `<div class="head"><span style="min-width:0"><b style="display:block">Dove suona</b><small style="color:var(--muted)">La musica si sposta sul dispositivo che scegli, dallo stesso punto.</small></span></div>
       ${row(S.device, this.name(), mine, here)}${[...this.devices].map(([id, n]) => row(id, n, this.states.get(id), !here && this.target === id)).join('')}
+      ${this.volOk() ? `<label class="livevol">${ic('vol')}<input type="range" id="liveVol" min="0" max="100" value="${Math.round(this.states.get(this.target).volume * 100)}" aria-label="Volume di ${esc(this.devices.get(this.target) || 'quel dispositivo')}"></label>` : ''}
       <label class="check" style="padding:12px 14px 6px;border-top:1px solid var(--line);margin-top:6px"><input type="checkbox" id="liveSolo" ${P.solo ? 'checked' : ''}><span>Questo dispositivo suona per conto suo<small>Sganciato: non si ferma quando suona un altro tuo dispositivo e non lo ferma. Potete ascoltare cose diverse insieme.</small></span></label>
       <button class="mi" id="liveResync">${ic('repeat')}<span class="grow"><b>Risincronizza</b><small>Ricollega subito questo dispositivo agli altri</small></span></button>`;
     $('#liveResync').onclick = () => {
@@ -6767,6 +6855,7 @@ const Live = {
       setTimeout(() => toast(this.es?.readyState === EventSource.OPEN ? 'Ricollegato.' : 'Il server non risponde: riprovo da solo.'), 2500);
     };
     d.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => { d.close(); this.choose(b.dataset.dev); });
+    const lv = $('#liveVol'); if (lv) { rangeFill(lv); lv.oninput = () => { rangeFill(lv); this.volume(lv.value / 100); }; }
     this.ready();  // mentre si sceglie, il canale si controlla da solo
     $('#liveSolo').onchange = e => {
       P.solo = e.target.checked; savePrefs(); this.sent = null;
@@ -6774,6 +6863,12 @@ const Live = {
       this.publish(); this.paint(); this.sheet();
     };
     closeOutside(d); d.showModal();
+  },
+  // volume del dispositivo comandato (TV, cassa, un altro telefono): solo se lo dice nel suo stato e il server lo sa inoltrare
+  volOk() { return this.remote() && typeof this.states.get(this.target)?.volume === 'number' && !!this.srv()?.me?.caps?.includes('livevol'); },
+  volume(v) {
+    const st = this.states.get(this.target); if (st) st.volume = v;
+    clearTimeout(this.volT); this.volT = setTimeout(() => this.cmd('volume', v, this.target), 150);  // mentre si trascina: uno ogni tanto
   },
   async choose(id) {
     await this.ready();
@@ -7053,7 +7148,7 @@ function wirePlayer() {
   $('#bRep').onclick = () => Radio.st ? radioNo() : Live.remote() ? Live.cmd('repeat') : ctlRepeat();
   $('#radioPill').onclick = () => Radio.st && Radio.sheet(Radio.st);
   $('#vol').value = P.volume * 100;
-  $('#vol').oninput = e => { P.volume = e.target.value / 100; savePrefs(); Engine.applyVolume(); rangeFill(e.target); };
+  $('#vol').oninput = e => { rangeFill(e.target); if (Live.volOk()) return Live.volume(e.target.value / 100); P.volume = e.target.value / 100; savePrefs(); Engine.applyVolume(); };
   $('#seek').oninput = () => { seeking = true; $('#tCur').textContent = fmt($('#seek').value / 1000 * playDur()); rangeFill($('#seek')); };
   rangeFill($('#vol'));
   // ogni cursore riempie in ambra la parte a sinistra del pomello

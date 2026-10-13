@@ -124,6 +124,19 @@ services:
       - ./data/caddy:/data
     restart: unless-stopped
 
+  # Tutta la casa in sincrono (Snapcast): COMPOSE_PROFILES=snapcast. Armony gli manda l'audio da questa macchina; le
+  # stanze (snapclient su un Raspberry, l'app Snapcast su Android, le casse Bluetooth del server) si collegano alla 1704
+  snapcast:
+    build: deploy/snapcast
+    image: armony-snapcast
+    container_name: armony-snapcast
+    logging: *logging
+    profiles: ["snapcast"]
+    network_mode: host
+    volumes:
+      - ./data/snapcast:/var/lib/snapserver
+    restart: unless-stopped
+
   # Senza systemd (WSL, NAS, Docker Desktop) il tasto «Aggiorna» e il trasferimento li esegue il guardiano invece di
   # armony-update.path: profilo "guardiano" (installa.sh lo attiva da solo). ARMONY_DIR in .env = questa cartella, con
   # il percorso intero: dentro il container deve essere uguale, perché docker compose risolve lì i percorsi

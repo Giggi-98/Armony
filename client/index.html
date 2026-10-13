@@ -288,6 +288,21 @@ label.check small{display:block;color:var(--muted)}
 .fedtile b{display:block}.fedtile small{display:block;color:var(--muted);margin-top:2px;font-size:.86rem;line-height:1.35}
 .fedtile.primary .fedav{background:var(--accent);color:var(--on-accent)}
 .botconf+.botconf{border-top:1px solid var(--line);padding-top:var(--s4)}
+.livevol{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 14px;color:var(--muted)}
+.livevol svg{width:20px;height:20px;flex:none}
+.livevol input{flex:1;min-width:0}
+.svora{font-size:2rem;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+input.svora{background:var(--surface2);color:var(--ink);border:0;border-radius:var(--r-m);padding:var(--s2) var(--s4);width:100%;font-family:inherit}
+.svgiorni{display:flex;gap:var(--s2)}
+.svgiorni label{flex:1;position:relative}
+.svgiorni input{position:absolute;opacity:0;pointer-events:none}
+.svgiorni span{display:grid;place-items:center;height:var(--hit);border-radius:999px;background:var(--surface2);font-weight:600;cursor:pointer}
+.svgiorni input:checked+span{background:var(--accent);color:var(--on-accent)}
+.svgiorni input:focus-visible+span{outline:2px solid var(--accent-text);outline-offset:2px}
+.svon{flex:none;padding:0}
+.stanza{display:flex;flex-direction:column;gap:var(--s2)}
+.stanza+.stanza{border-top:1px solid var(--line);padding-top:var(--s3)}
+.hayaml{margin:0;padding:var(--s3);max-height:320px;overflow:auto;background:var(--bg);border-radius:var(--r-s);font-size:12px;line-height:1.5;white-space:pre;-webkit-user-select:text;user-select:text}
 .botcode{border:1px solid var(--accent)}.botcode .code{font-size:1.3rem;letter-spacing:.12em;color:var(--accent-text)}
 .fedtile:disabled{cursor:default;opacity:.62;border-style:dashed}
 @media (hover:hover) and (pointer:fine){.fedtile:hover{border-color:var(--accent)}}

@@ -23,7 +23,8 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 **Più dispositivi, una sola musica**
 - Avvii sul telefono e il PC diventa il telecomando, o viceversa; "Dove suona" sposta la musica da un dispositivo all'altro dallo stesso punto. Se un'app si chiude male, si riaggancia da sola.
 - Riconosce le cuffie Bluetooth (col nome) e mette in pausa quando le stacchi.
-- **TV e casse di casa**: smart TV, casse DLNA, Chromecast e Android TV compaiono in «Dove suona»; con il Bluetooth del server anche casse Bluetooth e Alexa.
+- **TV e casse di casa**: smart TV, casse DLNA, Chromecast e Android TV compaiono in «Dove suona», col volume dal telefono; con il Bluetooth del server anche casse Bluetooth e Alexa; **Tutta la casa** (Snapcast) suona in sincrono in ogni stanza.
+- **Sveglia** con il mix del giorno o una playlist su una TV o una cassa, e **Home Assistant** che vede e comanda la musica.
 
 **Insieme agli amici**
 - **Jam**: ascoltate la stessa musica nello stesso momento, ognuno dal suo telefono; proposte, voti, reazioni. Cifrata da un capo all'altro.

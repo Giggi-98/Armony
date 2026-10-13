@@ -7,13 +7,15 @@ Armony - TV e casse di casa come dispositivi di «Dove suona» (capacità "casa"
   GET  /api/casa/copertina/<gettone>/<id> la copertina, idem
   GET  /api/casa/bluetooth                (admin) le casse Bluetooth del server: abbinate, collegate, trovate
   POST /api/casa/bluetooth/cerca          (admin) cerca casse vicine per una dozzina di secondi
-  POST /api/casa/bluetooth/<mac>          (admin) {azione: abbina | collega | scollega | dimentica}
+  POST /api/casa/bluetooth/<mac>          (admin) {azione: abbina | collega | scollega | dimentica | tuttacasa_si | tuttacasa_no}
+  GET  /api/casa/stanze                   le stanze di «Tutta la casa» (Snapcast): nome, collegata, volume, muto
+  PUT  /api/casa/stanze/<id>              {volume?, muto?, nome?}
 
 Il server sta in casa (rete host): manda un messaggio multicast SSDP e le smart TV (Samsung, LG, Sony…), le casse di
 rete (Sonos, amplificatori) e i programmi «renderer» rispondono; con pychromecast cerca anche i Chromecast e le Android/
 Google TV (mDNS). Due «driver» con gli stessi comandi: DLNA (SOAP di UPnP AVTransport) e Cast. Ognuna diventa un dispositivo virtuale «casa…» nel
 canale dal vivo: compare in «Dove suona» di chi è collegato da casa (o è amministratore), si sceglie come un telefono
-e si comanda da telecomando con gli stessi comandi (transfer, play, pause, next, prev, seek, skipto, enqueue, handoff).
+e si comanda da telecomando con gli stessi comandi (transfer, play, pause, next, prev, seek, skipto, enqueue, handoff, volume).
 Il server tiene la coda e dice alla TV cosa suonare; ogni 2 secondi le chiede a che punto è
 e, quando un brano finisce, passa al successivo. La TV scarica il brano dal server (mp3 a 320, il formato che leggono
 tutte) con un gettone usa e getta della sessione.
@@ -22,6 +24,9 @@ Bluetooth (capacità "bluetooth", dopo deploy/bluetooth.sh sull'host): le casse 
 fanno da cassa Bluetooth) sono un terzo driver. BlueZ e PipeWire girano sull'host; qui bluetoothctl parla con BlueZ dal
 bus di sistema montato, con un utente che può parlare solo con BlueZ, e ffmpeg suona il brano sull'uscita PipeWire
 della cassa.
+
+Tutta la casa (profilo "snapcast" del compose): un dispositivo che manda l'audio a Snapcast, che lo suona in sincrono
+in ogni stanza (snapclient). Le casse Bluetooth del server entrano in «Tutta la casa» con uno snapclient lanciato da qui.
 
 ─── PERCHÉ dispositivi virtuali e non una funzione a parte ───
 Il client sa già passare la coda a un altro dispositivo e fare da telecomando: la TV che si comporta come un
@@ -43,7 +48,9 @@ import xml.etree.ElementTree as ET
 from html import escape
 
 import requests
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+from flask import Blueprint, Response, g, jsonify, request, stream_with_context
+
+import db
 
 bp = Blueprint("casa", __name__)
 A = None
@@ -96,6 +103,7 @@ def cerca(attesa=3):
     if A.MULTICAST:
         trovate += cerca_cast(attesa)
     trovate += cerca_bt()
+    trovate += cerca_snap()
     for d in trovate:
         with lock:
             if d["id"] in trovati:
@@ -168,7 +176,7 @@ def giro():
 
 # ------------------------------------------------------------------ chi li vede: dispositivi virtuali nel canale dal vivo
 def nome(d):
-    return f"{'🔊' if d.get('tipo') == 'bt' else '📺'} {d['nome']}"[:40]
+    return f"{ {'bt': '🔊', 'snap': '🔗'}.get(d.get('tipo'), '📺')} {d['nome']}"[:40]
 
 
 def visibile(c):
@@ -259,7 +267,7 @@ ERRORI = (RuntimeError, requests.RequestException, ET.ParseError)
 
 class DLNA:
     def __init__(self, d):
-        self.avt = d["avt"]
+        self.avt, self.rc = d["avt"], d.get("rc")
 
     def carica(self, t, url, cop, da):
         try:
@@ -290,6 +298,14 @@ class DLNA:
 
     def salta(self, s):
         soap(self.avt, AVT, "Seek", ("InstanceID", 0), ("Unit", "REL_TIME"), ("Target", hms(s)))
+
+    def volume(self, v=None):
+        """Con v lo imposta (0…1), senza lo legge. RenderingControl: non tutte le TV lo hanno."""
+        if not self.rc:
+            raise RuntimeError("Questa TV non accetta il volume dalla rete")
+        if v is None:
+            return int(soap(self.rc, RC, "GetVolume", ("InstanceID", 0), ("Channel", "Master")).get("CurrentVolume") or 0) / 100
+        soap(self.rc, RC, "SetVolume", ("InstanceID", 0), ("Channel", "Master"), ("DesiredVolume", round(v * 100)))
 
     def leggi(self):
         """(PLAYING | PAUSED | STOPPED | altro, posizione, durata)"""
@@ -340,6 +356,12 @@ class Cast:
 
     def salta(self, s):
         self.fai(lambda mc: mc.seek(s))
+
+    def volume(self, v=None):
+        self.fai(lambda mc: None)  # collega, se non lo è
+        if v is None:
+            return self.d["cc"].status.volume_level if self.d["cc"].status else None
+        self.d["cc"].set_volume(v)
 
     def leggi(self):
         def f(mc):
@@ -410,32 +432,21 @@ def pactl_uscite():
     return [c.split("\t")[1] for c in r.stdout.splitlines() if "\t" in c]
 
 
-class BT:
-    """Una cassa Bluetooth: ffmpeg legge il brano dal server e lo suona sull'uscita PipeWire della cassa. Pausa e salto
-    fermano ffmpeg e lo rifanno partire dal punto giusto (un ffmpeg fermo a metà perderebbe il collegamento al brano)."""
+class Flusso:
+    """ffmpeg legge il brano dal server e lo manda a un'uscita (destinazione(): gli argomenti di uscita e l'ambiente).
+    Pausa e salto fermano ffmpeg e lo rifanno partire dal punto giusto (un ffmpeg fermo a metà perderebbe il
+    collegamento al brano). Base della cassa Bluetooth e di «Tutta la casa» (Snapcast)."""
+    ingresso = []  # opzioni prima di -i
+
     def __init__(self, d):
         self.d, self.p, self.url, self.da, self.t0, self.stato = d, None, None, 0.0, 0.0, "STOPPED"
         self.lk = threading.Lock()
 
-    def uscita(self):
-        mac = self.d["mac"].replace(":", "_")
-        for giro in range(2):
-            fine = time.time() + (2 if giro == 0 else 12)
-            while time.time() < fine:
-                u = next((x for x in pactl_uscite() if mac in x), None)
-                if u:
-                    return u
-                time.sleep(0.5)
-            if giro == 0:
-                btctl("connect", self.d["mac"], attesa=25)
-        raise RuntimeError(f"{self.d['nome']} non si collega: è accesa? È collegata a un telefono?")
-
     def avvia(self, da):
-        # buffer_duration: con quello di Pulse (2 s) ffmpeg finirebbe prima del suono, e la coda di ogni brano si perde
         self.chiudi()
-        u = self.uscita()
-        self.p = subprocess.Popen(["ffmpeg", "-nostdin", "-loglevel", "error", "-ss", f"{max(0, da):.1f}", "-i", self.url, "-vn", "-f", "pulse", "-buffer_duration", "300", "-device", u, "Armony"],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env={**os.environ, "PULSE_SERVER": f"unix:{BT_PULSE}"})
+        uscita, env = self.destinazione()
+        self.p = subprocess.Popen(["ffmpeg", "-nostdin", "-loglevel", "error", *self.ingresso, "-ss", f"{max(0, da):.1f}", "-i", self.url, "-vn", *uscita],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env={**os.environ, **env})
         self.da, self.t0, self.stato = max(0, da), time.time(), "PLAYING"
 
     def chiudi(self):
@@ -488,8 +499,110 @@ class BT:
             return self.stato, self.pos(), 0
 
 
+class BT(Flusso):
+    """Una cassa Bluetooth: il brano va sull'uscita PipeWire della cassa (protocollo PulseAudio)."""
+    def destinazione(self):
+        # buffer_duration: con quello di Pulse (2 s) ffmpeg finirebbe prima del suono, e la coda di ogni brano si perde
+        return ["-f", "pulse", "-buffer_duration", "300", "-device", self.uscita(), "Armony"], {"PULSE_SERVER": f"unix:{BT_PULSE}"}
+
+    def uscita(self):
+        mac = self.d["mac"].replace(":", "_")
+        for giro in range(2):
+            fine = time.time() + (2 if giro == 0 else 12)
+            while time.time() < fine:
+                u = next((x for x in pactl_uscite() if mac in x), None)
+                if u:
+                    return u
+                time.sleep(0.5)
+            if giro == 0:
+                btctl("connect", self.d["mac"], attesa=25)
+        raise RuntimeError(f"{self.d['nome']} non si collega: è accesa? È collegata a un telefono?")
+
+    def volume(self, v=None):
+        u = next((x for x in pactl_uscite() if self.d["mac"].replace(":", "_") in x), None)
+        if not u:
+            return None
+        env = {**os.environ, "PULSE_SERVER": f"unix:{BT_PULSE}"}
+        if v is None:
+            m = re.search(r"(\d+)%", subprocess.run(["pactl", "get-sink-volume", u], capture_output=True, text=True, timeout=5, env=env).stdout)
+            return int(m.group(1)) / 100 if m else None
+        subprocess.run(["pactl", "set-sink-volume", u, f"{round(v * 100)}%"], timeout=5, env=env)
+
+
+# ------------------------------------------------------------------ Tutta la casa (Snapcast, profilo "snapcast")
+# Snapcast suona la stessa musica in sincrono su tutti i suoi client (le stanze). Armony gli manda l'audio sulla
+# sorgente TCP locale e diventa un solo dispositivo, «Tutta la casa»; le stanze si comandano col suo JSON-RPC.
+SNAP_RPC = "http://127.0.0.1:1780/jsonrpc"
+SNAP_TCP = "tcp://127.0.0.1:4953"
+SNAP_ID = "casa" + hashlib.sha1(b"snapcast").hexdigest()[:12]
+SNAP = {"ok": False}
+clienti = {}  # mac -> snapclient che porta «Tutta la casa» su quella cassa Bluetooth
+
+
+def snap(metodo, **params):
+    j = A.http.post(SNAP_RPC, json={"id": 1, "jsonrpc": "2.0", "method": metodo, "params": params}, timeout=4).json()
+    if "error" in j:
+        raise RuntimeError(f"Snapcast: {j['error'].get('message')}")
+    return j["result"]
+
+
+def stanze():
+    """Gli snapclient conosciuti: [{id, nome, collegata, volume, muto}]."""
+    out = []
+    for gr in snap("Server.GetStatus")["server"]["groups"]:
+        for c in gr["clients"]:
+            out.append({"id": c["id"], "nome": c["config"]["name"] or c["host"]["name"], "collegata": c["connected"],
+                        "volume": c["config"]["volume"]["percent"] / 100, "muto": c["config"]["volume"]["muted"]})
+    return out
+
+
+def cerca_snap():
+    try:
+        n = sum(1 for x in stanze() if x["collegata"])
+    except (requests.RequestException, ValueError, RuntimeError, KeyError):
+        SNAP["ok"] = False
+        return []
+    SNAP["ok"] = True
+    return [{"id": SNAP_ID, "tipo": "snap", "nome": "Tutta la casa", "ip": "", "modello": f"Snapcast, {n} stanze collegate", "visto": time.time()}]
+
+
+class Snap(Flusso):
+    """«Tutta la casa»: PCM a Snapcast, al ritmo vero (-re): lui lo distribuisce alle stanze in sincrono."""
+    ingresso = ["-re"]
+
+    def destinazione(self):
+        return ["-f", "s16le", "-ar", "48000", "-ac", "2", SNAP_TCP], {}
+
+    def volume(self, v=None):
+        su = [x for x in stanze() if x["collegata"]]
+        if v is None:
+            return round(sum(x["volume"] for x in su) / len(su), 2) if su else None
+        for x in su:
+            snap("Client.SetVolume", id=x["id"], volume={"percent": round(v * 100), "muted": False})
+
+
+def snap_bt():
+    """Tiene acceso uno snapclient per ogni cassa Bluetooth messa in «Tutta la casa» (se è collegata)."""
+    while True:
+        try:
+            voluti = set(json.loads((db.one("SELECT value FROM settings WHERE key = 'snap_bt'") or {"value": "[]"})["value"])) if SNAP["ok"] else set()
+            for mac in [m for m in clienti if m not in voluti or clienti[m].poll() is not None]:
+                if clienti[mac].poll() is None:
+                    clienti[mac].terminate()
+                clienti.pop(mac)
+            for mac in voluti - set(clienti):
+                u = next((x for x in pactl_uscite() if mac.replace(":", "_") in x), None)
+                if u:  # spenta o non collegata: si riprova al giro dopo
+                    clienti[mac] = subprocess.Popen(["snapclient", "--host", "127.0.0.1", "--hostID", "armony-" + mac.replace(":", ""), "--player", "pulse",
+                                                     "--soundcard", u, "--logsink", "null"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                                    env={**os.environ, "PULSE_SERVER": f"unix:{BT_PULSE}"})
+        except Exception as e:  # noqa: BLE001 - il guardiano delle casse non deve fermarsi
+            A.diagnosi.log("avviso", "casa", f"Tutta la casa sulle casse Bluetooth: {e}"[:300])
+        time.sleep(15)
+
+
 def driver(d):
-    return Cast(d) if d.get("tipo") == "cast" else BT(d) if d.get("tipo") == "bt" else DLNA(d)
+    return Cast(d) if d.get("tipo") == "cast" else BT(d) if d.get("tipo") == "bt" else Snap(d) if d.get("tipo") == "snap" else DLNA(d)
 
 
 # ------------------------------------------------------------------ la coda su una TV
@@ -499,7 +612,7 @@ class Sessione:
         self.coda, self.i, self.shuffle, self.repeat = [], 0, False, "off"
         self.suona, self.pos, self.dur, self.at, self.since = False, 0.0, 0, time.time(), None
         self.fermato_da_noi, self.fermi, self.vivo, self.inviato = False, 0, True, None
-        self.err = 0
+        self.err, self.vol = 0, None
         threading.Thread(target=self.segui, daemon=True).start()
 
     # --- cosa la TV deve suonare
@@ -516,6 +629,11 @@ class Sessione:
         self.pos = float(self.r.carica(t, url, cop, da) or 0)
         self.at, self.fermato_da_noi, self.fermi = time.time(), False, 0
         self.since = self.since or int(time.time() * 1000)  # come i client: millisecondi
+        if self.vol is None:  # al primo brano: il volume com'è adesso, per il cursore del telecomando
+            try:
+                self.vol = self.r.volume()
+            except (*ERRORI, OSError, subprocess.TimeoutExpired):
+                pass
         self.pubblica(True)
 
     def avanti(self, auto=False):
@@ -561,6 +679,9 @@ class Sessione:
         elif cmd == "seek" and isinstance(v, (int, float)):
             self.r.salta(v)
             self.pos, self.at = float(v), time.time()
+        elif cmd == "volume" and isinstance(v, (int, float)):
+            self.vol = max(0.0, min(1.0, float(v)))
+            self.r.volume(self.vol)
         elif cmd == "repeat":
             self.repeat = {"off": "all", "all": "one", "one": "off"}[self.repeat]
         elif cmd == "shuffle":
@@ -621,7 +742,7 @@ class Sessione:
     def stato(self):
         t = self.coda[self.i] if self.coda else None
         return {"device": self.d["id"], "name": nome(self.d), "solo": False, "playing": self.suona, "position": round(self.posizione(), 1),
-                "duration": self.dur or (t or {}).get("duration") or 0, "rate": 1, "shuffle": self.shuffle, "repeat": self.repeat,
+                "duration": self.dur or (t or {}).get("duration") or 0, "rate": 1, **({"volume": round(self.vol, 2)} if self.vol is not None else {}), "shuffle": self.shuffle, "repeat": self.repeat,
                 "track": t, "next": self.coda[self.i + 1:self.i + 51], "left": max(0, len(self.coda) - self.i - 1),
                 "since": self.since if self.suona else None, "at": time.time()}
 
@@ -717,7 +838,10 @@ def bt_stato():
     for x in bt_elenco():
         out.append({**x, **bt_info(x["mac"])})
     out.sort(key=lambda x: (not x["abbinato"], not x["cassa"], x["nome"].lower()))
-    return jsonify(ok=True, dispositivi=out)
+    tc = set(json.loads((db.one("SELECT value FROM settings WHERE key = 'snap_bt'") or {"value": "[]"})["value"]))
+    for x in out:
+        x["tuttacasa"] = x["mac"] in tc
+    return jsonify(ok=True, dispositivi=out, snapcast=SNAP["ok"])
 
 
 @bp.post("/api/casa/bluetooth/cerca")
@@ -733,7 +857,7 @@ def bt_cerca():
 def bt_azione(mac):
     mac = mac.upper()
     azione = (request.get_json(silent=True) or {}).get("azione")
-    if not bt_ok() or not MAC.match(mac) or azione not in ("abbina", "collega", "scollega", "dimentica"):
+    if not bt_ok() or not MAC.match(mac) or azione not in ("abbina", "collega", "scollega", "dimentica", "tuttacasa_si", "tuttacasa_no"):
         return jsonify(error="Richiesta non valida"), 400
     if azione == "abbina":
         t = btctl("--agent", "NoInputNoOutput", "pair", mac, attesa=40)
@@ -744,12 +868,46 @@ def bt_azione(mac):
         btctl("connect", mac, attesa=25)
     elif azione == "collega":
         btctl("connect", mac, attesa=25)
+    elif azione in ("tuttacasa_si", "tuttacasa_no"):
+        v = set(json.loads((db.one("SELECT value FROM settings WHERE key = 'snap_bt'") or {"value": "[]"})["value"]))
+        v = v | {mac} if azione == "tuttacasa_si" else v - {mac}
+        db.run("INSERT INTO settings (key, value) VALUES ('snap_bt', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", json.dumps(sorted(v)))
     elif azione == "scollega":
         btctl("disconnect", mac)
     else:
         btctl("remove", mac)
     threading.Thread(target=cerca, daemon=True).start()  # in «Dove suona» compare o sparisce subito
     return jsonify(ok=True, **bt_info(mac))
+
+
+@bp.get("/api/casa/stanze")
+def stanze_elenco():
+    if not (A.dispositivi.is_local() or g.who["admin"]):
+        return jsonify(error="Le stanze si vedono da casa"), 403
+    try:
+        casa_ = urllib.parse.urlparse(A.trasferimento.ip_casa() or "").hostname  # le stanze lo raggiungono in casa, non dal dominio
+        return jsonify(ok=True, stanze=stanze(), host=casa_)
+    except (requests.RequestException, ValueError, RuntimeError, KeyError):
+        return jsonify(ok=False, stanze=[])
+
+
+@bp.put("/api/casa/stanze/<cid>")
+def stanza(cid):
+    if not (A.dispositivi.is_local() or g.who["admin"]):
+        return jsonify(error="Le stanze si comandano da casa"), 403
+    d = request.get_json(silent=True) or {}
+    try:
+        x = next((x for x in stanze() if x["id"] == cid), None)
+        if not x:
+            return jsonify(error="Stanza non trovata"), 404
+        if "volume" in d or "muto" in d:
+            snap("Client.SetVolume", id=cid, volume={"percent": round(max(0.0, min(1.0, float(d.get("volume", x["volume"])))) * 100),
+                                                     "muted": bool(d.get("muto", x["muto"]))})
+        if str(d.get("nome") or "").strip():
+            snap("Client.SetName", id=cid, name=str(d["nome"]).strip()[:40])
+    except (requests.RequestException, ValueError, RuntimeError, TypeError) as e:
+        return jsonify(error=str(e)[:200]), 502
+    return jsonify(ok=True, stanze=stanze())
 
 
 def init(flask_app, host):
@@ -759,5 +917,6 @@ def init(flask_app, host):
 
 
 def start():
-    if A.MULTICAST or bt_ok():
-        threading.Thread(target=giro, daemon=True).start()
+    threading.Thread(target=giro, daemon=True).start()  # senza multicast cerca solo casse Bluetooth e Snapcast
+    if bt_ok():
+        threading.Thread(target=snap_bt, daemon=True).start()

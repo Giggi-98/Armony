@@ -27,6 +27,27 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-13 — Tutta la casa con Snapcast, come servizio a parte
+**Contesto:** la stessa musica in più stanze, in sincrono.
+**Scelta:** Snapcast in un container suo (profilo "snapcast", rete host, sorgente TCP solo su 127.0.0.1): Armony gli manda il PCM con ffmpeg come a un dispositivo («Tutta la casa», driver Snap in casa.py) e ne legge e comanda le stanze col JSON-RPC (porta 1780). Le casse Bluetooth del server entrano come stanze con uno snapclient lanciato dal container di Armony, che ha già PipeWire.
+**Alternative scartate:** PipeWire combine-sink (solo casse attaccate al server, e restano sfasate); sincronizzare da Armony TV e casse DLNA/Chromecast (non hanno un orologio comune: sfasamenti di secondi); un orologio suo come la Jam (è per telefoni con Armony aperto, non per casse senza schermo).
+**Conseguenze:** le TV e i Chromecast restano fuori da Tutta la casa; le stanze nuove vogliono un client Snapcast (app Android, Raspberry); la porta 1780 di controllo è aperta nella rete di casa, come quella dell'app Snapcast.
+**Da rivedere se:** serve sincronizzare dispositivi senza Snapcast, o Snapcast smette di essere mantenuto.
+
+## 2026-10-13 — Home Assistant con un gettone e REST, non un'integrazione
+**Contesto:** Home Assistant deve vedere cosa suona e comandare la musica per le automazioni.
+**Scelta:** ogni utente crea un gettone (nel database solo l'impronta sha256) e Armony gli dà il YAML con `rest_command` e un sensore REST; le rotte /api/ha/<gettone>/… valgono solo dalla rete di casa e fanno quello che fa un telecomando (manda_cmd).
+**Alternative scartate:** un'integrazione `custom_components` con un `media_player` (da installare in Home Assistant e da tenere dietro alle sue versioni, e non provabile qui); MQTT (serve un broker, e Home Assistant non ha un media_player MQTT).
+**Conseguenze:** in Home Assistant niente scheda «lettore» con la copertina: un sensore e un comando, che bastano per le automazioni.
+**Da rivedere se:** si vuole il lettore nella plancia di Home Assistant, o servono i comandi da fuori casa.
+
+## 2026-10-13 — La sveglia la fa partire il server
+**Contesto:** sveglie con il mix o una playlist su una TV, una cassa o un dispositivo.
+**Scelta:** le sveglie stanno sul server (settings `sveglia:<utente>`, col fuso del telefono che le crea) e un giro ogni 20 secondi manda la coda e alza il volume con gli stessi comandi del telecomando.
+**Alternative scartate:** sveglia nell'app (sul telefono spento o col browser chiuso non suona, e una TV non ha un'app Armony).
+**Conseguenze:** se all'ora giusta il dispositivo non è collegato la sveglia non suona: arriva una notifica.
+**Da rivedere se:** l'app Android avrà una sveglia sua (allora quella locale per il telefono stesso).
+
 ## 2026-10-13 — Niente /jam dal bot
 **Contesto:** fra le idee per i bot c'era «/jam apre una Jam e manda il link nel gruppo».
 **Scelta:** non fatto. Il link di una Jam porta il segreto della stanza nel frammento `#`, creato dal client e mai visto dal server (CLAUDE.md, sicurezza della Jam): un bot che la apre dovrebbe generarlo sul server, e il server conoscerebbe la chiave.

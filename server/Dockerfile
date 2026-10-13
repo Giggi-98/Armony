@@ -1,6 +1,7 @@
 FROM python:3.12-slim
-# bluez e pulseaudio-utils: solo i comandi (bluetoothctl, pactl) per le casse Bluetooth dell'host (deploy/bluetooth.sh)
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates bluez pulseaudio-utils \
+# bluez, pulseaudio-utils, snapclient: solo i comandi (bluetoothctl, pactl, snapclient) per le casse Bluetooth dell'host
+# (deploy/bluetooth.sh) e per metterle in «Tutta la casa» (Snapcast)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates bluez pulseaudio-utils snapclient \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY server/requirements.txt .

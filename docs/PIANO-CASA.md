@@ -28,6 +28,13 @@ Bluetooth (fase 4) o, più avanti, con una skill Alexa (account sviluppatore Ama
 (se è collegato al telefono, non al server). Fatto con lo script `deploy/bluetooth.sh` (niente SSH dall'agente al mini
 PC): ogni cassa è un dispositivo a sé, niente uscita combinata (vedi DECISIONS.md).
 
+## Dopo (0.65)
+
+Volume di TV, casse e dispositivi dal telecomando; pulsanti nei messaggi dei bot (⏮️ ⏯️ ⏭️ sotto `/ora`, ⏯️ ⏭️ sotto
+«🎶 Ora» nel vocale); 🏆 classifica del lunedì (canale e `/classifica`); 🙋 `/richiedi` con ✅/❌ degli amministratori;
+⏰ sveglia (sveglia.py); 🏠 Home Assistant con gettone e REST (homeassistant.py); 🔗 Tutta la casa con Snapcast (profilo
+"snapcast", driver Snap in casa.py, casse Bluetooth del server come stanze). Il quiz musicale l'utente non lo vuole.
+
 ## Cosa possiamo fare con i bot (idee, da scegliere)
 
 Fatte (dopo la 0.63): 🎵 `/brano`, 🔗 link incollato, 📊 riepilogo della settimana (`/settimana` e il lunedì), 🆕 canale
