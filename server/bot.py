@@ -335,10 +335,14 @@ def c_cerca(u, q):
     if not q:
         return "Scrivi cosa cercare: /cerca bohemian rhapsody"
     r = A.federazione.nd_get("search3", query=q, songCount=6, albumCount=3, artistCount=2).get("searchResult3") or {}
-    righe = [f"🎵 {s.get('title')} — {s.get('artist')}  {url('#/album/' + s['albumId']) if s.get('albumId') else ''}" for s in r.get("song") or []]
+    brani = (r.get("song") or [])[:5]
+    righe = [f"{i}. 🎵 {s.get('title')} — {s.get('artist')}  {url('#/album/' + s['albumId']) if s.get('albumId') else ''}" for i, s in enumerate(brani, 1)]
     righe += [f"💿 {a.get('name')} — {a.get('artist')}  {url('#/album/' + a['id'])}" for a in r.get("album") or []]
     righe += [f"🎤 {a.get('name')}  {url('#/artista/' + a['id'])}" for a in r.get("artist") or []]
-    return "\n".join(righe) if righe else f"Niente per «{q}». Con /scarica e un link lo prendi da YouTube."
+    if not righe:
+        return f"Niente per «{q}». Con /richiedi lo chiedi, con /scarica e un link lo prendi da YouTube."
+    # ▶️ n: quel brano parte sul tuo dispositivo (seguito da brani simili)
+    return {"testo": "\n".join(righe), "tasti": [(f"▶️ {i}", f"play:{s['id']}") for i, s in enumerate(brani, 1)]} if brani else "\n".join(righe)
 
 
 def suona(u):
@@ -372,7 +376,25 @@ def premuto(rete, chat, azione):
         return out
     if tipo == "ric":
         return richiesta_decidi(u, arg)
+    if tipo == "play":
+        return {"avviso": suona_brano(u, arg)}
+    if tipo == "sv":
+        return A.sveglia.tasto(u, arg)
     return None
+
+
+def suona_brano(u, sid):
+    """▶️ sotto /cerca: il brano parte sul dispositivo che suona (o ha suonato per ultimo), poi brani simili."""
+    st = suona(u)
+    if not st:
+        return "🔇 Apri Armony su un dispositivo, poi riprova."
+    t = A.federazione.nd_get("getSong", id=sid).get("song")
+    if not t:
+        return "Brano non trovato."
+    simili = A.federazione.nd_get("getSimilarSongs", id=sid, count=30).get("similarSongs", {}).get("song") or []
+    coda = [brano_wire(t)] + [brano_wire(x) for x in simili if x.get("id") != sid]
+    A.manda_cmd(u, st["device"], "transfer", {"queue": coda, "index": 0, "position": 0, "shuffle": False, "repeat": "off"})
+    return f"▶️ «{t.get('title')}» su {st.get('name') or 'il tuo dispositivo'}"
 
 
 def c_amici(u, _):
@@ -707,17 +729,22 @@ def tg(method, timeout=40, **params):
 
 
 def tastiera(tasti):
-    return {"inline_keyboard": [[{"text": e, "callback_data": a[:64]} for e, a in tasti]]}
+    riga = [{"text": e, "callback_data": a[:64]} for e, a in tasti]
+    return {"inline_keyboard": [riga] if riga else []}  # una riga vuota Telegram la rifiuta
 
 
 def tg_tocco(cq):
     """Un pulsante toccato su Telegram: risposta (toglie la rotellina) e messaggio aggiornato al suo posto."""
     m = cq.get("message") or {}
     ch = (m.get("chat") or {}).get("id")
+    out = None
     try:
         out = premuto("telegram", ch, cq.get("data") or "")
     finally:
-        tg("answerCallbackQuery", callback_query_id=cq["id"])
+        avviso = out.pop("avviso", None) if isinstance(out, dict) else None
+        tg("answerCallbackQuery", callback_query_id=cq["id"], **({"text": avviso[:190]} if avviso else {}))
+    if isinstance(out, dict) and not out:
+        return  # solo un avviso: il messaggio resta com'è
     if out:
         testo, tasti = (out["testo"], out["tasti"]) if isinstance(out, dict) else (out, [])
         try:
@@ -869,6 +896,8 @@ def dc_client():
             return await dc["voce"](inter, cid[5:])
         await inter.response.defer()
         out = await asyncio.get_running_loop().run_in_executor(None, premuto, "discord", str(inter.user.id), cid)
+        if isinstance(out, dict) and "avviso" in out:
+            return await inter.followup.send(out["avviso"], ephemeral=True)
         if out:
             testo, tasti = (out["testo"], out["tasti"]) if isinstance(out, dict) else (out, [])
             await inter.edit_original_response(content=testo[:1900], view=vista(tasti) if tasti else None)

@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-13 — Bluetooth: un ponte D-Bus sull'host invece del bus montato nel container
+**Contesto:** con la scelta del 12/10 (Casse Bluetooth, più sotto) il container montava `/run/dbus` e usava `bluetoothctl` come `armony-bt`. Su Ubuntu il bus di sistema applica AppArmor ai messaggi: il profilo `docker-default` non ha regole D-Bus, quindi il primo messaggio (`Hello`) viene rifiutato e la ricerca delle casse non trova mai niente. Le prove del 12/10 avevano un D-Bus finto in un container senza AppArmor e non l'hanno visto.
+**Scelta:** `deploy/bluetooth.sh` installa `xdg-dbus-proxy` e lo fa girare sull'host come `armony-bt` (servizio `armony-bt-dbus`, presa in `/run/armony-bt`, cartella che resta fra un riavvio e l'altro); il container si collega a quella presa, sempre come uid di `armony-bt`. Il resto della scelta del 12/10 resta. La pagina dice quando il Bluetooth non risponde e perché.
+**Alternative scartate:** `apparmor:unconfined` per il container di Armony (toglie tutta la protezione al container per una funzione); un profilo AppArmor nostro (da tenere allineato a `docker-default`, e un nome di profilo che non c'è impedisce al container di partire); il proxy con `--filter --talk=org.bluez` (più stretto, ma l'agente di abbinamento riceve chiamate da BlueZ che il filtro potrebbe bloccare: non provabile qui senza un adattatore).
+**Conseguenze:** chi ha lanciato lo script prima deve rilanciarlo; un servizio in più sull'host.
+**Da rivedere se:** Docker aggiunge regole D-Bus a `docker-default`, o si prova su un adattatore vero che il filtro `--talk=org.bluez` basta.
+
 ## 2026-10-13 — Tutta la casa con Snapcast, come servizio a parte
 **Contesto:** la stessa musica in più stanze, in sincrono.
 **Scelta:** Snapcast in un container suo (profilo "snapcast", rete host, sorgente TCP solo su 127.0.0.1): Armony gli manda il PCM con ffmpeg come a un dispositivo («Tutta la casa», driver Snap in casa.py) e ne legge e comanda le stanze col JSON-RPC (porta 1780). Le casse Bluetooth del server entrano come stanze con uno snapclient lanciato dal container di Armony, che ha già PipeWire.

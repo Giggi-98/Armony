@@ -4694,14 +4694,19 @@ document.addEventListener('contextmenu', e => {
 I.disk = '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>';
 I.archive = '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/>';
 I.user = '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>';
-const SET_AREAS = [['dev', 'Questo dispositivo'], ['srv', 'Server']];
+// gruppi dell'elenco: [area, titolo, icona]. Le aree «srv» e «sis» (e Casse Bluetooth) sono impostazioni del server:
+// da internet senza chiave si leggono e basta (setRO)
+const SET_AREAS = [['tu', 'Tu', 'user'], ['ascolto', 'Ascolto', 'headphones'], ['casa', 'Casa e chat', 'home'], ['dev', 'Questo dispositivo', 'phone'],
+  ['srv', 'Server', 'friends'], ['sis', 'Sistema', 'pulse']];
+const SET_SRV = new Set(['srv', 'sis']), SET_SRV_K = new Set(['bluetooth']);
+const setSrv = (a, k) => SET_SRV.has(a) || SET_SRV_K.has(k);
 function vSettings(id = location.hash.split('/')[2]) {
   const opt = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${String(k) === String(cur) ? 'selected' : ''}>${v}</option>`).join('');
   const qOpts = Object.fromEntries(Object.entries(QUALITIES).map(([k, q]) => [k, q.label]));
   const ds = dlSrv(), adm = !!access().admin, caps = ds?.me?.caps || [];
   // [area, id, titolo, icona, parole per la ricerca, contenuto]
   const T = [
-  ['dev', 'profilo', 'Profilo', 'user', 'nome nick foto profilo avatar immagine sincronizzazione dispositivi password', `<div class="panel stack">
+  ['tu', 'profilo', 'Profilo', 'user', 'nome nick foto profilo avatar immagine sincronizzazione dispositivi password', `<div class="panel stack">
     ${Avatar.ok() ? `<div class="mecard">${pavatar({ user: srv().user, name: P.nick || srv().user }, 'xl')}<span class="grow"><b>${esc(P.nick || srv().user)}</b><small>${esc(srv().user)} · ${esc(srv().name)}</small>
       <span class="row"><button class="btn sm" id="pAv">${ic('image')} Cambia foto</button><button class="btn sm" id="pAvDel">Togli</button></span></span></div>` : ''}
     <label class="f">Il tuo nome per gli amici e nelle Jam<input type="text" id="pNick" value="${esc(P.nick)}" placeholder="Es. Giulia" maxlength="30"></label>
@@ -4711,17 +4716,18 @@ function vSettings(id = location.hash.split('/')[2]) {
     <label class="f">Nome di questo dispositivo<input type="text" id="pDev" value="${esc(P.deviceName)}" placeholder="${esc(Live.name())}" maxlength="30"></label>
     ${Amici.on() ? '<div class="row"><button class="btn" id="pPw">Cambia password</button></div>' : ''}</div>`],
 
-  srv()?.me?.caps?.includes('notifiche') ? ['dev', 'notifiche', 'Notifiche', 'bell', 'notifiche avvisi campanella importazioni download jam dispositivi', `<div class="panel stack">
+  srv()?.me?.caps?.includes('notifiche') ? ['tu', 'notifiche', 'Notifiche', 'bell', 'notifiche avvisi campanella importazioni download jam dispositivi', `<div class="panel stack">
     <label class="check"><input type="checkbox" id="pNotif" ${P.notifOn ? 'checked' : ''}><span>Avvisi su questo dispositivo<small>Quando ${NATIVE ? 'l\'app è in sottofondo' : 'Armony non è la scheda in primo piano'}, le notifiche arrivano come avvisi del ${NATIVE ? 'telefono' : 'sistema'}. Tutte restano comunque nella campanella.</small></span></label>
     ${[['nImport', '📥 Importazioni e album finiti', 'Quanti brani sono arrivati e quanti non si trovano'], ['nDownload', '⬇️ Download singoli', 'Scaricati o non riusciti'], ['nJam', '🎉 Jam degli amici', 'Quando qualcuno apre una Jam visibile'], ['nDev', '🔐 Dispositivi da approvare', 'Un tuo dispositivo nuovo aspetta l\'approvazione'], ['nAmici', '🤝 Amici', 'Brani mandati a te, inviti e aggiunte nelle playlist collaborative']].map(([k, l, h]) => `<label class="check"><input type="checkbox" data-pb="${k}" ${P[k] !== false ? 'checked' : ''}><span>${l}<small>${h}</small></span></label>`).join('')}
     ${srv()?.me?.caps?.includes('notattivita') ? `<label class="check"><input type="checkbox" id="nAtt" ${Notif.att !== false ? 'checked' : ''}><span>✨ Amici in linea e cosa ascoltano<small>👋 chi torna in linea, 🎧 chi comincia ad ascoltare, 📀 le playlist condivise. Pochi avvisi: al massimo uno ogni tre ore per amico. Vale per il tuo utente su tutti i dispositivi.</small></span></label>` : ''}
     <p class="small" style="color:var(--muted);margin:0">${NATIVE ? 'Con l\'app chiusa del tutto gli avvisi non arrivano: li ritrovi nella campanella quando la riapri.' : 'Con il browser chiuso gli avvisi non arrivano: li ritrovi nella campanella.'}</p></div>`] : null,
 
-  srv()?.me?.caps?.includes('sveglia') && srv()?.session ? ['dev', 'sveglia', 'Sveglia', 'clock', 'sveglia mattina ora tv cassa mix playlist volume', '<div id="svBox"><p class="sub">Caricamento…</p></div>'] : null,
-  srv()?.me?.caps?.includes('snapcast') && srv()?.session ? ['dev', 'tuttacasa', 'Tutta la casa', 'speaker', 'snapcast stanze multiroom sincrono casse tutta la casa volume', '<div id="tcBox"><p class="sub">Caricamento…</p></div>'] : null,
-  srv()?.me?.caps?.includes('homeassistant') && srv()?.session ? ['dev', 'homeassistant', 'Home Assistant', 'home', 'home assistant domotica automazioni casa yaml', '<div id="haBox"><p class="sub">Caricamento…</p></div>'] : null,
-  srv()?.me?.caps?.includes('bot') ? ['dev', 'bot', 'Bot Telegram e Discord', 'send', 'bot telegram discord chat comandi notifiche collega', '<div id="botBox"><p class="sub">Caricamento…</p></div>'] : null,
-  ['dev', 'ascolto', 'Ascolto', 'headphones', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
+  srv()?.me?.caps?.includes('casa') && srv()?.session ? ['casa', 'retecasa', 'TV e casse in rete', 'wifi', 'tv casse dlna chromecast google cast smart tv rete casa trovati cerca multicast', '<div id="rcBox"><p class="sub">Caricamento…</p></div>'] : null,
+  srv()?.me?.caps?.includes('sveglia') && srv()?.session ? ['casa', 'sveglia', 'Sveglia', 'clock', 'sveglia mattina ora tv cassa mix playlist volume', '<div id="svBox"><p class="sub">Caricamento…</p></div>'] : null,
+  srv()?.me?.caps?.includes('snapcast') && srv()?.session ? ['casa', 'tuttacasa', 'Tutta la casa', 'speaker', 'snapcast stanze multiroom sincrono casse tutta la casa volume', '<div id="tcBox"><p class="sub">Caricamento…</p></div>'] : null,
+  srv()?.me?.caps?.includes('homeassistant') && srv()?.session ? ['casa', 'homeassistant', 'Home Assistant', 'home', 'home assistant domotica automazioni casa yaml', '<div id="haBox"><p class="sub">Caricamento…</p></div>'] : null,
+  srv()?.me?.caps?.includes('bot') ? ['casa', 'bot', 'Bot Telegram e Discord', 'send', 'bot telegram discord chat comandi notifiche collega', '<div id="botBox"><p class="sub">Caricamento…</p></div>'] : null,
+  ['ascolto', 'ascolto', 'Ascolto', 'headphones', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
     <div class="grid2">
       <label class="f">Qualità<select data-p="quality">${opt(qOpts, P.quality)}</select></label>
       <label class="f">Qualità con rete mobile<select data-p="qualityMobile">${opt({ same: 'Uguale', ...qOpts }, P.qualityMobile)}</select></label>
@@ -4739,16 +4745,16 @@ function vSettings(id = location.hash.split('/')[2]) {
     <div class="row"><button class="btn" data-act="eq">${ic('sliders')} Equalizzatore</button><button class="btn" data-act="speed">${ic('speed')} Velocità: ${P.speed}×</button></div>
   </div>`],
 
-  ['dev', 'testi', 'Testi e sincronizzazione', 'lyrics', 'lyrics lrclib coda continua dispositivi', `<div class="panel stack">
+  ['ascolto', 'testi', 'Testi e sincronizzazione', 'lyrics', 'lyrics lrclib coda continua dispositivi', `<div class="panel stack">
     <label class="check"><input type="checkbox" data-pb="lyricsOnline" ${P.lyricsOnline ? 'checked' : ''}><span>Cerca i testi online se il server non li ha<small>Usa LRCLIB, un archivio libero di testi sincronizzati. Invia solo titolo, artista e durata del brano.</small></span></label>
     <label class="check"><input type="checkbox" data-pb="syncQueue" ${P.syncQueue ? 'checked' : ''}><span>Continua su altri dispositivi<small>Salva la coda sul server: apri Armony sul PC e riprendi da dove eri al telefono.</small></span></label>
   </div>`],
 
   // sul web non c'è: il tema sta nel pulsante in alto a destra, la barra in basso si personalizza tenendola premuta
-  NATIVE ? ['dev', 'aspetto', 'Aspetto', 'moon', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+  NATIVE ? ['ascolto', 'aspetto', 'Aspetto', 'moon', 'tema chiaro scuro automatico colori barra in basso sezioni navigazione', `<div class="seg">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([v, l]) => `<label><input type="radio" name="theme" value="${v}" ${P.theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
     <div class="tbset"><span class="grow"><b>Barra in basso</b><small>${tabsOf().map(h => NAV.find(n => n[0] === h)[1]).join(' · ')}</small></span><button class="btn sm" data-act="tabsedit">Personalizza</button></div>`] : null,
 
-  ['dev', 'jam', 'Jam', 'jam', 'stun turn 5g internet nat ascoltare insieme', `<div class="panel stack">
+  ['ascolto', 'jam', 'Jam', 'jam', 'stun turn 5g internet nat ascoltare insieme', `<div class="panel stack">
     <label class="check"><input type="checkbox" data-pb="stun" ${P.stun ? 'checked' : ''}><span>Permetti Jam via internet (5G)<small>Usa server STUN pubblici per scoprire l'indirizzo esterno. Non passa musica né chiavi da quei server.</small></span></label>
     <p class="small" style="color:var(--muted);margin:0">Server TURN (facoltativo). Serve quando operatori mobili o reti aziendali impediscono il collegamento diretto. Il traffico che vi passa resta cifrato.</p>
     <div class="grid2">
@@ -4759,7 +4765,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   </div>`],
 
   // i miei dispositivi qui; quelli degli altri utenti, la regola dei client senza chiave e il registro in Server → Sicurezza
-  srv()?.session && Disp.ok(srv()) ? ['dev', 'dispositivi', 'Dispositivi e sicurezza', 'shield', 'dispositivi sicurezza chiave abbina codice revoca approva attesa sessioni', '<div id="devBox"><p class="sub">Caricamento…</p></div>'] : null,
+  srv()?.session && Disp.ok(srv()) ? ['tu', 'dispositivi', 'Dispositivi e sicurezza', 'shield', 'dispositivi sicurezza chiave abbina codice revoca approva attesa sessioni', '<div id="devBox"><p class="sub">Caricamento…</p></div>'] : null,
 
   ['dev', 'server', 'Server musicali', 'lib', 'navidrome subsonic account accesso password indirizzo rete lan', `<p class="sub">Qualsiasi server compatibile Subsonic: Navidrome, Gonic, Airsonic, Ampache.</p>
   <div>${S.servers.map(s => `<div class="list-item" style="cursor:default">
@@ -4788,27 +4794,31 @@ function vSettings(id = location.hash.split('/')[2]) {
     <label class="f">Indirizzo pubblico di questo server<input type="url" id="pubUrl" value="${esc(ds.me.public || '')}" placeholder="https://armony.nome-rete.ts.net" ${ds.me.public_fisso ? 'disabled' : ''}></label>
     <p class="small" style="color:var(--muted);margin:0">Quello con cui gli altri raggiungono Armony (Tailscale, dominio). Vale per tutti i dispositivi: link condivisi, inviti agli amici, QR dell'app e server collegati lo usano al posto dell'indirizzo di casa.</p>
     ${ds.me.public_fisso ? '<p class="small" style="margin:0">Deciso da <b>ARMONY_DOMAIN</b> nel file <code>.env</code> del server (HTTPS con Caddy): si cambia lì, e i server collegati lo sanno da soli.</p>' : '<div class="row"><button class="btn" id="pubSave">Salva</button></div>'}</div>`] : null,
-  adm && caps.includes('youtube') ? ['srv', 'youtube', 'YouTube', 'film', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>'] : null,
-  adm && dlSrv()?.me?.caps?.includes('salute') ? ['srv', 'salute', 'Salute della libreria', 'check', 'salute libreria doppioni copertine tag generi album spezzati testi lrclib pulizia', '<div id="saluteBox"><p class="sub">Controllo la libreria…</p></div>'] : null,
+  adm && caps.includes('youtube') ? ['sis', 'youtube', 'YouTube', 'film', 'download cookie robot bot bloccato account prova yt-dlp', '<div class="panel stack" id="ytBox"><p class="sub">Controllo…</p></div>'] : null,
+  adm && dlSrv()?.me?.caps?.includes('salute') ? ['sis', 'salute', 'Salute della libreria', 'check', 'salute libreria doppioni copertine tag generi album spezzati testi lrclib pulizia', '<div id="saluteBox"><p class="sub">Controllo la libreria…</p></div>'] : null,
   adm && dlSrv()?.me?.caps?.includes('trasferimento') ? ['srv', 'trasferimento', 'Trasferimento', 'send', 'trasferimento trasloco sposta server nuovo casa migrazione identità', '<div id="trBox"><p class="sub">Caricamento…</p></div>'] : null,
-  adm && caps.includes('bluetooth') ? ['srv', 'bluetooth', 'Casse Bluetooth', 'speaker', 'bluetooth casse alexa echo abbina collega dove suona', '<div id="btBox"><p class="sub">Caricamento…</p></div>'] : null,
-  adm ? ['srv', 'aggiornamenti', 'Aggiornamenti', 'repeat', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>'] : null,
+  adm && caps.includes('bluetooth') ? ['casa', 'bluetooth', 'Casse Bluetooth', 'speaker', 'bluetooth casse alexa echo abbina collega dove suona', '<div id="btBox"><p class="sub">Caricamento…</p></div>'] : null,
+  adm ? ['sis', 'aggiornamenti', 'Aggiornamenti', 'repeat', 'versione github aggiorna', '<div class="panel" id="updBox"><p class="sub">Controllo…</p></div>'] : null,
   // stato del server (diagnosi.js) con dentro lo spazio del disco; sui server che non lo conoscono, solo lo spazio
-  adm && ds?.session && caps.includes('diagnosi') ? ['srv', 'stato', 'Stato del server', 'pulse', 'cpu processore memoria ram carico rete thread ascolti flussi dispositivi risorse monitor disco spazio occupato libero', '<div id="statoBox"><p class="sub">Misuro…</p></div><h3>Spazio</h3><div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>']
-    : adm && srv()?.session && caps.includes('spazio') ? ['srv', 'disco', 'Spazio del server', 'disk', 'memoria disco spazio occupato libero gb musica video', '<div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>'] : null,
-  adm && ds?.session && caps.includes('diagnosi') ? ['srv', 'registro', 'Registro eventi', 'bug', 'log errori debug problemi eventi ambiguità guasti', '<div id="logBox"><p class="sub">Caricamento…</p></div>'] : null
+  adm && ds?.session && caps.includes('diagnosi') ? ['sis', 'stato', 'Stato del server', 'pulse', 'cpu processore memoria ram carico rete thread ascolti flussi dispositivi risorse monitor disco spazio occupato libero', '<div id="statoBox"><p class="sub">Misuro…</p></div><h3>Spazio</h3><div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>']
+    : adm && srv()?.session && caps.includes('spazio') ? ['sis', 'disco', 'Spazio del server', 'disk', 'memoria disco spazio occupato libero gb musica video', '<div class="panel stack" id="spazioSrvBox"><p class="sub">Calcolo…</p></div>'] : null,
+  adm && ds?.session && caps.includes('diagnosi') ? ['sis', 'registro', 'Registro eventi', 'bug', 'log errori debug problemi eventi ambiguità guasti', '<div id="logBox"><p class="sub">Caricamento…</p></div>'] : null
   ].filter(Boolean);
   const ro = `<p class="ro-note" hidden>${ic('lock')}<span>Sola lettura. Da internet le impostazioni del server si cambiano solo da un dispositivo con chiave (l'app, o Armony aperta con HTTPS) oppure da casa o da Tailscale.</span></p>`;
   view.innerHTML = `<div class="setp"><h1>Impostazioni</h1><p class="sub">Tutto resta su questo dispositivo, salvo ciò che sta sui server.</p>
   <label class="setsearch">${ic('search')}<input type="search" id="setQ" placeholder="Cerca nelle impostazioni" aria-label="Cerca nelle impostazioni" autocomplete="off"></label>
   <div id="setNone" class="empty" hidden></div>
-  <div class="set"><div class="setnav" role="navigation" aria-label="Gruppi di impostazioni">${SET_AREAS.map(([a, l]) => T.some(t => t[0] === a) ? `<p class="setnav-h">${a === 'srv' ? `${l} <span>${esc(ds?.name || '')}</span>` : l}</p>
-    ${T.filter(t => t[0] === a).map(([, k, title, icon]) => `<a href="#/impostazioni/${k}" data-t="${k}"><i class="setic">${ic(icon)}</i><span>${title}</span><i class="dot" data-dot="${k}" aria-label="da vedere" hidden></i>${ic('chevr')}</a>`).join('')}` : '').join('')}</div>
+  <div class="set"><div class="setnav" role="navigation" aria-label="Gruppi di impostazioni">${SET_AREAS.map(([a, l, gi]) => T.some(t => t[0] === a) ? `<div class="setgrp" data-g="${a}"><button type="button" class="setnav-h" aria-expanded="false"><i class="setic">${ic(gi)}</i><span>${l}${a === 'srv' && ds?.name ? ` <small>${esc(ds.name)}</small>` : ''}</span><i class="dot" data-gdot="${a}" hidden></i><small class="setn">${T.filter(t => t[0] === a).length}</small>${ic('chev')}</button><div class="setgrp-l">
+    ${T.filter(t => t[0] === a).map(([, k, title, icon]) => `<a href="#/impostazioni/${k}" data-t="${k}"><i class="setic">${ic(icon)}</i><span>${title}</span><i class="dot" data-dot="${k}" aria-label="da vedere" hidden></i>${ic('chevr')}</a>`).join('')}</div></div>` : '').join('')}</div>
   <div class="setbody">${T.map(([a, k, title, , keys, body]) => `<section class="stab" data-t="${k}" data-k="${esc(keys)}" aria-label="${esc(title)}">
-    <header class="stab-h"><button class="icon-btn stab-back" aria-label="Torna alle impostazioni">${ic('chevl')}</button><h2><small class="stab-area">${a === 'srv' ? 'Server' : 'Questo dispositivo'}</small>${title}</h2></header>
-    ${a === 'srv' ? `${ro}<fieldset class="sbody srvfs">${body}</fieldset>` : `<div class="sbody">${body}</div>`}</section>`).join('')}</div></div>
+    <header class="stab-h"><button class="icon-btn stab-back" aria-label="Torna alle impostazioni">${ic('chevl')}</button><h2><small class="stab-area">${SET_AREAS.find(x => x[0] === a)?.[1] || ''}</small>${title}</h2></header>
+    ${setSrv(a, k) ? `${ro}<fieldset class="sbody srvfs">${body}</fieldset>` : `<div class="sbody">${body}</div>`}</section>`).join('')}</div></div>
   <p class="small" style="color:var(--muted);margin-top:24px">Armony, dispositivo ${esc(S.device)}.</p></div>`;
   $('#setQ').oninput = e => settingsFilter(e.target.value);
+  view.querySelectorAll('.setgrp > .setnav-h').forEach(b => b.onclick = () => {
+    const g = b.parentElement, on = !g.classList.contains('aperto'), aperti = new Set(store.get('setAperti') || []);
+    on ? aperti.add(g.dataset.g) : aperti.delete(g.dataset.g); store.set('setAperti', [...aperti]); setGrp(g, on);
+  });
   view.querySelectorAll('.stab-back').forEach(b => b.onclick = () => navStack.at(-2) === '#/impostazioni' ? history.back() : location.hash = '#/impostazioni');
   $('#pNick').onchange = e => { P.nick = e.target.value.trim(); savePrefs(); };
   $('#pDev').onchange = e => { P.deviceName = e.target.value.trim(); savePrefs(); Live.connect(); };
@@ -4838,7 +4848,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   $('#cacheMB').onchange = e => { P.cacheMB = +e.target.value; savePrefs(); if (!P.cacheMB) ACache.clear().then(() => { $('#cacheUse').textContent = '0 MB usati'; }); else ACache.trim(); };
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint(); refreshBot(); refreshBt(); refreshSveglia(); refreshHa(); refreshStanze();
+  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint(); refreshBot(); refreshBt(); refreshSveglia(); refreshHa(); refreshStanze(); refreshReteCasa();
   $('#pubSave')?.addEventListener('click', async () => {
     try {
       const r = await dlApi('/api/indirizzo', { method: 'PUT', body: JSON.stringify({ url: $('#pubUrl').value.trim() }) });
@@ -4862,9 +4872,14 @@ function setTab(id) {
   if ($('#setQ').value) { $('#setQ').value = ''; settingsFilter(''); }
   p.classList.toggle('open', !!want);
   tabs.forEach(t => t.classList.toggle('on', t === on));
+  // gruppi aperti: quelli scelti (ricordati) e quello della scheda in vista; sul telefono, senza scelte, il primo
+  const aperti = new Set(store.get('setAperti') || (matchMedia('(min-width:861px)').matches ? [] : ['tu']));
+  const grpOn = p.querySelector(`.setnav a[data-t="${on.dataset.t}"]`)?.closest('.setgrp');
+  p.querySelectorAll('.setgrp').forEach(g => setGrp(g, aperti.has(g.dataset.g) || (g === grpOn && (want || matchMedia('(min-width:861px)').matches))));
   p.querySelectorAll('.setnav a').forEach(a => { const o = a.dataset.t === on.dataset.t; a.classList.toggle('on', o); o ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'); });
   window.scrollTo(0, 0);
 }
+function setGrp(g, on) { g.classList.toggle('aperto', on); g.querySelector('.setnav-h').setAttribute('aria-expanded', on); }
 // area Server in sola lettura: amministratore senza chiave da internet (il server rifiuterebbe comunque)
 function setRO() {
   const ro = dlSrv()?.me?.srvedit === false;
@@ -4876,6 +4891,7 @@ function setDots() {
   const m = srv()?.me || {}, n = m.pending || 0, mine = m.admin ? m.pending_mine ?? 0 : n;
   const on = { dispositivi: mine > 0, sicurezza: n - mine > 0, aggiornamenti: !!S.updAvail };
   $$('#view [data-dot]').forEach(d => d.hidden = !on[d.dataset.dot]);
+  $$('#view [data-gdot]').forEach(d => d.hidden = ![...d.closest('.setgrp').querySelectorAll('[data-dot]')].some(x => !x.hidden));
 }
 // ricerca fra le impostazioni: in tutte le schede, e mostra solo le voci che contengono il testo, raggruppate per scheda
 const fold = t => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -5381,6 +5397,22 @@ async function refreshBot(attesa) {
   });
   if (attesa && attesa.scade * 1000 > Date.now()) botT = setTimeout(() => box.isConnected && refreshBot(attesa), 3000);
 }
+/* ================= TV e casse in rete: cosa trova il server in casa, e se no perché (capacità "casa") ================= */
+async function refreshReteCasa(r) {
+  const box = $('#rcBox'); if (!box) return;
+  if (!r) { try { r = await srvApi(srv(), '/api/casa'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; } }
+  if (!box.isConnected) return;
+  const emo = { dlna: '📺', cast: '📡', bt: '🔊', snap: '🔗' }, tipo = { dlna: 'TV o cassa DLNA', cast: 'Chromecast / Google TV', bt: 'Bluetooth del server', snap: 'Snapcast' };
+  const err = Object.entries(r.errori || {}), quando = r.ultima ? new Date(r.ultima * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : null;
+  box.innerHTML = `<p class="sub">📡 Il server cerca da solo ogni minuto TV, casse e Chromecast nella rete di casa: quelli trovati compaiono in «Dove suona» di chi è in casa.</p>
+    ${!r.multicast ? '<div class="panel stack"><b>⚠️ Ricerca in rete spenta</b><p class="sub" style="margin:0">Il multicast è spento (<code>ARMONY_MULTICAST=0</code>, o Armony non è in rete «host»): TV e Chromecast non si trovano. Le casse Bluetooth e Tutta la casa sì.</p></div>' : ''}
+    <div class="panel stack">${r.dispositivi.map(d => `<div class="row between" style="flex-wrap:nowrap"><span class="grow" style="min-width:0"><b>${emo[d.tipo] || '📺'} ${esc(d.nome)}</b>
+      <small style="display:block;color:var(--muted)">${esc(tipo[d.tipo] || '')}${d.modello ? ' · ' + esc(d.modello) : ''}${d.ip ? ' · ' + esc(d.ip) : ''}${d.usata ? ' · 🎶 la usa ' + esc(d.usata) : ''}</small></span></div>`).join('')
+      || `<p class="sub" style="margin:0">${r.multicast ? 'Niente trovato. TV e casse devono essere accese e nella stessa rete del server (non in una rete «ospiti»); alcune TV vanno abilitate alla «condivisione» o al «DLNA» nelle loro impostazioni.' : 'Niente trovato.'}</p>`}
+      <div class="row between"><small style="color:var(--muted)">${quando ? `Ultima ricerca alle ${quando}${r.multicast ? ` · ${r.ssdp} risposte DLNA` : ''}` : 'Prima ricerca fra poco'}</small><button class="btn sm" id="rcCerca">${ic('search')} Cerca adesso</button></div></div>
+    ${err.length ? `<div class="panel stack"><b>⚠️ Qualcosa non va</b>${err.map(([k, v]) => `<p class="sub" style="margin:0"><b>${esc({ dlna: 'DLNA', cast: 'Chromecast', bluetooth: 'Bluetooth', snapcast: 'Snapcast' }[k] || k)}</b>: ${esc(v)}</p>`).join('')}</div>` : ''}`;
+  $('#rcCerca').onclick = async () => { const b = $('#rcCerca'); b.disabled = true; b.innerHTML = `${ic('search')} Cerco…`; try { refreshReteCasa(await srvApi(srv(), '/api/casa/cerca', { method: 'POST' })); } catch (e) { toast(e.message); b.disabled = false; } };
+}
 /* ================= Tutta la casa (capacità "snapcast", server/casa.py): le stanze di Snapcast ================= */
 async function refreshStanze() {
   const box = $('#tcBox'); if (!box) return;
@@ -5468,6 +5500,7 @@ async function refreshBt(lista) {
   const box = $('#btBox'); if (!box) return;
   let r = lista; if (!r) { try { r = await srvApi(srv(), '/api/casa/bluetooth'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; } }
   if (!box.isConnected) return;
+  if (r.problema) { box.innerHTML = `<div class="panel stack"><b>⚠️ Il Bluetooth non risponde</b><p class="sub" style="margin:0">${esc(r.problema)}</p><div class="row"><button class="btn" id="btRiprova">Riprova</button></div></div>`; $('#btRiprova').onclick = () => refreshBt(); return; }
   const ab = r.dispositivi.filter(d => d.abbinato), altre = r.dispositivi.filter(d => !d.abbinato);
   const riga = d => `<div class="row between" style="flex-wrap:nowrap;gap:var(--s3)"><span class="grow" style="min-width:0"><b>${d.cassa ? '🔊' : '📱'} ${esc(d.nome)}</b>
       <small style="display:block;color:var(--muted)">${d.abbinato ? (d.collegato ? (d.cassa ? '🟢 collegata' : '🟢 collegato') : d.cassa ? 'abbinata, non collegata' : 'abbinato, non collegato') : d.cassa ? 'cassa trovata' : 'dispositivo trovato'} · ${esc(d.mac)}</small></span>

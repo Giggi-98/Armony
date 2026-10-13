@@ -6,6 +6,8 @@
 #  - installa BlueZ e PipeWire (con il suo pezzo per il Bluetooth) e accende il Bluetooth a ogni avvio;
 #  - crea l'utente di sistema "armony-bt" che sul bus di sistema può parlare solo con BlueZ: il container usa lui per
 #    abbinare e collegare le casse (root sul bus di sistema potrebbe comandare tutto l'host);
+#  - fa girare come armony-bt un ponte D-Bus (xdg-dbus-proxy, servizio armony-bt-dbus) con una presa sua in
+#    /run/armony-bt: con AppArmor (Ubuntu) il bus di sistema rifiuta i processi dei container, il ponte no;
 #  - fa partire PipeWire nella sessione dell'utente che possiede la cartella anche senza schermo e senza login
 #    (linger), e dice a WirePlumber di usare il Bluetooth anche così;
 #  - scrive ARMONY_BT_UID, ARMONY_BT_DBUS e ARMONY_BT_PULSE in .env e ricrea il container di Armony.
@@ -27,7 +29,7 @@ fi
 
 echo "1/5 Installo BlueZ e PipeWire…"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bluez pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth rfkill >/dev/null
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bluez pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth rfkill xdg-dbus-proxy >/dev/null
 
 echo "2/5 Bluetooth acceso a ogni avvio…"
 if [ -f /etc/bluetooth/main.conf ]; then
@@ -38,7 +40,7 @@ rfkill unblock bluetooth 2>/dev/null || true
 systemctl enable --now bluetooth >/dev/null 2>&1
 systemctl restart bluetooth
 
-echo "3/5 Utente armony-bt (solo BlueZ)…"
+echo "3/5 Utente armony-bt (solo BlueZ) e ponte D-Bus…"
 id armony-bt >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin armony-bt
 cat > /etc/dbus-1/system.d/armony-bluetooth.conf <<'EOF'
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
@@ -51,6 +53,30 @@ cat > /etc/dbus-1/system.d/armony-bluetooth.conf <<'EOF'
 </busconfig>
 EOF
 systemctl reload dbus 2>/dev/null || systemctl reload dbus-broker 2>/dev/null || true
+# il ponte: il container si collega alla sua presa; lui parla col bus di sistema come armony-bt (vedi in testa)
+cat > /etc/systemd/system/armony-bt-dbus.service <<'FINE'
+[Unit]
+Description=Armony: ponte D-Bus per il Bluetooth (deploy/bluetooth.sh)
+After=dbus.service bluetooth.service
+
+[Service]
+User=armony-bt
+RuntimeDirectory=armony-bt
+RuntimeDirectoryMode=0755
+# la cartella resta anche quando il ponte si riavvia: il container la tiene montata
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/xdg-dbus-proxy unix:path=/run/dbus/system_bus_socket /run/armony-bt/system_bus_socket
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+FINE
+systemctl daemon-reload
+systemctl enable armony-bt-dbus >/dev/null 2>&1
+systemctl restart armony-bt-dbus
+i=0; while [ ! -S /run/armony-bt/system_bus_socket ] && [ $i -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
+[ -S /run/armony-bt/system_bus_socket ] || { echo "Il ponte D-Bus non è partito: journalctl -u armony-bt-dbus"; exit 1; }
 
 echo "4/5 PipeWire per $UTENTE anche senza login…"
 loginctl enable-linger "$UTENTE"
@@ -77,7 +103,7 @@ i=0; while [ ! -S "/run/user/$UUID_/pulse/native" ] && [ $i -lt 20 ]; do sleep 0
 echo "5/5 .env e container di Armony…"
 metti() { if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else echo "$1=$2" >> .env; fi; }
 metti ARMONY_BT_UID "$(id -u armony-bt)"
-metti ARMONY_BT_DBUS /run/dbus
+metti ARMONY_BT_DBUS /run/armony-bt
 metti ARMONY_BT_PULSE "/run/user/$UUID_/pulse"
 docker compose up -d --build armony
 

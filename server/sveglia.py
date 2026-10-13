@@ -5,6 +5,8 @@ Armony - sveglia (capacità "sveglia").
   PUT  /api/sveglia                 {sveglie: [...]}: le mie sveglie, tutte insieme (al più 10)
   POST /api/sveglia/<id>/prova      fa partire subito quella sveglia
 
+Quando suona, alle chat del bot con le notifiche accese arriva «⏰ Buongiorno» con 😴 Altri 10 minuti e ⏹️ Spegni.
+
 Una sveglia: {id, attiva, ora "07:30", giorni [0-6, lunedì = 0], fuso "Europe/Rome", dispositivo, nome_dispositivo,
 cosa "mix" | "playlist", playlist, nome_playlist, volume 0…1}. All'ora giusta (nel fuso di chi l'ha creata) il server manda
 la coda al dispositivo scelto (una TV, una cassa Bluetooth, un telefono o un computer collegato) con «transfer», come
@@ -26,6 +28,8 @@ import db
 bp = Blueprint("sveglia", __name__)
 A = None
 SALITA_S, PASSI = 300, 15     # il volume sale in 5 minuti, a 15 scalini
+RINVIO_S = 600                # «😴 Altri 10 minuti»
+rinvii = {}                   # (utente, id) -> Timer del rinvio, finché non scatta o la si spegne
 
 
 def mie(u):
@@ -140,11 +144,51 @@ def giro():
                     x["attiva"] = False  # senza giorni suona una volta sola
                 try:
                     suona(u, x)
+                    avvisa(u, x)
                     A.diagnosi.log("info", "sveglia", f"sveglia di {u} alle {x['ora']} su {x['nome_dispositivo']}")
                 except Exception as e:  # noqa: BLE001 - una sveglia che non parte va detta, non deve fermare le altre
                     A.notifiche.notifica(u, "sistema", "⏰ La sveglia non è partita", str(e)[:200], "#/impostazioni/sveglia")
             if cambiate:
                 db.run("UPDATE settings SET value = ? WHERE key = ?", json.dumps(sveglie), r["key"])
+
+
+def avvisa(u, x, testo=None):
+    """Il messaggio del bot con i tasti per rimandare o spegnere (se l'utente ha chat collegate)."""
+    tasti = [("😴 Altri 10 minuti", f"sv:rinvia:{x['id']}"), ("⏹️ Spegni", f"sv:spegni:{x['id']}")]
+    for r in db.all_("SELECT rete, chat FROM bot_chat WHERE user = ? AND notifiche = 1", u):
+        A.bot.manda(r["rete"], r["chat"], {"testo": testo or f"⏰ Buongiorno! Sveglia delle {x['ora']} su {x['nome_dispositivo']}. ☀️", "tasti": tasti})
+
+
+def tasto(u, arg):
+    """😴 o ⏹️ sotto il messaggio della sveglia."""
+    azione, _, sid = arg.partition(":")
+    x = next((x for x in mie(u) if x["id"] == sid), None)
+    if not x:
+        return "Sveglia non trovata."
+    vecchio = rinvii.pop((u, sid), None)
+    if vecchio:
+        vecchio.cancel()
+    try:
+        A.manda_cmd(u, x["dispositivo"], "pause", None, "sveglia")
+    except (ValueError, RuntimeError):
+        pass
+    if azione == "spegni":
+        return "⏹️ Sveglia spenta. Buona giornata! ☀️"
+    t = threading.Timer(RINVIO_S, rinviata, args=(u, x))
+    t.daemon = True
+    t.start()
+    rinvii[(u, sid)] = t
+    ora = (datetime.datetime.now(zoneinfo.ZoneInfo(x["fuso"])) + datetime.timedelta(seconds=RINVIO_S)).strftime("%H:%M")
+    return {"testo": f"😴 Altri 10 minuti: riparte alle {ora}.", "tasti": [("⏹️ Spegni", f"sv:spegni:{sid}")]}
+
+
+def rinviata(u, x):
+    rinvii.pop((u, x["id"]), None)
+    try:
+        suona(u, x)
+        avvisa(u, x, f"⏰ Su, sono le {datetime.datetime.now(zoneinfo.ZoneInfo(x['fuso'])).strftime('%H:%M')}! 🌞")
+    except Exception as e:  # noqa: BLE001
+        A.notifiche.notifica(u, "sistema", "⏰ La sveglia rimandata non è partita", str(e)[:200], "#/impostazioni/sveglia")
 
 
 def init(flask_app, host):

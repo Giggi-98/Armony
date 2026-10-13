@@ -63,6 +63,7 @@ lock = threading.RLock()
 trovati = {}             # id -> {id, nome, ip, loc, avt, rc, modello, visto}
 sessioni = {}            # id -> sessione attiva su quel dispositivo (vedi Sessione)
 sveglia = threading.Event()
+ultima = {"ts": None, "errori": {}, "ssdp": 0}  # l'ultima ricerca: quando, quante risposte SSDP, cosa è andato storto
 
 
 # ------------------------------------------------------------------ ricerca in rete (SSDP) e descrizione dei dispositivi
@@ -93,17 +94,21 @@ def ssdp(attesa):
 
 
 def cerca(attesa=3):
-    nuovi, via = [], []
+    nuovi, via, errori = [], [], {}
     trovate = []
-    for loc, ip in (ssdp(attesa) if A.MULTICAST else {}).items():
+    risposte = ssdp(attesa) if A.MULTICAST else {}
+    for loc, ip in risposte.items():
         try:
             trovate.append(descrivi(loc, ip))
-        except (requests.RequestException, ET.ParseError, ValueError):
-            continue
-    if A.MULTICAST:
-        trovate += cerca_cast(attesa)
-    trovate += cerca_bt()
-    trovate += cerca_snap()
+        except (requests.RequestException, ET.ParseError, ValueError) as e:
+            errori["dlna"] = f"{ip}: {e}"[:200]
+    for nome_, f in (("cast", (lambda: cerca_cast(attesa)) if A.MULTICAST else list), ("bluetooth", cerca_bt), ("snapcast", cerca_snap)):
+        try:  # una fonte che va storta (Bluetooth, Snapcast) non deve far sparire le altre
+            trovate += f()
+        except Exception as e:  # noqa: BLE001
+            errori[nome_] = str(e)[:200]
+            A.diagnosi.log("avviso", "casa", f"ricerca {nome_}: {e}"[:300])
+    ultima.update(ts=time.time(), errori=errori, ssdp=len(risposte))
     for d in trovate:
         with lock:
             if d["id"] in trovati:
@@ -394,6 +399,17 @@ def btctl(*args, attesa=20):
     return ANSI.sub("", r.stdout + r.stderr)
 
 
+def bt_problema():
+    """Perché il Bluetooth non risponde, in parole, o None se va."""
+    t = btctl("list", attesa=10)
+    if "connection != NULL" in t or "Failed to connect" in t or "Access denied" in t:
+        return ("Armony non riesce a parlare con il Bluetooth del server (con AppArmor il bus di sistema rifiuta i container): "
+                "aggiorna Armony e rilancia sudo sh deploy/bluetooth.sh, che mette il ponte D-Bus")
+    if not re.search(r"^Controller ", t, re.M):
+        return "Il server non vede un adattatore Bluetooth acceso (spento con rfkill? chiavetta staccata? sudo systemctl status bluetooth)"
+    return None
+
+
 def bt_elenco(quali=None):
     """[{mac, nome}] dei dispositivi che BlueZ conosce (quali = "Paired" per i soli abbinati)."""
     out = []
@@ -415,6 +431,9 @@ def cerca_bt():
     """Le casse abbinate al server diventano dispositivi di «Dove suona», anche spente: sceglierle le collega."""
     if not bt_ok():
         return []
+    problema = bt_problema()
+    if problema:
+        raise RuntimeError(problema)  # lo mostra «TV e casse in rete»
     out = []
     for x in bt_elenco("Paired"):
         i = bt_info(x["mac"])
@@ -793,13 +812,15 @@ def elenco():
     with lock:
         return jsonify(dispositivi=[{"id": d["id"], "nome": d["nome"], "modello": d["modello"], "ip": d["ip"], "tipo": d.get("tipo"),
                                      "usata": sessioni[d["id"]].utente if d["id"] in sessioni and sessioni[d["id"]].suona else None}
-                                    for d in trovati.values()], multicast=A.MULTICAST)
+                                    for d in trovati.values()], multicast=A.MULTICAST, ultima=ultima["ts"], ssdp=ultima["ssdp"],
+                       errori=ultima["errori"], bluetooth=bt_ok(), snapcast=SNAP["ok"])
 
 
 @bp.post("/api/casa/cerca")
 def cerca_ora():
-    threading.Thread(target=cerca, daemon=True).start()
-    return jsonify(ok=True)
+    """Cerca adesso e risponde a ricerca finita (qualche secondo), con l'elenco nuovo."""
+    cerca()
+    return elenco()
 
 
 def sessione_di(gettone):
@@ -834,6 +855,9 @@ def copertina(gettone, cid):
 def bt_stato():
     if not bt_ok():
         return jsonify(ok=False, dispositivi=[])
+    problema = bt_problema()
+    if problema:
+        return jsonify(ok=True, dispositivi=[], snapcast=SNAP["ok"], problema=problema)
     out = []
     for x in bt_elenco():
         out.append({**x, **bt_info(x["mac"])})
@@ -848,6 +872,9 @@ def bt_stato():
 def bt_cerca():
     if not bt_ok():
         return jsonify(error="Bluetooth non preparato su questo server (deploy/bluetooth.sh)"), 409
+    problema = bt_problema()
+    if problema:
+        return jsonify(error=problema), 409
     btctl("power", "on", attesa=8)
     btctl("--timeout", "12", "scan", "on", attesa=20)
     return bt_stato()
