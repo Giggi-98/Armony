@@ -52,7 +52,8 @@ import java.util.regex.Pattern;
  * La musica nella memoria del telefono, per "Questo telefono" (Local in client/telefono.js).
  *   access() / requestAccess()   { granted }: READ_MEDIA_AUDIO da Android 13, READ_EXTERNAL_STORAGE prima
  *   scan({ offset, limit })      { tracks: [{ id, title, artist, album, albumArtist, track, year, duration (ms),
- *                                  genre, mime, size, modified (s), name }], total }   solo i brani "musica"
+ *                                  genre, mime, size, modified (s), name, dir }], total }   solo i brani "musica";
+ *                                  dir è la cartella («Music/Armony/Queen/»), per scegliere quali cartelle usare
  *   upload({ id, url, token })   { code, body }: PUT del file a pezzi dal content://, mai tutto in memoria;
  *                                  evento "upload" { id, sent, total } ogni mezzo secondo
  *   evento "change"              MediaStore è cambiato (brani aggiunti o tolti), dopo 3 s di calma
@@ -125,6 +126,8 @@ public class ArmonyLibraryPlugin extends Plugin {
                 MediaStore.Audio.Media.MIME_TYPE, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.DATE_MODIFIED, MediaStore.Audio.Media.DISPLAY_NAME));
             // artista dell'album e genere sono colonne pubbliche solo da Android 11
             if (Build.VERSION.SDK_INT >= 30) { cols.add(MediaStore.Audio.Media.ALBUM_ARTIST); cols.add(MediaStore.Audio.Media.GENRE); }
+            // la cartella (per scegliere quali usare): RELATIVE_PATH da Android 10, prima dal percorso del file
+            cols.add(Build.VERSION.SDK_INT >= 29 ? MediaStore.Audio.Media.RELATIVE_PATH : MediaStore.Audio.Media.DATA);
             String sel = MediaStore.Audio.Media.IS_MUSIC + " != 0";
             try (Cursor c = getContext().getContentResolver().query(MEDIA, cols.toArray(new String[0]), sel, null, MediaStore.Audio.Media._ID)) {
                 JSArray out = new JSArray();
@@ -144,6 +147,7 @@ public class ArmonyLibraryPlugin extends Plugin {
                     t.put("size", num(c, MediaStore.Audio.Media.SIZE));
                     t.put("modified", num(c, MediaStore.Audio.Media.DATE_MODIFIED));
                     t.put("name", str(c, MediaStore.Audio.Media.DISPLAY_NAME));
+                    t.put("dir", cartella(c));
                     out.put(t);
                 } while (out.length() < limit && c.moveToNext());
                 JSObject r = new JSObject();
@@ -154,6 +158,16 @@ public class ArmonyLibraryPlugin extends Plugin {
                 call.reject("Lettura della musica non riuscita: " + e.getMessage());
             }
         });
+    }
+
+    /** «Music/Armony/Queen/» : la cartella relativa alla memoria, con la barra in fondo. */
+    private static String cartella(Cursor c) {
+        if (Build.VERSION.SDK_INT >= 29) return str(c, MediaStore.Audio.Media.RELATIVE_PATH);
+        String p = str(c, MediaStore.Audio.Media.DATA);
+        int i = p.lastIndexOf('/');
+        p = i < 0 ? "" : p.substring(0, i + 1);
+        String radice = android.os.Environment.getExternalStorageDirectory().getAbsolutePath() + "/";
+        return p.startsWith(radice) ? p.substring(radice.length()) : p.replaceFirst("^/storage/[^/]+/", "");
     }
 
     private static String str(Cursor c, String col) {

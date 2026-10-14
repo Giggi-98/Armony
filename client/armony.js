@@ -5923,12 +5923,18 @@ function closeOutside(d) {
 function ctxDialog() {
   const d = $('#dlg'); d.className = 'sheet';
   d.innerHTML = `<div class="head"><b>Server e qualità</b></div>
-    <p class="sh">Server</p>${(Local.on() ? [Local.srv, ...S.servers] : S.servers).map(s => `<button class="mi ${s.id === S.active ? 'on' : ''}" data-sid="${s.id}">${ic(s.id === S.active ? 'check' : s.local ? 'phone' : 'lib')}${esc(s.name)}</button>`).join('')}
+    <p class="sh">Server</p>${(Local.p ? [Local.srv, ...S.servers] : S.servers).map(s => `<button class="mi ${s.id === S.active ? 'on' : ''}" data-sid="${s.id}">${ic(s.id === S.active ? 'check' : s.local ? 'phone' : 'lib')}<span class="grow">${esc(s.name)}${s.local ? `<small style="display:block;color:var(--muted);font-weight:500">${Local.on() ? 'senza server: la musica del telefono' : 'spento: toccalo per usare la musica del telefono'}</small>` : ''}</span></button>`).join('')}
+    ${S.active === Local.id ? `<button class="mi" data-ctx="dirs">📁<span class="grow">Cartelle del telefono</span></button>` : ''}
     <button class="mi" data-ctx="srv">${ic('plus')}${S.servers.length ? 'Gestisci i server' : 'Aggiungi un server'}</button>
     <p class="sh">Qualità di ascolto</p>${Object.entries(QUALITIES).map(([k, q]) => `<button class="mi ${k === P.quality ? 'on' : ''}" data-q="${k}">${ic(k === P.quality ? 'check' : 'album')}${q.label}</button>`).join('')}`;
-  d.querySelectorAll('[data-sid]').forEach(el => el.onclick = () => { d.close(); if (S.active === el.dataset.sid) return; S.active = el.dataset.sid; persistServers(); route(); });
+  d.querySelectorAll('[data-sid]').forEach(el => el.onclick = () => {
+    d.close(); if (S.active === el.dataset.sid) return;
+    if (el.dataset.sid === Local.id && !Local.on()) return Local.enable(true);  // la prima volta: permesso e cartelle
+    S.active = el.dataset.sid; persistServers(); route();
+  });
+  d.querySelector('[data-ctx="dirs"]')?.addEventListener('click', () => { d.close(); setTimeout(() => Local.cartelle(false), 330); });
   d.querySelectorAll('[data-q]').forEach(el => el.onclick = () => { setQuality(el.dataset.q); d.close(); });
-  d.querySelector('[data-ctx]').onclick = () => { d.close(); if (S.servers.length) location.hash = '#/impostazioni/server'; else serverDialog(); };
+  d.querySelector('[data-ctx="srv"]').onclick = () => { d.close(); if (S.servers.length) location.hash = '#/impostazioni/server'; else serverDialog(); };
   closeOutside(d); d.showModal();
 }
 // barra in basso del telefono: le sezioni scelte (tabsOf). Le altre stanno nel menu del profilo, in alto a sinistra

@@ -42,6 +42,7 @@ const Local = {
     if (use || !srv()) S.active = this.id;
     persistServers(); await this.refresh(); await this.ready;
     route(); this.paint();
+    if (this.granted && !store.get('phoneDirsVisto', false)) this.cartelle(true);  // la prima volta: quali cartelle
     if (this.granted === false) toast('Senza il permesso Armony vede solo i brani salvati offline. Se Android non lo chiede più: Impostazioni di Android, App, Armony, Autorizzazioni.', 7000);
   },
   // all'avvio dell'app: se il server in uso non risponde lo dice e chiede se passare al telefono (modalità senza server).
@@ -59,6 +60,59 @@ const Local = {
     $('#lpRiprova').onclick = async () => { const b = $('#lpRiprova'); b.disabled = true; b.textContent = 'Provo…'; d.close(); this.prova(s).then(() => S.active === s.id && !$('dialog[open]') && toast(`✅ ${s.name} risponde.`)); };
     closeOutside(d); d.showModal();
   },
+  // cartelle escluse ('phoneEscluse', prefissi come «WhatsApp/»): si salvano quelle tolte, così una cartella nuova
+  // (Music/Armony dei download) entra da sola. Un indice di prima, senza cartelle, le ha tutte
+  dirOk(d) { return !d || !(store.get('phoneEscluse', [])).some(e => d.startsWith(e)); },
+  // l'albero delle cartelle con la musica: [{ path, nome, n (brani, sottocartelle comprese), figli }]
+  albero() {
+    const radice = { path: '', figli: new Map(), n: 0 };
+    for (const r of this.raw) {
+      let nodo = radice; radice.n++;
+      for (const pezzo of (r.dir || '').split('/').filter(Boolean)) {
+        const path = nodo.path + pezzo + '/';
+        nodo = nodo.figli.get(pezzo) || nodo.figli.set(pezzo, { path, nome: pezzo, figli: new Map(), n: 0 }).get(pezzo);
+        nodo.n++;
+      }
+    }
+    // una catena di cartelle con un solo figlio e nessun brano proprio si mostra come una riga sola («Android/media/…»)
+    const piega = n => { while (n.figli.size === 1 && [...n.figli.values()][0].n === n.n && n.path) { const f = [...n.figli.values()][0]; n = { ...f, nome: n.nome + '/' + f.nome }; } return { ...n, figli: [...n.figli.values()].map(piega).sort((a, b) => b.n - a.n) }; };
+    return [...radice.figli.values()].map(piega).sort((a, b) => b.n - a.n);
+  },
+  // scegliere le cartelle: spunta tolta = esclusa con tutte le sue sottocartelle
+  async cartelle(prima) {
+    if (!this.raw.length) await this.refresh();
+    let escluse = [...store.get('phoneEscluse', [])];
+    const fuori = p => escluse.some(e => p.startsWith(e)), sotto = p => escluse.some(e => p.startsWith(e) && e !== p);
+    const d = $('#dlg'); d.className = 'sheet smart';
+    const riga = (n, liv) => `<div class="dirr" style="--liv:${liv}">
+        ${n.figli.length ? `<button type="button" class="icon-btn dirx" data-dx="${esc(n.path)}" aria-expanded="false" aria-label="Apri ${esc(n.nome)}">${ic('chevr')}</button>` : '<span class="dirx"></span>'}
+        <label class="dirl"><input type="checkbox" data-dp="${esc(n.path)}"><span class="grow"><b>📁 ${esc(n.nome.split('/').pop())}</b><small>${n.nome.includes('/') ? esc(n.nome.split('/').slice(0, -1).join('/')) + ' · ' : ''}${n.n} ${n.n === 1 ? 'brano' : 'brani'}</small></span></label></div>
+      ${n.figli.length ? `<div class="dirf" data-df="${esc(n.path)}" hidden>${n.figli.map(f => riga(f, liv + 1)).join('')}</div>` : ''}`;
+    const tree = this.albero();
+    d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">📁 Cartelle della musica</b><small style="color:var(--muted)">${prima ? 'Scegli da quali cartelle Armony prende la musica. Puoi cambiarlo quando vuoi da Impostazioni → Questo telefono.' : 'Togli la spunta alle cartelle da non usare: vale anche per le sottocartelle.'}</small></span></div>
+      <div class="smbody">${tree.length ? `<div class="dirs">${tree.map(n => riga(n, 0)).join('')}</div>` : `<p class="sub">${this.granted === false ? 'Armony non ha il permesso di leggere la musica del telefono.' : 'Nessuna musica trovata nella memoria del telefono.'}</p>`}
+      <p class="small" id="dirTot" style="color:var(--muted);margin:0"></p>
+      <div class="row"><button class="btn primary" id="dirOk">${ic('check')} ${prima ? 'Va bene' : 'Salva'}</button>${prima ? '' : '<button class="btn" id="dirNo">Annulla</button>'}</div></div>`;
+    const dipingi = () => {
+      d.querySelectorAll('[data-dp]').forEach(i => { const p = i.dataset.dp; i.checked = !fuori(p); i.disabled = sotto(p); });
+      const tot = this.raw.length, si = this.raw.filter(r => !r.dir || !escluse.some(e => r.dir.startsWith(e))).length;
+      $('#dirTot').textContent = `${si} brani di ${tot}${escluse.length ? ` · ${escluse.length} ${escluse.length === 1 ? 'cartella esclusa' : 'cartelle escluse'}` : ' · tutte le cartelle'}`;
+    };
+    d.querySelectorAll('[data-dp]').forEach(i => i.onchange = () => {
+      const p = i.dataset.dp;
+      escluse = escluse.filter(e => !e.startsWith(p));  // dentro questa: non serve più ricordarle una per una
+      if (!i.checked) escluse.push(p);
+      dipingi();
+    });
+    d.querySelectorAll('[data-dx]').forEach(b => b.onclick = () => { const f = d.querySelector(`[data-df="${CSS.escape(b.dataset.dx)}"]`), on = f.hidden; f.hidden = !on; b.setAttribute('aria-expanded', on); });
+    $('#dirNo')?.addEventListener('click', () => d.close());
+    $('#dirOk').onclick = async () => {
+      store.set('phoneEscluse', escluse); store.set('phoneDirsVisto', true); d.close();
+      await this.build(); emit('libreria'); emitSoon('playlists'); this.paint(); route();
+      toast(`📱 ${this.songs.length} brani dal telefono.`);
+    };
+    dipingi(); closeOutside(d); d.showModal();
+  },
   disable() { store.set('phoneLib', false); if (S.active === this.id) S.active = S.servers[0]?.id || null; persistServers(); this.paint(); },
   // rilegge MediaStore; true se qualcosa è cambiato
   refresh() {
@@ -70,7 +124,7 @@ const Local = {
         const all = [];
         for (let off = 0; ;) { const r = await this.p.scan({ offset: off, limit: 500 }); all.push(...r.tracks); off += r.tracks.length; if (!r.tracks.length || off >= r.total) break; }
         const sig = hash2(all.map(x => x.id + '.' + x.modified).join());
-        if (sig === this.sig) return false;
+        if (sig === this.sig && this.raw.every(x => 'dir' in x)) return false;  // un indice di prima delle cartelle si rilegge
         this.raw = all; this.sig = sig;
         await DB.put('telefono', { k: 'index', raw: all, sig }).catch(() => {});
         await this.build(); emit('libreria'); emitSoon('playlists'); this.paint();
@@ -94,6 +148,7 @@ const Local = {
       (seen.get(dk(x)) || seen.set(dk(x), []).get(dk(x))).push(x.duration);
     };
     for (const r of this.raw) {
+      if (!this.dirOk(r.dir)) continue;  // cartella esclusa (Local.cartelle)
       const artist = r.artist || 'Artista sconosciuto', name = r.name || '';
       add({ id: 'p' + r.id, mid: String(r.id), title: r.title || name.replace(/\.[^.]+$/, ''), artist, aa: r.albumArtist || mainArt(artist), album: r.album || 'Senza album',
         track: r.track % 1000 || undefined, discNumber: Math.floor(r.track / 1000) || 1, year: r.year || undefined, genre: r.genre || '',
@@ -310,6 +365,7 @@ const Local = {
       ${on ? `<div class="row between" style="flex-wrap:nowrap"><span class="small" style="color:var(--muted)">${this.granted === false ? 'Armony non ha il permesso di leggere la musica: vedi solo i brani salvati offline.'
         : `${this.songs.length} ${this.songs.length === 1 ? 'brano' : 'brani'} in ${this.albums.size} album${nOff ? `, ${nOff} salvati offline dai server` : ''}.`}</span>
         <button class="btn sm${this.granted === false ? ' primary' : ''}" data-ph="${this.granted === false ? 'perm' : 'scan'}">${this.granted === false ? 'Consenti' : 'Aggiorna'}</button></div>
+      ${this.granted === false ? '' : `<div class="row between" style="flex-wrap:nowrap"><span class="small" style="color:var(--muted)">📁 ${store.get('phoneEscluse', []).length ? `${store.get('phoneEscluse', []).length} ${store.get('phoneEscluse', []).length === 1 ? 'cartella esclusa' : 'cartelle escluse'}` : 'Tutte le cartelle'}</span><button class="btn sm" id="phDirs">Scegli le cartelle</button></div>`}
       <h3>Copia sul server</h3>
       ${!t ? `<p class="small" style="color:var(--muted);margin:0">Collega un server Armony dove puoi caricare musica: Armony ci salverà una copia dei brani e delle playlist del telefono, e da lì potrai salvare per l'offline quelli che vuoi.</p>`
         : `${ts.length > 1 ? `<label class="f">Server per il backup<select id="bkSrv">${ts.map(x => `<option value="${esc(x.id)}" ${x === t ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : ''}
@@ -318,6 +374,7 @@ const Local = {
         <div id="bkLive"></div>`}` : ''}`;
     box.querySelector('#phOn').onchange = e => e.target.checked ? this.enable(false) : this.disable();
     box.querySelector('[data-ph]')?.addEventListener('click', e => e.currentTarget.dataset.ph === 'perm' ? this.enable(false) : this.act('scan'));
+    box.querySelector('#phDirs')?.addEventListener('click', () => this.cartelle(false));
     if (!on || !t) return;  // con la musica del telefono spenta i comandi del backup non ci sono
     box.querySelector('#bkSrv')?.addEventListener('change', e => { store.set('phoneBkSrv', e.target.value); this.paint(); });
     box.querySelector('#bkAuto').onchange = e => { store.set('phoneBkAuto', e.target.checked); if (e.target.checked) this.auto(true); };
