@@ -3,6 +3,7 @@ Armony - TV e casse di casa come dispositivi di «Dove suona» (capacità "casa"
 
   GET  /api/casa                          TV e casse trovate in rete (DLNA/UPnP), con chi le sta usando
   POST /api/casa/cerca                    cerca adesso (di solito si cerca da soli ogni minuto)
+  PUT  /api/casa/dispositivo/<id>         (admin) {nome?, nascosto?}: rinominarlo per «Dove suona» o nasconderlo
   GET  /api/casa/flusso/<gettone>/<id>    il brano per la TV: pubblica ma solo dalla rete di casa e col gettone
   GET  /api/casa/copertina/<gettone>/<id> la copertina, idem
   GET  /api/casa/bluetooth                (admin) le casse Bluetooth del server: abbinate, collegate, trovate
@@ -180,8 +181,19 @@ def giro():
 
 
 # ------------------------------------------------------------------ chi li vede: dispositivi virtuali nel canale dal vivo
+def scelte():
+    """Nomi dati dall'amministratore e dispositivi nascosti: {id: {"nome": …, "nascosto": bool}} (settings casa_scelte)."""
+    r = db.one("SELECT value FROM settings WHERE key = 'casa_scelte'")
+    return json.loads(r["value"]) if r else {}
+
+
 def nome(d):
-    return f"{ {'bt': '🔊', 'snap': '🔗'}.get(d.get('tipo'), '📺')} {d['nome']}"[:40]
+    proprio = (scelte().get(d["id"]) or {}).get("nome") or d["nome"]
+    return f"{ {'bt': '🔊', 'snap': '🔗'}.get(d.get('tipo'), '📺')} {proprio}"[:40]
+
+
+def nascosto(d):
+    return bool((scelte().get(d["id"]) or {}).get("nascosto"))
 
 
 def visibile(c):
@@ -194,7 +206,7 @@ def per(conn):
     if not visibile(conn):
         return []
     with lock:
-        return [{"device": d["id"], "name": nome(d)} for d in trovati.values()]
+        return [{"device": d["id"], "name": nome(d)} for d in trovati.values() if not nascosto(d)]
 
 
 def esiste(dev):
@@ -216,7 +228,8 @@ def a_chi(msg, filtro=None):
 
 
 def arrivato(d):
-    a_chi({"type": "join", "device": d["id"], "name": nome(d)})
+    if not nascosto(d):
+        a_chi({"type": "join", "device": d["id"], "name": nome(d)})
     A.diagnosi.log("info", "casa", f"trovato in rete: {d['nome']} ({d['modello'] or d['ip']})")
 
 
@@ -328,8 +341,19 @@ class Cast:
     def mc(self):
         import pychromecast
         if not self.d.get("cc"):
-            self.d["cc"] = pychromecast.get_chromecast_from_cast_info(self.d["info"], None)
-        self.d["cc"].wait(timeout=10)
+            # dall'indirizzo e dalla porta trovati nella ricerca: con il solo nome mDNS e senza zeroconf (chiuso a fine
+            # ricerca) pychromecast non lo risolve e riprova per sempre, e alla TV non arrivava niente
+            i = self.d["info"]
+            self.d["cc"] = pychromecast.get_chromecast_from_host((i.host, i.port, i.uuid, i.model_name, i.friendly_name), tries=2, retry_wait=1, timeout=5)
+            self.d["cc"].start()
+        if not self.d["cc"].socket_client.is_connected:
+            try:
+                self.d["cc"].wait(timeout=8)
+            except Exception:  # noqa: BLE001 - tempo scaduto: lo dice la riga sotto
+                pass
+        if not self.d["cc"].socket_client.is_connected:
+            self.d.pop("cc").disconnect(timeout=2)  # al prossimo comando si riprova da capo
+            raise RuntimeError("la TV non risponde (è accesa? Chromecast integrato attivo?)")
         return self.d["cc"].media_controller
 
     def fai(self, f):
@@ -810,10 +834,35 @@ def comando(u, dev, cmd, v):
 @bp.get("/api/casa")
 def elenco():
     with lock:
-        return jsonify(dispositivi=[{"id": d["id"], "nome": d["nome"], "modello": d["modello"], "ip": d["ip"], "tipo": d.get("tipo"),
+        sc = scelte()
+        return jsonify(dispositivi=[{"id": d["id"], "nome": (sc.get(d["id"]) or {}).get("nome") or d["nome"], "originale": d["nome"], "modello": d["modello"],
+                                     "ip": d["ip"], "tipo": d.get("tipo"), "nascosto": bool((sc.get(d["id"]) or {}).get("nascosto")),
                                      "usata": sessioni[d["id"]].utente if d["id"] in sessioni and sessioni[d["id"]].suona else None}
                                     for d in trovati.values()], multicast=A.MULTICAST, ultima=ultima["ts"], ssdp=ultima["ssdp"],
                        errori=ultima["errori"], bluetooth=bt_ok(), snapcast=SNAP["ok"])
+
+
+@bp.put("/api/casa/dispositivo/<dev>")
+def dispositivo(dev):
+    """{nome?, nascosto?}: un nome nostro per «Dove suona» (vuoto = quello del dispositivo) o toglierlo dall'elenco."""
+    d = request.get_json(silent=True) or {}
+    with lock:
+        trovato = trovati.get(dev)
+    if not trovato:
+        return jsonify(error="Dispositivo non trovato"), 404
+    sc = scelte()
+    x = sc.setdefault(dev, {})
+    if "nome" in d:
+        x["nome"] = str(d.get("nome") or "").strip()[:40]
+    if "nascosto" in d:
+        x["nascosto"] = bool(d["nascosto"])
+    sc = {k: v for k, v in sc.items() if v.get("nome") or v.get("nascosto")}
+    db.run("INSERT INTO settings (key, value) VALUES ('casa_scelte', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", json.dumps(sc))
+    # a chi ha «Dove suona» aperto: sparisce, ricompare o cambia nome subito
+    a_chi({"type": "gone", "device": dev})
+    if not nascosto(trovato):
+        a_chi({"type": "join", "device": dev, "name": nome(trovato)})
+    return elenco()
 
 
 @bp.post("/api/casa/cerca")

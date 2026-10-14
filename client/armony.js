@@ -5405,15 +5405,19 @@ async function refreshReteCasa(r) {
   const box = $('#rcBox'); if (!box) return;
   if (!r) { try { r = await srvApi(srv(), '/api/casa'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; } }
   if (!box.isConnected) return;
-  const emo = { dlna: '📺', cast: '📡', bt: '🔊', snap: '🔗' }, tipo = { dlna: 'TV o cassa DLNA', cast: 'Chromecast / Google TV', bt: 'Bluetooth del server', snap: 'Snapcast' };
+  const adm = !!srv()?.me?.admin, emo = { dlna: '📺', cast: '📡', bt: '🔊', snap: '🔗' }, tipo = { dlna: 'TV o cassa DLNA', cast: 'Chromecast / Google TV', bt: 'Bluetooth del server', snap: 'Snapcast' };
   const err = Object.entries(r.errori || {}), quando = r.ultima ? new Date(r.ultima * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : null;
-  box.innerHTML = `<p class="sub">📡 Il server cerca da solo ogni minuto TV, casse e Chromecast nella rete di casa: quelli trovati compaiono in «Dove suona» di chi è in casa.</p>
+  box.innerHTML = `<p class="sub">📡 Il server cerca da solo ogni minuto TV, casse e Chromecast nella rete di casa: quelli trovati compaiono in «Dove suona» di chi è in casa.${adm ? ' Con ✏️ dai un nome tuo, con «Nascondi» lo togli da «Dove suona».' : ''}</p>
     ${!r.multicast ? '<div class="panel stack"><b>⚠️ Ricerca in rete spenta</b><p class="sub" style="margin:0">Il multicast è spento (<code>ARMONY_MULTICAST=0</code>, o Armony non è in rete «host»): TV e Chromecast non si trovano. Le casse Bluetooth e Tutta la casa sì.</p></div>' : ''}
-    <div class="panel stack">${r.dispositivi.map(d => `<div class="row between" style="flex-wrap:nowrap"><span class="grow" style="min-width:0"><b>${emo[d.tipo] || '📺'} ${esc(d.nome)}</b>
-      <small style="display:block;color:var(--muted)">${esc(tipo[d.tipo] || '')}${d.modello ? ' · ' + esc(d.modello) : ''}${d.ip ? ' · ' + esc(d.ip) : ''}${d.usata ? ' · 🎶 la usa ' + esc(d.usata) : ''}</small></span></div>`).join('')
+    <div class="panel stack">${r.dispositivi.map(d => `<div class="row between" style="flex-wrap:nowrap${d.nascosto ? ';opacity:.55' : ''}"><span class="grow" style="min-width:0"><b>${emo[d.tipo] || '📺'} ${esc(d.nome)}${d.nascosto ? ' <small class="tag">nascosto</small>' : ''}</b>
+      <small style="display:block;color:var(--muted)">${d.nome !== d.originale ? esc(d.originale) + ' · ' : ''}${esc(tipo[d.tipo] || '')}${d.modello ? ' · ' + esc(d.modello) : ''}${d.ip ? ' · ' + esc(d.ip) : ''}${d.usata ? ' · 🎶 la usa ' + esc(d.usata) : ''}</small></span>
+      ${adm ? `<button class="icon-btn" data-rcn="${esc(d.id)}" aria-label="Rinomina ${esc(d.nome)}">${ic('pen')}</button><button class="btn sm" data-rch="${esc(d.id)}">${d.nascosto ? 'Mostra' : 'Nascondi'}</button>` : ''}</div>`).join('')
       || `<p class="sub" style="margin:0">${r.multicast ? 'Niente trovato. TV e casse devono essere accese e nella stessa rete del server (non in una rete «ospiti»); alcune TV vanno abilitate alla «condivisione» o al «DLNA» nelle loro impostazioni.' : 'Niente trovato.'}</p>`}
       <div class="row between"><small style="color:var(--muted)">${quando ? `Ultima ricerca alle ${quando}${r.multicast ? ` · ${r.ssdp} risposte DLNA` : ''}` : 'Prima ricerca fra poco'}</small><button class="btn sm" id="rcCerca">${ic('search')} Cerca adesso</button></div></div>
     ${err.length ? `<div class="panel stack"><b>⚠️ Qualcosa non va</b>${err.map(([k, v]) => `<p class="sub" style="margin:0"><b>${esc({ dlna: 'DLNA', cast: 'Chromecast', bluetooth: 'Bluetooth', snapcast: 'Snapcast' }[k] || k)}</b>: ${esc(v)}</p>`).join('')}</div>` : ''}`;
+  const cambia = async (id, b) => { try { refreshReteCasa(await srvApi(srv(), '/api/casa/dispositivo/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(b) })); } catch (e) { toast(e.message); } };
+  box.querySelectorAll('[data-rcn]').forEach(b => b.onclick = () => { const d = r.dispositivi.find(x => x.id === b.dataset.rcn), n = prompt(`Nome in «Dove suona» (vuoto = «${d.originale}»):`, d.nome === d.originale ? '' : d.nome); if (n !== null) cambia(d.id, { nome: n.trim() }); });
+  box.querySelectorAll('[data-rch]').forEach(b => b.onclick = () => { const d = r.dispositivi.find(x => x.id === b.dataset.rch); cambia(d.id, { nascosto: !d.nascosto }).then(() => toast(d.nascosto ? `${d.nome} di nuovo in «Dove suona».` : `${d.nome} non compare più in «Dove suona».`)); });
   $('#rcCerca').onclick = async () => { const b = $('#rcCerca'); b.disabled = true; b.innerHTML = `${ic('search')} Cerco…`; try { refreshReteCasa(await srvApi(srv(), '/api/casa/cerca', { method: 'POST' })); } catch (e) { toast(e.message); b.disabled = false; } };
 }
 /* ================= Tutta la casa (capacità "snapcast", server/casa.py): le stanze di Snapcast ================= */
