@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-14 — TV di casa: la sessione si chiude invece di aspettare
+**Contesto:** la sessione su una TV la interrogava ogni 2 secondi finché c'era una coda, per sempre: spenta, in pausa o su un'altra sorgente la TV sentiva il server di continuo, e in «Dove suona» restava «In pausa». Se la TV si fermava a metà brano (cambio sorgente) il server credeva finito il brano e le mandava il successivo.
+**Scelta:** una TV ferma a più di 20 s dalla fine del brano è stata fermata da qualcun altro; quella, una TV che non risponde da 30 s o ferma da 10 minuti chiude la sessione (`Sessione.riposa`): niente più chiamate, Chromecast scollegato, stato tolto a chi la usava. Nascosta o sparita dalla rete, la sessione si chiude lo stesso (prima una TV con sessione non spariva mai).
+**Alternative scartate:** tenere la sessione in pausa senza interrogarla (la voce restava «In pausa» con un brano che la TV non ha più); continuare a interrogarla più di rado (la TV continuava a sentire il server).
+**Conseguenze:** dopo 10 minuti di pausa la TV non si riprende con «play»: si sceglie di nuovo in «Dove suona». Una pausa data col telecomando della TV si vede ancora; un «play» dal telecomando della TV dopo 10 minuti no.
+**Da rivedere se:** una TV segnala come fermo (STOPPED) anche un salto o un caricamento lento a metà brano, chiudendo la sessione per sbaglio.
+
 ## 2026-10-14 — Download sul telefono con NewPipeExtractor, e l'MP4 rimesso insieme da noi
 **Contesto:** fase 2 di docs/PIANO-TELEFONO.md: scaricare sul telefono senza server.
 **Scelta:** NewPipeExtractor (Java, la libreria di NewPipe) estrae i link di YouTube e YouTube Music (scelta dell'utente fra le due del piano); l'audio è l'm4a AAC (itag 140), scaricato a pezzi da 4 MB; metadati da Deezer come sul server (ricerca strutturata, poi semplice; titolo uguale e durata entro 8 s). L'm4a di YouTube è a frammenti (DASH, «default-base-is-moof»): Scaricatore.java legge da sé moof/tfhd/trun e dà a mp4parser una traccia già pronta, che lui scrive come MP4 normale con i tag di iTunes e la copertina. Il file va in Music/Armony/Artista/Album con MediaStore. Tutto il cuore è Java senza Android e si prova sul computer.

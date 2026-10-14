@@ -60,6 +60,7 @@ RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
 AVT = "urn:schemas-upnp-org:service:AVTransport:1"
 RC = "urn:schemas-upnp-org:service:RenderingControl:1"
 DIMENTICA = 300          # secondi senza risposte prima di togliere un dispositivo dall'elenco
+QUIETE = 300             # letture (ogni 2 s, quindi 10 minuti) da ferma prima di smettere di chiamarla
 lock = threading.RLock()
 trovati = {}             # id -> {id, nome, ip, loc, avt, rc, modello, visto}
 sessioni = {}            # id -> sessione attiva su quel dispositivo (vedi Sessione)
@@ -119,7 +120,8 @@ def cerca(attesa=3):
                 nuovi.append(d)
     now = time.time()
     with lock:
-        for k in [k for k, d in trovati.items() if now - d["visto"] > DIMENTICA and k not in sessioni]:
+        # spenta o scollegata: sparisce anche con una sessione, se non sta suonando (prima restava in «Dove suona» per sempre)
+        for k in [k for k, d in trovati.items() if now - d["visto"] > DIMENTICA and not (k in sessioni and sessioni[k].suona)]:
             via.append(trovati.pop(k))
     # fuori dal lucchetto di casa: a_chi prende quello del canale dal vivo, che live_stream tiene mentre chiama per()
     for d in nuovi:
@@ -234,7 +236,27 @@ def arrivato(d):
 
 
 def sparito(d):
+    chiudi(d["id"])
     a_chi({"type": "gone", "device": d["id"]})
+
+
+def chiudi(dev, ferma=False):
+    """Chiude la sessione di un dispositivo nascosto o sparito: non lo si chiama più e chi lo usava non lo vede più."""
+    with lock:
+        s = sessioni.pop(dev, None)
+    if not s:
+        return
+    s.vivo = False
+    try:
+        if ferma:
+            s.r.ferma()
+        getattr(s.r, "lascia", lambda: None)()
+    except Exception:  # noqa: BLE001 - già spenta o scollegata
+        pass
+    with A.llock:
+        A.lstates.get(s.utente, {}).pop(dev, None)
+    A.live_put(s.utente, {"type": "gone", "device": dev})
+    A.pres_gone(s.utente, dev)
 
 
 # ------------------------------------------------------------------ UPnP: comandi alla TV
@@ -382,6 +404,12 @@ class Cast:
 
     def ferma(self):
         self.fai(lambda mc: mc.stop())
+
+    def lascia(self):
+        """Chiude il collegamento: aperto, pychromecast continua a parlare con la TV e, se cade, la richiama."""
+        cc = self.d.pop("cc", None)
+        if cc:
+            cc.disconnect(timeout=2)
 
     def salta(self, s):
         self.fai(lambda mc: mc.seek(s))
@@ -655,7 +683,7 @@ class Sessione:
         self.coda, self.i, self.shuffle, self.repeat = [], 0, False, "off"
         self.suona, self.pos, self.dur, self.at, self.since = False, 0.0, 0, time.time(), None
         self.fermato_da_noi, self.fermi, self.vivo, self.inviato = False, 0, True, None
-        self.err, self.vol = 0, None
+        self.err, self.vol, self.quieto = 0, None, 0
         threading.Thread(target=self.segui, daemon=True).start()
 
     # --- cosa la TV deve suonare
@@ -750,10 +778,28 @@ class Sessione:
     def posizione(self):
         return self.pos + (time.time() - self.at if self.suona else 0)
 
+    def riposa(self, perche):
+        """Chiude la sessione: interrogata ogni 2 secondi, anche spenta o su un'altra sorgente, la TV sentiva il server per
+        sempre e in «Dove suona» restava «In pausa». Resta nell'elenco, pulita: chi la vuole la sceglie di nuovo."""
+        dev = self.d["id"]
+        A.diagnosi.log("info", "casa", f"{self.d['nome']}: {perche}, la lascio stare finché non la scegli di nuovo"[:300])
+        with lock:
+            mia = sessioni.get(dev) is self
+        if not mia:  # già sostituita da un'altra sessione
+            self.vivo = False
+            return
+        chiudi(dev)
+        if esiste(dev) and not nascosto(self.d):
+            A.live_put(self.utente, {"type": "join", "device": dev, "name": nome(self.d)})
+
     def segui(self):
         while self.vivo:
             time.sleep(2)
             if not self.coda:
+                continue
+            self.quieto = 0 if self.suona else self.quieto + 1
+            if self.quieto >= QUIETE:
+                self.riposa("ferma da 10 minuti")
                 continue
             try:
                 stato, pos, dur = self.r.leggi()
@@ -761,8 +807,7 @@ class Sessione:
             except ERRORI:
                 self.err += 1
                 if self.err == 15:  # 30 secondi senza risposta: spenta o fuori rete
-                    self.suona = False
-                    self.pubblica(True)
+                    self.riposa("non risponde da 30 secondi")
                 continue
             prima = (self.suona, int(self.posizione()))
             if stato == "PLAYING":
@@ -773,6 +818,10 @@ class Sessione:
             elif stato == "STOPPED" and self.suona and not self.fermato_da_noi:
                 self.fermi += 1
                 if self.fermi >= 2:  # due letture di fila: alcune TV passano un attimo da STOPPED fra un brano e l'altro
+                    durata = self.dur or self.coda[self.i].get("duration") or 0
+                    if durata and durata - self.posizione() > 20:  # a metà brano: cambiata sorgente o fermata dal suo telecomando
+                        self.riposa("fermata dalla TV (altra sorgente?)")
+                        continue
                     try:
                         self.avanti(auto=True)
                     except ERRORI as e:
@@ -859,6 +908,8 @@ def dispositivo(dev):
     sc = {k: v for k, v in sc.items() if v.get("nome") or v.get("nascosto")}
     db.run("INSERT INTO settings (key, value) VALUES ('casa_scelte', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", json.dumps(sc))
     # a chi ha «Dove suona» aperto: sparisce, ricompare o cambia nome subito
+    if nascosto(trovato):
+        chiudi(dev, ferma=True)  # nascosta mentre suona: si ferma, e non resta nello stato di chi la usava
     a_chi({"type": "gone", "device": dev})
     if not nascosto(trovato):
         a_chi({"type": "join", "device": dev, "name": nome(trovato)})
