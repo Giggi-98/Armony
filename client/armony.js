@@ -3589,10 +3589,12 @@ async function vDownload(sub = '') {
   const tabs = `<div class="lpills dltabs" role="navigation" aria-label="Da dove scaricare">${[['link', '', 'link', 'Da un link'], ['cerca', '/cerca', 'search', 'Cerca online'], ['carica', '/carica', 'upload', 'Dal dispositivo']]
     .map(([k, h, i, l]) => `<a href="#/scarica${h}" class="${t === k ? 'on' : ''}"${t === k ? ' aria-current="page"' : ''}>${ic(i)}${l}</a>`).join('')}</div>`;
   if (t === 'carica') return vUpload(tabs);
+  if (PhoneDl.on()) return PhoneDl.view(sub);  // telefono in uso: si scarica sul telefono (telefono.js)
   if (S.dl.url && !access().download) { view.innerHTML = `<h1>Scarica</h1>${tabs}<div class="empty">I download non sono abilitati per il tuo utente. Chiedilo a chi gestisce il server.</div>`; return; }
   // a sinistra cosa scaricare (link o ricerca, audio o video, formato e qualità); a destra l'attività. I video vanno nella
   // sezione Video (video.js): qui resta solo il collegamento
   view.innerHTML = `<h1>Scarica</h1><p class="sub">Da YouTube, SoundCloud, Bandcamp, Vimeo e centinaia di altri siti.</p>
+  ${PhoneDl.p && srv()?.local ? `<p class="small" style="margin:0 0 var(--s3)"><a href="#" id="dTelefono">📱 Scarica invece sul telefono</a></p>` : ''}
   <div id="sosp"></div>${tabs}
   <div class="dlgrid"><div class="dlmain">
   <section class="panel dlcard">
@@ -3619,6 +3621,7 @@ async function vDownload(sub = '') {
     <div id="jobs"><p class="sub">Caricamento…</p></div>
     <a class="panel dl-vids" href="#/video">${ic('film')}<span class="grow"><b>I tuoi video</b><small id="vids">…</small></span>${ic('chevr')}</a>
   </div></div>`;
+  $('#dTelefono')?.addEventListener('click', e => { e.preventDefault(); store.set('dlDove', 'telefono'); route(); });
   $('#dPaste')?.addEventListener('click', async () => { try { const v = (await navigator.clipboard.readText()).trim(); if (v) { const ta = $('#dUrl'); ta.value = ta.value.trim() ? ta.value.trim() + '\n' + v : v; ta.focus(); } else toast('Gli appunti sono vuoti.'); } catch { toast('Il browser non mi lascia leggere gli appunti: incolla con Ctrl+V.'); } });
   const setOpts = () => {
     const m = $('[name=mode]:checked').value;
@@ -7236,10 +7239,9 @@ async function boot() {
   $('#hSearch').onclick = e => { if (location.hash.startsWith('#/cerca')) { e.preventDefault(); $('#q')?.focus(); } else searchFocus = true; };
   Wave.init();
   Engine.init(); wirePlayer();
-  await Offline.init(); await Local.init(); ACache.init();
+  await Offline.init(); await Local.init(); PhoneDl.init(); ACache.init();
   try { const q = await DB.get('stato', 'queue'); if (q?.queue && q.at > store.get('queueAt', 0)) { S.queue = q.queue; S.index = q.index; } } catch {}
   if (srv()?.session && Disp.ok(srv()) && Disp.stale(srv())) await Promise.race([Disp.fresh(srv(), true), sleep(4000)]);
-  if (Local.on() && !navigator.onLine && !srv()?.local) S.active = Local.id;  // senza rete suona il telefono
   fillSelectors(); updateNowPlaying(); paintTime();
   const t = S.queue[S.index];
   if (t && (srv(t.serverId) || Offline.has(t))) await Engine.load(t, Engine.cur, { autoplay: false, startAt: store.get('pos', 0), lazy: true });
@@ -7260,6 +7262,7 @@ async function boot() {
   NativeMedia.init(); Phone.init(); if (NATIVE) { nativeBack(); AppUpdate.init(); NetDns.need(''); }
   Jam.init();
   route();
+  if (Local.p && srv() && !srv().local) Local.prova(srv());  // l'app: server che non risponde → chiede se passare al telefono
   setTimeout(resolvePending, 8000);
   addEventListener('online', () => { HistSync.run(); Live.wake(true); Scrob.flush(); });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Live.wake());

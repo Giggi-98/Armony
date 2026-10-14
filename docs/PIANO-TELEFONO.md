@@ -103,6 +103,11 @@ freddo e prima ricerca più veloci di adesso.
 
 ### Fase 2 — Scaricare dal telefono
 
+> **Stato (2026-10-14):** fatta prima della fase 1 (i file in Music/Armony li trova già «Questo telefono» con l'indice di
+> oggi), con NewPipeExtractor. Scaricatore.java (provato sul computer contro YouTube vero), ArmonyDownloadService e
+> ArmonyDownloadPlugin, pagina Scarica del telefono in telefono.js. Da collaudare sul telefono. Restano: «Scegli
+> un'altra versione», la riserva sul server quando il telefono non riesce, SoundCloud.
+
 La parte più delicata. Due strade:
 
 | | Pro | Contro |

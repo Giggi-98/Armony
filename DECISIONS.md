@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-14 — Download sul telefono con NewPipeExtractor, e l'MP4 rimesso insieme da noi
+**Contesto:** fase 2 di docs/PIANO-TELEFONO.md: scaricare sul telefono senza server.
+**Scelta:** NewPipeExtractor (Java, la libreria di NewPipe) estrae i link di YouTube e YouTube Music (scelta dell'utente fra le due del piano); l'audio è l'm4a AAC (itag 140), scaricato a pezzi da 4 MB; metadati da Deezer come sul server (ricerca strutturata, poi semplice; titolo uguale e durata entro 8 s). L'm4a di YouTube è a frammenti (DASH, «default-base-is-moof»): Scaricatore.java legge da sé moof/tfhd/trun e dà a mp4parser una traccia già pronta, che lui scrive come MP4 normale con i tag di iTunes e la copertina. Il file va in Music/Armony/Artista/Album con MediaStore. Tutto il cuore è Java senza Android e si prova sul computer.
+**Alternative scartate:** youtubedl-android (40–60 MB in più, avvio lento); MovieCreator di mp4parser per leggere il DASH (con le prove l'audio usciva rovinato, poi si è visto che il guasto vero era lo spostamento dei dati quando si aggiungono i tag: corretto spostando gli offset di stco; la lettura nostra resta perché non dipende da come mp4parser tratta i frammenti); lasciare il file a frammenti (durata e salto non vanno in tutti i lettori, i tag non ci stanno).
+**Conseguenze:** l'APK cresce di circa 2 MB (NewPipeExtractor, Rhino, mp4parser); i primi 36 ms del brano (il ritardo dell'encoder, che YouTube nasconde con un'edit list) restano; un cambio di YouTube rompe i download sul telefono finché non esce un APK nuovo.
+**Da rivedere se:** YouTube rompe NewPipeExtractor spesso (allora youtubedl-android, che si aggiorna da solo), o serve anche SoundCloud dal telefono.
+
 ## 2026-10-13 — Bluetooth: un ponte D-Bus sull'host invece del bus montato nel container
 **Contesto:** con la scelta del 12/10 (Casse Bluetooth, più sotto) il container montava `/run/dbus` e usava `bluetoothctl` come `armony-bt`. Su Ubuntu il bus di sistema applica AppArmor ai messaggi: il profilo `docker-default` non ha regole D-Bus, quindi il primo messaggio (`Hello`) viene rifiutato e la ricerca delle casse non trova mai niente. Le prove del 12/10 avevano un D-Bus finto in un container senza AppArmor e non l'hanno visto.
 **Scelta:** `deploy/bluetooth.sh` installa `xdg-dbus-proxy` e lo fa girare sull'host come `armony-bt` (servizio `armony-bt-dbus`, presa in `/run/armony-bt`, cartella che resta fra un riavvio e l'altro); il container si collega a quella presa, sempre come uid di `armony-bt`. Il resto della scelta del 12/10 resta. La pagina dice quando il Bluetooth non risponde e perché.

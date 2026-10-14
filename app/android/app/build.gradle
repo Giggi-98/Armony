@@ -35,6 +35,13 @@ android {
             }
         }
     }
+    // NewPipeExtractor usa java.time e altre API di Java 11: su Android vecchi le porta il desugaring
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+    }
+    packagingOptions {
+        resources { excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*', 'META-INF/versions/9/module-info.class'] }
+    }
     buildTypes {
         release {
             signingConfig f('KEYSTORE') ? signingConfigs.release : null
@@ -61,6 +68,11 @@ dependencies {
     implementation "androidx.work:work-runtime:2.10.0"
     // ProxyController per il DNS di riserva (ArmonyNetPlugin); stessa versione che usa Capacitor
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    // download sul telefono senza server (Scaricatore.java): estrazione da YouTube come NewPipe, MP4 e tag con mp4parser
+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.5'
+    implementation 'org.mp4parser:isoparser:1.9.56'
+    implementation 'org.mp4parser:muxer:1.9.56'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

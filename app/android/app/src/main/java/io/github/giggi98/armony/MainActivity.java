@@ -23,6 +23,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ArmonyLibraryPlugin.class);
         registerPlugin(ArmonyNetPlugin.class);
         registerPlugin(ArmonyFilesPlugin.class);
+        registerPlugin(ArmonyDownloadPlugin.class);
         // app aperta toccando una notifica: il client ci va appena pronto (ArmonyFiles.pending)
         ArmonyFilesPlugin.pending = ArmonyFilesPlugin.linkOf(getIntent());
         // DNS di riserva: il proxy locale è pronto prima che il client chiami i server

@@ -31,6 +31,12 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!-- download sul telefono, anche a schermo spento (ArmonyDownloadService.java) -->
+        <service
+            android:name=".ArmonyDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- widget "In riproduzione" della schermata Home (ArmonyWidget.java) -->
         <receiver
             android:name=".ArmonyWidget"
@@ -66,10 +72,13 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- aggiornamento dall'app: Android chiede comunque conferma all'utente (ArmonyUpdatePlugin.java) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- "Musica del telefono": chiesto solo quando la si attiva (ArmonyLibraryPlugin.java) -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- download sul telefono prima di Android 10 (da Android 10 si scrive con MediaStore, senza permessi) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 </manifest>

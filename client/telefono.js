@@ -44,6 +44,21 @@ const Local = {
     route(); this.paint();
     if (this.granted === false) toast('Senza il permesso Armony vede solo i brani salvati offline. Se Android non lo chiede più: Impostazioni di Android, App, Armony, Autorizzazioni.', 7000);
   },
+  // all'avvio dell'app: se il server in uso non risponde lo dice e chiede se passare al telefono (modalità senza server).
+  // Una volta per apertura: «Resta» non la ripropone finché l'app non riparte
+  async prova(s) {
+    // raggiungibile = risponde, anche con un errore (password, dispositivo in attesa): quelli li dice già il resto dell'app
+    const ok = navigator.onLine && await Promise.race([(async () => { await NetDns.need(s.url); await netFetch(absUrl(s.url) + '/rest/ping.view'); })().then(() => true, () => false), sleep(6000).then(() => false)]);
+    if (ok || S.active !== s.id || $('dialog[open]')) return;
+    const d = $('#dlg'); d.className = 'sheet smart';
+    d.innerHTML = `<div class="head"><span class="grow"><b style="display:block">📡 Non riesco a raggiungere ${esc(s.name)}</b><small style="color:var(--muted)">${navigator.onLine ? 'Il server non risponde: è spento, o da qui non si raggiunge.' : 'Il telefono è senza rete.'}</small></span></div>
+      <div class="smbody"><p class="sub" style="margin:0">Senza server Armony suona la musica che hai sul telefono e quella salvata offline, e puoi scaricare nuova musica sul telefono. ${esc(s.name)} torna quando lo scegli dal pulsante dei server.</p>
+      <button class="btn primary" id="lpTel" style="width:100%">📱 Usa la musica del telefono</button><div class="row"><button class="btn" id="lpRiprova">Riprova</button><button class="btn" id="lpResta">Resta su ${esc(s.name)}</button></div></div>`;
+    $('#lpTel').onclick = () => { d.close(); this.on() ? (S.active = this.id, persistServers(), route(), this.paint()) : this.enable(true); };
+    $('#lpResta').onclick = () => d.close();
+    $('#lpRiprova').onclick = async () => { const b = $('#lpRiprova'); b.disabled = true; b.textContent = 'Provo…'; d.close(); this.prova(s).then(() => S.active === s.id && !$('dialog[open]') && toast(`✅ ${s.name} risponde.`)); };
+    closeOutside(d); d.showModal();
+  },
   disable() { store.set('phoneLib', false); if (S.active === this.id) S.active = S.servers[0]?.id || null; persistServers(); this.paint(); },
   // rilegge MediaStore; true se qualcosa è cambiato
   refresh() {
@@ -319,5 +334,74 @@ const Local = {
       : 'Nessun backup ancora.';
     box.innerHTML = `<div class="row between" style="flex-wrap:nowrap"><span class="small" style="color:var(--muted)" role="status">${msg}</span><button class="btn sm" id="bkNow" ${bk ? 'disabled' : ''}>Salva ora</button></div>${bk ? `<div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>` : ''}`;
     box.querySelector('#bkNow').onclick = () => this.backup(true);
+  }
+};
+
+/* Armony - scaricare sul telefono, senza server (fase 2 di docs/PIANO-TELEFONO.md). Il plugin ArmonyDownload
+   (ArmonyDownloadPlugin.java, Scaricatore.java) cerca su YouTube Music, scarica l'audio, lo completa con i dati di
+   Deezer e lo mette in Music/Armony: da lì «Questo telefono» lo trova da solo. Qui solo la pagina Scarica quando è
+   attivo il telefono; con un server collegato si può scegliere di scaricare lì (store 'dlDove'). */
+const PhoneDl = {
+  p: null, lavori: [],
+  init() {
+    this.p = NATIVE ? window.Capacitor?.Plugins?.ArmonyDownload || null : null;
+    this.p?.addListener('lavoro', l => { const i = this.lavori.findIndex(x => x.id === l.id); i < 0 ? this.lavori.push(l) : this.lavori[i] = l; this.paint(); });
+  },
+  // la pagina Scarica è quella del telefono: telefono in uso, e niente server scelto al suo posto
+  on: () => !!PhoneDl.p && !!srv()?.local && (!dlSrv() || store.get('dlDove', 'telefono') === 'telefono'),
+  async view(sub = '') {
+    const [tab, ...rest] = (sub || '').split('/'), q0 = rest.join('/'), t = tab === 'cerca' ? 'cerca' : 'link', s = dlSrv();
+    view.innerHTML = `<h1>Scarica</h1><p class="sub">📱 Sul telefono, senza server: da YouTube e YouTube Music, con titolo, album e copertina. I brani vanno nella cartella <b>Music/Armony</b> e restano anche senza Armony.</p>
+      ${s && access().download ? `<p class="small" style="margin:0 0 var(--s3)"><a href="#" id="pdServer">🖥️ Scarica invece su ${esc(s.name)}</a></p>` : ''}
+      <div class="lpills dltabs" role="navigation" aria-label="Da dove scaricare">${[['link', '', 'link', 'Da un link'], ['cerca', '/cerca', 'search', 'Cerca online']]
+        .map(([k, h, i, l]) => `<a href="#/scarica${h}" class="${t === k ? 'on' : ''}"${t === k ? ' aria-current="page"' : ''}>${ic(i)}${l}</a>`).join('')}</div>
+      <div class="dlgrid"><div class="dlmain"><section class="panel dlcard">
+        ${t === 'link' ? `<label class="dl-in"><span class="dl-in-h">${ic('link')}Incolla uno o più link<small>un brano o una playlist, uno per riga</small></span>
+          <textarea id="pdUrl" rows="3" placeholder="https://music.youtube.com/watch?v=…" spellcheck="false" autocapitalize="none"></textarea></label>
+          <button class="btn primary dl-go" id="pdGo">${ic('down')} Scarica sul telefono</button>`
+        : `<div class="dl-search"><label class="ordq">${ic('search')}<input type="search" id="pdQ" placeholder="Artista e titolo" value="${esc(q0)}" aria-label="Cerca online" enterkeyhint="search"></label><button class="btn primary" id="pdCerca">${ic('search')} Cerca</button></div>`}
+      </section>${t === 'cerca' ? '<div id="pdRes"></div>' : ''}</div>
+      <div class="dlside"><div class="dl-sh"><h2>Attività</h2><button class="btn sm" id="pdPulisci">Rimuovi conclusi</button></div><div id="jobs"></div></div></div>`;
+    $('#pdServer')?.addEventListener('click', e => { e.preventDefault(); store.set('dlDove', 'server'); route(); });
+    $('#pdPulisci').onclick = async () => { this.lavori = (await this.p.pulisci()).lavori; this.paint(); };
+    const scarica = async (opz, b) => {
+      if (b) b.disabled = true;
+      try { const r = await this.p.scarica(opz); toast(r.aggiunti > 1 ? `⬇️ ${r.aggiunti} brani in coda sul telefono.` : '⬇️ In coda sul telefono.'); if (b && opz.brano) b.innerHTML = ic('check'); return true; }
+      catch (e) { toast(e.message || String(e)); if (b) b.disabled = false; return false; }
+    };
+    if (t === 'link') $('#pdGo').onclick = async e => {
+      const links = $('#pdUrl').value.split(/\s+/).filter(x => /^https?:\/\//.test(x));
+      if (!links.length) return toast('Incolla almeno un link di YouTube o YouTube Music.');
+      for (const link of links) if (!(await scarica({ link }, e.currentTarget))) return;
+      $('#pdUrl').value = ''; e.currentTarget.disabled = false;
+    };
+    else {
+      const go = async () => {
+        const q = $('#pdQ').value.trim(); if (!q) return;
+        const box = $('#pdRes'); box.innerHTML = '<p class="sub">Cerco su YouTube Music…</p>';
+        try {
+          const brani = (await this.p.cerca({ q, n: 15 })).brani;
+          box.innerHTML = brani.length ? brani.map((b, i) => `<div class="list-item" style="cursor:default">
+            <span class="pic">${b.copertina ? `<img src="${esc(b.copertina)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</span>
+            <span class="grow"><b>${esc(b.titolo)}</b><small>${esc(b.artista || '')}${b.durata ? ' · ' + fmt(b.durata) : ''}</small></span>
+            <button class="btn sm primary" data-pd="${i}" aria-label="Scarica ${esc(b.titolo)}">${ic('down')}</button></div>`).join('') : '<div class="empty">Nessun risultato.</div>';
+          box.querySelectorAll('[data-pd]').forEach(b => b.onclick = () => scarica({ brano: brani[+b.dataset.pd] }, b));
+        } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message || String(e))}</div>`; }
+      };
+      $('#pdCerca').onclick = go; $('#pdQ').onkeydown = e => { if (e.key === 'Enter') go(); };
+      if (q0) go();
+    }
+    try { this.lavori = (await this.p.lavori()).lavori; } catch {}
+    this.paint();
+  },
+  paint() {
+    const box = $('#jobs'); if (!box || !$('#pdPulisci')) return;
+    const fatto = { fatto: 'ok', "c'era già": 'ok', errore: 'err' };
+    box.innerHTML = this.lavori.length ? [...this.lavori].reverse().map(l => `<div class="panel" style="padding:14px">
+      <div class="row between" style="flex-wrap:nowrap"><b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.titolo || l.url)}</b>
+      <span class="tag ${fatto[l.stato] || ''}">${esc(l.stato)}</span></div>
+      <small style="color:var(--muted)">${esc([l.artista, l.album].filter(Boolean).join(' · ') || 'YouTube')}</small>
+      ${l.stato === 'errore' ? `<p style="color:var(--danger);margin:6px 0 0;font-size:.88rem">${esc(l.errore || '')}</p>` : fatto[l.stato] ? '' : `<div class="bar"><i style="width:${l.progresso || 0}%"></i></div>`}</div>`).join('')
+      : `<div class="dl-empty">${ic('down')}<b>Nessun download sul telefono</b><small>Quello che scarichi compare qui, con l'avanzamento. Continua anche a schermo spento.</small></div>`;
   }
 };
