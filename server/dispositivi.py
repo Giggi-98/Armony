@@ -63,6 +63,9 @@ MSG = {
     "chiave": "Da internet entrano solo i dispositivi con chiave: aggiorna Armony (app o pagina con HTTPS), o collegati da casa o da Tailscale.",
     "mai": "Questo server accetta solo dispositivi con chiave: aggiorna Armony e aprila con HTTPS o dall'app.",
     "emergenza": "Il codice di emergenza vale solo da casa o da Tailscale.",
+    "chiaveapi_casa": "Le chiavi API valgono solo dalla rete di casa o da Tailscale.",
+    "chiaveapi_lettura": "Questa chiave API è di sola lettura: accetta solo richieste GET.",
+    "chiaveapi_rotta": "Con una chiave API: solo rotte /api/, e chiavi, dispositivi, utenti e password si possono solo leggere.",
     "impserver": "Da internet le impostazioni del server si cambiano solo da un dispositivo con chiave (l'app, o Armony "
                  "aperta con HTTPS) oppure da casa o da Tailscale. Da qui puoi guardarle ma non cambiarle.",
 }
@@ -276,10 +279,13 @@ def ticket_dev(t):
 def identity(tok=None, k=None):
     """Chi fa la richiesta: sessione (X-Token o ?token=) oppure gettone (?k=). Se non vale, g.why dice perché."""
     g.why = None
-    tok = tok or request.headers.get("X-Token") or request.args.get("token") or ""
+    bearer = request.headers.get("Authorization", "")
+    tok = tok or request.headers.get("X-Token") or (bearer[7:].strip() if bearer[:7].lower() == "bearer " else "") or request.args.get("token") or ""
     k = "" if tok else (k or request.args.get("k") or "")
     if not tok and not k:
         return None
+    if tok.startswith(A.chiavi.PREFISSO):  # chiave API di un programma di casa (chiavi.py)
+        return A.chiavi.identity(tok)
     if tok and A.TOKEN and secrets.compare_digest(tok, A.TOKEN):
         # l'accesso di emergenza non passa dal Funnel né da indirizzi pubblici
         if not is_local():
@@ -332,7 +338,7 @@ def refuse_change():
 def deny():
     """La risposta 401 con il motivo: il client mostra "Questo dispositivo è stato revocato" senza riprovare."""
     why = getattr(g, "why", None)
-    return jsonify(error=MSG.get(why, "Accesso richiesto: entra con il tuo utente."), code=why), 401
+    return jsonify(error=MSG.get(why, "Accesso richiesto: entra con il tuo utente."), code=why), 403 if why in ("chiaveapi_lettura", "chiaveapi_rotta") else 401
 
 
 def me_extra(who):

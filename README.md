@@ -25,6 +25,7 @@ Il manuale completo, in italiano semplice, è [`LEGGIMI.md`](LEGGIMI.md).
 - Riconosce le cuffie Bluetooth (col nome) e mette in pausa quando le stacchi.
 - **TV e casse di casa**: smart TV, casse DLNA, Chromecast e Android TV compaiono in «Dove suona», col volume dal telefono; con il Bluetooth del server anche casse Bluetooth e Alexa; **Tutta la casa** (Snapcast) suona in sincrono in ogni stanza.
 - **Sveglia** con il mix del giorno o una playlist su una TV o una cassa, e **Home Assistant** che vede e comanda la musica.
+- **Chiavi API** per i programmi del tuo homelab: vedono in tempo reale cosa succede e, se vuoi, comandano (solo da casa o da Tailscale).
 
 **Insieme agli amici**
 - **Jam**: ascoltate la stessa musica nello stesso momento, ognuno dal suo telefono; proposte, voti, reazioni. Cifrata da un capo all'altro.

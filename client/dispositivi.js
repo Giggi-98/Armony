@@ -268,7 +268,7 @@ const Disp = {
     });
     for (const b of [box, sec]) b?.querySelectorAll('[data-dv]').forEach(el => el.onclick = () => this.act(el.dataset.dv, el.dataset.id));
   },
-  ev: { accesso: 'Accesso', accesso_fallito: 'Password sbagliata', attesa: 'Dispositivo in attesa', nuovo: 'Dispositivo nuovo, fidato', approvato: 'Approvato', revocato: 'Revocato', abbinato: 'Abbinato con codice', abbinamento_fallito: 'Codice di abbinamento sbagliato', codice: 'Codice di abbinamento creato', rigenera: 'Chiave nuova richiesta', rigenerato: 'Chiave rigenerata', chiave: 'Prima chiave', bloccato: 'Troppi tentativi: attesa', emergenza: 'Codice di emergenza', senza_chiave: 'Rifiutato: senza chiave', impostazione: 'Impostazione', impserver: 'Rifiutato: impostazioni del server senza chiave' },
+  ev: { accesso: 'Accesso', accesso_fallito: 'Password sbagliata', attesa: 'Dispositivo in attesa', nuovo: 'Dispositivo nuovo, fidato', approvato: 'Approvato', revocato: 'Revocato', abbinato: 'Abbinato con codice', abbinamento_fallito: 'Codice di abbinamento sbagliato', codice: 'Codice di abbinamento creato', rigenera: 'Chiave nuova richiesta', rigenerato: 'Chiave rigenerata', chiave: 'Prima chiave', bloccato: 'Troppi tentativi: attesa', emergenza: 'Codice di emergenza', senza_chiave: 'Rifiutato: senza chiave', impostazione: 'Impostazione', impserver: 'Rifiutato: impostazioni del server senza chiave', chiaveapi: 'Chiave API' },
   async act(a, id) {
     const s = srv(), d = (this.list || []).find(x => x.id === id), base = `/api/dispositivi/${encodeURIComponent(id || '')}`;
     try {

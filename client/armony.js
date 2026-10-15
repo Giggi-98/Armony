@@ -4729,6 +4729,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   srv()?.me?.caps?.includes('sveglia') && srv()?.session ? ['casa', 'sveglia', 'Sveglia', 'clock', 'sveglia mattina ora tv cassa mix playlist volume', '<div id="svBox"><p class="sub">Caricamento…</p></div>'] : null,
   srv()?.me?.caps?.includes('snapcast') && srv()?.session ? ['casa', 'tuttacasa', 'Tutta la casa', 'speaker', 'snapcast stanze multiroom sincrono casse tutta la casa volume', '<div id="tcBox"><p class="sub">Caricamento…</p></div>'] : null,
   srv()?.me?.caps?.includes('homeassistant') && srv()?.session ? ['casa', 'homeassistant', 'Home Assistant', 'home', 'home assistant domotica automazioni casa yaml', '<div id="haBox"><p class="sub">Caricamento…</p></div>'] : null,
+  srv()?.me?.caps?.includes('chiaviapi') && srv()?.session ? ['casa', 'chiaviapi', 'Chiavi API', 'lock', 'chiavi api homelab token gettone script plancia monitoraggio curl integrazione', '<div id="akBox"><p class="sub">Caricamento…</p></div>'] : null,
   srv()?.me?.caps?.includes('bot') ? ['casa', 'bot', 'Bot Telegram e Discord', 'send', 'bot telegram discord chat comandi notifiche collega', '<div id="botBox"><p class="sub">Caricamento…</p></div>'] : null,
   ['ascolto', 'ascolto', 'Ascolto', 'headphones', 'audio qualità bitrate equalizzatore eq dissolvenza crossfade velocità volume notte replaygain normalizzazione visualizzatore iphone', `<div class="panel stack">
     <div class="grid2">
@@ -4851,7 +4852,7 @@ function vSettings(id = location.hash.split('/')[2]) {
   $('#cacheMB').onchange = e => { P.cacheMB = +e.target.value; savePrefs(); if (!P.cacheMB) ACache.clear().then(() => { $('#cacheUse').textContent = '0 MB usati'; }); else ACache.trim(); };
   $('#cf').oninput = e => { P.crossfade = +e.target.value; $('#cfv').textContent = P.crossfade ? P.crossfade + ' secondi' : 'spenta'; savePrefs(); };
   ['tUrl', 'tUser', 'tPass'].forEach(id => $('#' + id).onchange = () => { P.turn = { url: $('#tUrl').value.trim(), user: $('#tUser').value.trim(), pass: $('#tPass').value }; savePrefs(); });
-  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint(); refreshBot(); refreshBt(); refreshSveglia(); refreshHa(); refreshStanze(); refreshReteCasa();
+  refreshSpazio(); refreshApk(); Disp.paint(); diagPaint(); refreshBot(); refreshBt(); refreshSveglia(); refreshHa(); refreshChiavi(); refreshStanze(); refreshReteCasa();
   $('#pubSave')?.addEventListener('click', async () => {
     try {
       const r = await dlApi('/api/indirizzo', { method: 'PUT', body: JSON.stringify({ url: $('#pubUrl').value.trim() }) });
@@ -5453,6 +5454,50 @@ async function refreshHa(nuovo) {
   $('#haCopia')?.addEventListener('click', async () => { if (await copyText(r.yaml)) toast('📋 Copiato.'); });
   $('#haNuovo')?.addEventListener('click', async () => { if (r.attivo && !confirm('Il gettone di adesso smette di valere. Continuare?')) return; try { refreshHa(await srvApi(srv(), '/api/homeassistant', { method: 'POST' })); } catch (e) { toast(e.message); } });
   $('#haVia')?.addEventListener('click', async () => { if (confirm('Home Assistant non potrà più comandare la tua musica.')) { await srvApi(srv(), '/api/homeassistant', { method: 'DELETE' }).catch(e => toast(e.message)); refreshHa(); } });
+}
+/* ================= chiavi API (capacità "chiaviapi", server/chiavi.py) =================
+   Chiavi per i programmi di casa: valgono come il mio utente su /api/*, solo da casa o Tailscale. Si vedono solo appena create. */
+const akEsempi = (base, k, adm) => `# chi sei e cosa puoi fare
+curl -H "Authorization: Bearer ${k}" ${base}/api/me
+
+# in diretta: cosa suona, chi ascolta, download, brani nuovi, notifiche
+curl -N -H "Authorization: Bearer ${k}" "${base}/api/live?device=homelab&name=Homelab"
+
+# adesso: i tuoi dispositivi e cosa suonano
+curl -H "Authorization: Bearer ${k}" ${base}/api/live/stato
+${adm ? `
+# il server: risorse, flussi, lavori; registro eventi
+curl -H "Authorization: Bearer ${k}" ${base}/api/stato
+curl -H "Authorization: Bearer ${k}" ${base}/api/log
+` : ''}
+# comandi (chiave con comandi): pausa, play, next, prev, volume…
+curl -X POST -H "Authorization: Bearer ${k}" -H "Content-Type: application/json" \\
+  -d '{"to": "<id del dispositivo>", "cmd": "pause"}' ${base}/api/live/cmd`;
+async function refreshChiavi(nuova) {
+  const box = $('#akBox'); if (!box) return;
+  let r; try { r = await srvApi(srv(), '/api/chiavi'); } catch (e) { box.innerHTML = `<p class="sub">${esc(e.message)}</p>`; return; }
+  if (!box.isConnected) return;
+  const base = r.base || 'http://INDIRIZZO-DI-ARMONY:8080', adm = !!srv()?.me?.admin;
+  const giorno = t => new Date(t * 1000).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+  box.innerHTML = `<p class="sub">🔑 Per i programmi del tuo homelab (plance, script, monitoraggio): vedono in tempo reale cosa succede${adm ? ' sul server' : ''} e, se vuoi, comandano la musica. Una chiave vale come il tuo utente, con i tuoi permessi, e solo dalla rete di casa o da Tailscale.</p>
+    ${nuova ? `<div class="panel stack botcode"><b>✅ La chiave «${esc(nuova.nome)}»</b><p class="sub" style="margin:0">Si vede solo adesso: copiala nel programma. Se la perdi, revocala e creane una nuova.</p>
+      <pre class="hayaml" style="white-space:pre-wrap;word-break:break-all">${esc(nuova.chiave)}</pre><div class="row"><button class="btn primary" id="akCopia">${ic('check')} Copia la chiave</button><button class="btn" id="akCopiaEs">Copia gli esempi</button></div>
+      <p class="sub" style="margin:0">Come si usa:</p><pre class="hayaml">${esc(akEsempi(base, nuova.chiave, adm))}</pre></div>` : ''}
+    <div class="panel stack">
+      <label class="f">Nome<input type="text" id="akNome" placeholder="Es. Plancia di casa" maxlength="40"></label>
+      <label class="check"><input type="checkbox" id="akScrive"><span>Può anche comandare<small>Spenta, la chiave guarda e basta (solo richieste GET). Accesa, fa quello che puoi fare tu: play, pausa, code, download${adm ? ', impostazioni del server' : ''}. Chiavi, dispositivi, utenti e password restano fuori.</small></span></label>
+      <div class="row"><button class="btn primary" id="akNuova">${ic('plus')} Crea chiave</button></div></div>
+    ${r.chiavi.length ? `<div class="panel stack">${r.chiavi.map(k => `<div class="row between" style="flex-wrap:nowrap;gap:var(--s3)"><span class="grow" style="min-width:0"><b>${esc(k.nome)}</b><br><small style="color:var(--muted)">${k.scrive ? 'Guarda e comanda' : 'Solo lettura'}${k.admin ? ' · amministratore' : ''} · creata il ${giorno(k.creata)} · ${k.vista ? 'usata ' + ago(k.vista * 1000) : 'mai usata'}</small></span><button class="btn sm danger" data-akx="${esc(k.id)}">Revoca</button></div>`).join('')}</div>` : ''}`;
+  $('#akCopia')?.addEventListener('click', async () => { if (await copyText(nuova.chiave)) toast('📋 Chiave copiata.'); });
+  $('#akCopiaEs')?.addEventListener('click', async () => { if (await copyText(akEsempi(base, nuova.chiave, adm))) toast('📋 Esempi copiati.'); });
+  $('#akNuova').onclick = async () => {
+    const nome = $('#akNome').value.trim() || 'Homelab';
+    try { const j = await srvApi(srv(), '/api/chiavi', { method: 'POST', body: JSON.stringify({ nome, scrive: $('#akScrive').checked }) }); refreshChiavi({ ...j, nome }); } catch (e) { toast(e.message); }
+  };
+  box.querySelectorAll('[data-akx]').forEach(b => b.onclick = async () => {
+    if (!confirm('Il programma che la usa non potrà più entrare. Revocare la chiave?')) return;
+    try { await srvApi(srv(), '/api/chiavi/' + encodeURIComponent(b.dataset.akx), { method: 'DELETE' }); refreshChiavi(); } catch (e) { toast(e.message); }
+  });
 }
 /* ================= sveglia (capacità "sveglia", server/sveglia.py) =================
    Le sveglie stanno sul server, che all'ora giusta manda la coda al dispositivo scelto: anche a telefono spento. */

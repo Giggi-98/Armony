@@ -88,6 +88,9 @@ Armony - server di supporto.
                         playlist a una TV, una cassa o un dispositivo, con il volume che sale. Capacità "sveglia"
   /api/homeassistant    il gettone dell'utente per Home Assistant e il YAML da incollare (homeassistant.py); /api/ha/<gettone>/…
                         pubbliche ma solo dalla rete di casa e col gettone: stato e comandi. Capacità "homeassistant"
+  /api/chiavi          chiavi API per i programmi di casa (chiavi.py): valgono come una sessione dell'utente su /api/*, con
+                        «Authorization: Bearer arm_…», solo da casa o da Tailscale, anche di sola lettura; su /api/live
+                        osservano senza essere un dispositivo. Capacità "chiaviapi"
   /api/playlist/ordina  nuovo ordine di una playlist, riscritta in modo sicuro (importa.py, capacità "plordina")
   /api/playlist/togli   toglie un brano da una playlist per id, non per posizione (importa.py, capacità "pltogli")
   /api/import/playlist, /api/import/stato   importazioni ricordate dal server (importa.py): riconoscimento sul DB di
@@ -147,6 +150,7 @@ import bot
 import casa
 import sveglia
 import homeassistant
+import chiavi
 
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
 VIDEO_DIR = os.environ.get("VIDEO_DIR", "/videos")
@@ -179,10 +183,10 @@ VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov")
 # livello dell'API di Armony: sale solo con modifiche che un client vecchio non regge.
 # I client controllano API_LEVEL e CAPS per sapere cosa possono usare su questo server.
 API_LEVEL = 1
-CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento", "intelligenti", "salute", "trasfcasa", "notattivita", "bot", "casa", "livevol", "sveglia", "homeassistant"]
+CAPS = ["login", "upload", "download", "update", "jam", "lan", "history", "prefs", "live", "livehb", "delete", "scaletta", "register", "edit", "discografia", "spazio", "jobgroups", "federazione", "presenza", "indirizzo", "radio", "youtube", "dispositivi", "impserver", "diagnosi", "importsrv", "ascolti", "abbonamenti", "permessi", "scelta", "livestato", "livecmd", "pltogli", "liveq", "notifiche", "catalogo", "plordina", "novita", "amici", "avatar", "fedofferta", "notifondo", "webradio", "webradio-paese", "fedfoglia", "fedcollab", "fedpresenza", "fedtopologia", "trasferimento", "intelligenti", "salute", "trasfcasa", "notattivita", "bot", "casa", "livevol", "sveglia", "homeassistant", "chiaviapi"]
 # prefisso → permesso richiesto. "user" = qualsiasi sessione valida
 # None = pubblica di proposito, con controlli suoi (firme, codici monouso, limiti di tentativi): dispositivi.py
-RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/intelligente", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/bot", "user"), ("/api/casa/flusso", None), ("/api/casa/copertina", None), ("/api/casa/bluetooth", "admin"), ("/api/casa/dispositivo", "admin"), ("/api/casa", "user"), ("/api/sveglia", "user"), ("/api/homeassistant", "user"), ("/api/ha/", None), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/trasferimento", "admin"), ("/api/salute", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
+RULES = (("/api/notifiche/nuove", None), ("/api/webradio", "user"), ("/api/chiave", None), ("/api/scelta", "download"), ("/api/origine", "user"), ("/api/benvenuto", None), ("/api/ascolti/server", "stats"), ("/api/ascolti", "user"), ("/api/import/playlist", "user"), ("/api/import/stato", "user"), ("/api/playlist/intelligente", "user"), ("/api/playlist/togli", "user"), ("/api/playlist/ordina", "user"), ("/api/notifiche", "user"), ("/api/bot", "user"), ("/api/casa/flusso", None), ("/api/casa/copertina", None), ("/api/casa/bluetooth", "admin"), ("/api/casa/dispositivo", "admin"), ("/api/casa", "user"), ("/api/sveglia", "user"), ("/api/homeassistant", "user"), ("/api/chiavi", "user"), ("/api/ha/", None), ("/api/amici", "user"), ("/api/collab", "user"), ("/api/manda", "user"), ("/api/blend", "user"), ("/api/password", "user"), ("/api/profilo", "user"), ("/api/avatar", "user"), ("/api/catalogo", "download"), ("/api/popolari", "user"), ("/api/novita", "user"), ("/api/stato", "admin"), ("/api/login", None), ("/api/logout", "user"), ("/api/log", "user"), ("/api/sicurezza", "admin"), ("/api/dispositivi", "user"), ("/api/update", "admin"), ("/api/youtube", "admin"), ("/api/indirizzo", "admin"), ("/api/users", "admin"), ("/api/fed", "admin"), ("/api/trasferimento", "admin"), ("/api/salute", "admin"), ("/api/rete/copia", "download"), ("/api/rete", "rete"), ("/api/radio", "user"), ("/api/register/settings", "admin"), ("/api/register/invites", "admin"), ("/api/upload", "upload"), ("/api/tracks", "delete"), ("/api/cover", "delete"),
          ("/api/download", "download"), ("/api/import", "download"), ("/api/album/scaletta", "download"), ("/api/discografia", "download"), ("/api/jobs", "download"), ("/api/search", "download"),
          ("/api/videos", "download"), ("/api/health", "user"), ("/api/spazio", "user"), ("/api/me", "user"), ("/api/logout", "user"),
          ("/api/history", "user"), ("/api/prefs", "user"), ("/api/live", "user"))
@@ -1053,7 +1057,9 @@ def live_stream():
     hb = request.args.get("hb") == "1"
     cid, q = uuid.uuid4().hex, queue.Queue(maxsize=200)
     primo = not live_connesso(u)  # nessun dispositivo di questo utente era collegato: per l'avviso «è in linea»
-    me = {"device": dev, "name": name, "q": q, "hb": hb, "seen": time.time(),
+    # con una chiave API (chiavi.py) il programma osserva: riceve tutto ma non è un dispositivo per gli altri
+    oss = g.who.get("chiave")
+    me = {"device": dev, "name": name, "q": q, "hb": hb, "seen": time.time(), "chiave": oss,
           "dev": g.who.get("dev"), "admin": g.who["admin"], "keyed": g.who.get("keyed", True), "net": dispositivi.net(), "t0": time.time()}
     with llock:
         old = [c for c in lconns.get(u, {}).values() if c["device"] == dev]
@@ -1078,19 +1084,19 @@ def live_stream():
                 c["q"].put_nowait(json.dumps({"type": "kicked"}))
             except queue.Full:
                 pass
-        others = {c["device"]: c["name"] for c in lconns[u].values() if c["device"] != dev}
+        others = {c["device"]: c["name"] for c in lconns[u].values() if c["device"] != dev and not c.get("chiave")}
         hello = {"type": "hello", "devices": [{"device": d, "name": n} for d, n in others.items()] + casa.per(me),
                  "states": [s for d, s in lstates.get(u, {}).items() if d != dev], "cmds": cmd_pending(u, dev, time.time())}
-    if old and hb:
+    if old and hb and not oss:
         pres_gone(u, dev)
     # presenza e attività di tutto il server: chi si collega vede subito chi sta ascoltando
     with alock:
         recent = [act_pub(a) for a in acts]
     hello = json.dumps({**hello, "presence": pres_all(), "activity": [a for a in recent if pres_who(a["user"])[0]],
                         "share": pres_who(u)[0], "now": time.time(), "radio": radio.all_summaries()})
-    if not old or hb:  # dopo un fantasma "join" dice agli altri di dimenticare lo stato vecchio
+    if (not old or hb) and not oss:  # dopo un fantasma "join" dice agli altri di dimenticare lo stato vecchio
         live_put(u, {"type": "join", "device": dev, "name": name}, skip=dev)
-    if primo:
+    if primo and not oss:
         notifiche.collegato(u, name)
 
     def gen():
@@ -1109,14 +1115,14 @@ def live_stream():
         finally:
             with llock:
                 lconns.get(u, {}).pop(cid, None)
-                gone = not any(c["device"] == dev for c in lconns.get(u, {}).values())
+                gone = not oss and not any(c["device"] == dev for c in lconns.get(u, {}).values())
                 if gone:
                     lstates.get(u, {}).pop(dev, None)
             if gone:
                 live_put(u, {"type": "gone", "device": dev})
                 pres_gone(u, dev)
                 radio.device_gone(u, dev)
-            if not live_connesso(u):
+            if not oss and not live_connesso(u):
                 notifiche.scollegato(u)
 
     return Response(stream_with_context(gen()), mimetype="text/event-stream",
@@ -1159,7 +1165,7 @@ def live_stato():
     u, now = user_or_400(), time.time()
     dev, cid = request.args.get("device") or "", request.args.get("cmd") or ""
     with llock:
-        devs = {c["device"]: c["name"] for c in lconns.get(u, {}).values() if not c.get("stop")}
+        devs = {c["device"]: c["name"] for c in lconns.get(u, {}).values() if not c.get("stop") and not c.get("chiave")}
     devs.update({x["device"]: x["name"] for x in casa.per({"net": dispositivi.net(), "admin": g.who["admin"]})})
     with llock:
         states = list(lstates.get(u, {}).values())
@@ -1206,7 +1212,7 @@ def live_cmd():
         except (ValueError, RuntimeError, requests.RequestException) as e:
             return jsonify(error=str(e)[:200]), 409
     with llock:
-        present = any(c["device"] == to for c in lconns.get(u, {}).values())
+        present = any(c["device"] == to and not c.get("chiave") for c in lconns.get(u, {}).values())
     if not present:
         return jsonify(error="Quel dispositivo non è più collegato."), 404
     value = d.get("value")
@@ -1287,7 +1293,7 @@ def pres_put(msg):
 
 def live_connesso(u):
     with llock:
-        return any(not c.get("stop") for c in lconns.get(u, {}).values())
+        return any(not c.get("stop") and not c.get("chiave") for c in lconns.get(u, {}).values())
 
 
 def live_suona(u):
@@ -2889,6 +2895,7 @@ bot.init(app, sys.modules[__name__])
 casa.init(app, sys.modules[__name__])
 sveglia.init(app, sys.modules[__name__])
 homeassistant.init(app, sys.modules[__name__])
+chiavi.init(app, sys.modules[__name__])
 webradio.init(app, sys.modules[__name__])
 amici.init(app, sys.modules[__name__])
 utenti.init(app, sys.modules[__name__])

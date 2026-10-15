@@ -27,6 +27,13 @@ Perché il sistema è fatto così e cos'altro era sul tavolo. `LEGGIMI.md` dice
 
 ---
 
+## 2026-10-15 — Chiavi API per l'homelab, accanto al gettone di Home Assistant
+**Contesto:** un homelab (plance, script, monitoraggio) vuole vedere in tempo reale cosa succede in Armony e comandarla, non solo la musica di un utente come Home Assistant (voce del 2026-10-13).
+**Scelta:** chiavi `arm_…` per utente (`server/chiavi.py`, in `settings` solo l'impronta sha256): valgono come una sessione del loro utente su tutte le rotte `/api/*` (`Authorization: Bearer` o `X-Token`), solo da casa o da Tailscale, di sola lettura (GET) o anche con comandi. Su `/api/live` la chiave osserva: riceve gli eventi ma non è un dispositivo (niente «join», presenza, «è in linea», «Dove suona»). Le rotte che creano accessi (chiavi, dispositivi, password, utenti, inviti, gettoni, bot, sicurezza) con una chiave si leggono e basta; `/rest` mai. Amministratore solo finché l'utente lo è ancora su un suo dispositivo fidato.
+**Alternative scartate:** allargare il gettone di Home Assistant (stesse rotte ridotte, un solo gettone per utente); un'API a parte per l'homelab (da tenere allineata a quella che il client usa già); chiavi valide anche da internet (una chiave copiata in un file di configurazione è facile da perdere, e da fuori ci sono i dispositivi con chiave); una tabella nuova con migrazione (bastano poche righe in `settings`, come per Home Assistant).
+**Conseguenze:** le rotte sono quelle interne del client, che possono cambiare fra versioni (`API_LEVEL`); un canale `/api/live` aperto da una chiave occupa un thread di waitress e conta nel limite di canali dell'utente.
+**Da rivedere se:** serve accedere da fuori casa, o un programma ha bisogno di un'API stabile e documentata a parte.
+
 ## 2026-10-14 — TV di casa: la sessione si chiude invece di aspettare
 **Contesto:** la sessione su una TV la interrogava ogni 2 secondi finché c'era una coda, per sempre: spenta, in pausa o su un'altra sorgente la TV sentiva il server di continuo, e in «Dove suona» restava «In pausa». Se la TV si fermava a metà brano (cambio sorgente) il server credeva finito il brano e le mandava il successivo.
 **Scelta:** una TV ferma a più di 20 s dalla fine del brano è stata fermata da qualcun altro; quella, una TV che non risponde da 30 s o ferma da 10 minuti chiude la sessione (`Sessione.riposa`): niente più chiamate, Chromecast scollegato, stato tolto a chi la usava. Nascosta o sparita dalla rete, la sessione si chiude lo stesso (prima una TV con sessione non spariva mai).

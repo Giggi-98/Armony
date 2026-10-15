@@ -98,7 +98,7 @@ def utente(gettone):
 
 def dispositivi(u):
     with A.llock:
-        out = {c["device"]: c.get("name") or c["device"] for c in A.lconns.get(u, {}).values()}
+        out = {c["device"]: c.get("name") or c["device"] for c in A.lconns.get(u, {}).values() if not c.get("chiave")}
     out.update({d["device"]: d["name"] for d in A.casa.per({"net": "locale"})})
     return out
 
